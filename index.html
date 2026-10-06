@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="ASMR squishy obby. An endless course of soft pads over bubbling lava." />
+    <title>ASMR squishy obby</title>
+  </head>
+  <body>
+    <canvas id="view" tabindex="-1"></canvas>
+
+    <header id="hud">
+      <div class="brand">
+        <p class="eyebrow">An endless soft course</p>
+        <h1>ASMR squishy obby</h1>
+      </div>
+      <div class="stats">
+        <p><span>Level</span> <strong id="level">1</strong></p>
+        <p><span>Best</span> <strong id="best">1</strong></p>
+        <p><span>Height</span> <strong id="height">0 m</strong></p>
+        <p><span>Time</span> <strong id="time">0.00</strong></p>
+        <p><span>Falls</span> <strong id="falls">0</strong></p>
+      </div>
+      <button id="settings-open" type="button" aria-label="Character studio and graphics">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.2 7.2 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.43 7.43 0 0 0-.05.94c0 .32.02.63.05.94L2.83 14.52a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.24 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"
+          />
+        </svg>
+      </button>
+    </header>
+
+    <p id="hint">Press a key or tap to wake the crunch.</p>
+    <p id="toast" hidden>Checkpoint</p>
+    <pre id="debug" hidden></pre>
+
+    <div class="touch-ui" id="touch">
+      <div id="stick" class="stick" aria-hidden="true">
+        <div id="stick-knob" class="knob"></div>
+      </div>
+      <button id="jump" type="button">Jump</button>
+    </div>
+
+    <main id="start-menu" aria-labelledby="start-title">
+      <div class="start-glow" aria-hidden="true"></div>
+      <section class="start-panel">
+        <div class="start-heading">
+          <p class="start-kicker" data-i18n="start.kicker">A cozy ASMR adventure</p>
+          <h2 id="start-title" data-i18n="start.title">Squishy Sky Obby</h2>
+          <p class="start-subtitle" data-i18n="start.subtitle">Bounce softly. Climb high. Have fun!</p>
+        </div>
+
+        <label class="name-field" for="player-name">
+          <span data-i18n="start.nameLabel">Player name</span>
+          <input
+            id="player-name"
+            type="text"
+            maxlength="18"
+            autocomplete="nickname"
+            data-i18n-placeholder="start.namePlaceholder"
+            placeholder="Your name"
+          />
+        </label>
+
+        <fieldset class="difficulty-picker">
+          <legend data-i18n="start.difficultyLabel">Choose your difficulty</legend>
+          <div class="difficulty-options">
+            <button type="button" data-difficulty="easy" aria-pressed="true">
+              <span class="difficulty-icon" aria-hidden="true">🌱</span>
+              <strong data-i18n="difficulty.easy">Easy</strong>
+              <small data-i18n="difficulty.easyHint">Soft &amp; steady</small>
+            </button>
+            <button type="button" data-difficulty="medium" aria-pressed="false">
+              <span class="difficulty-icon" aria-hidden="true">✨</span>
+              <strong data-i18n="difficulty.medium">Medium</strong>
+              <small data-i18n="difficulty.mediumHint">A little bouncy</small>
+            </button>
+            <button type="button" data-difficulty="hard" aria-pressed="false">
+              <span class="difficulty-icon" aria-hidden="true">🔥</span>
+              <strong data-i18n="difficulty.hard">Hard</strong>
+              <small data-i18n="difficulty.hardHint">Extra squishy</small>
+            </button>
+          </div>
+        </fieldset>
+
+        <div class="start-actions">
+          <button id="start-avatar" class="secondary-action" type="button">
+            <span aria-hidden="true">🎀</span>
+            <span data-i18n="start.avatar">Customize avatar</span>
+          </button>
+          <button id="start-play" class="play-action" type="button">
+            <span data-i18n="start.play">Start bouncing</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <button id="rewards-open" class="rewards-card" type="button" aria-haspopup="dialog" aria-controls="shop">
+        <span class="reward-icon" aria-hidden="true">🏆</span>
+        <span class="reward-copy">
+          <span id="rewards-title" data-i18n="start.rewards">Your rewards</span>
+          <strong><span data-i18n="start.bestLevel">Best level</span> <span id="menu-best">1</span></strong>
+        </span>
+        <span class="reward-badge"><span aria-hidden="true">⭐</span> <span id="menu-stars">0</span></span>
+      </button>
+    </main>
+
+    <div id="shop" hidden>
+      <button id="shop-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="shop-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow" data-i18n="shop.kicker">Spend your stars</p>
+            <h2 id="shop-title" data-i18n="shop.title">Rewards shop</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span aria-hidden="true">⭐</span> <span id="shop-stars">0</span></span>
+            <button id="shop-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p id="shop-status" class="note" aria-live="polite" data-i18n="shop.note">
+          Each new best level earns 3 stars. Bought looks unlock in Customize avatar.
+        </p>
+        <div id="shop-list"></div>
+      </section>
+    </div>
+
+    <div id="settings" hidden>
+      <button id="settings-backdrop" class="backdrop" type="button" aria-label="Close settings"></button>
+      <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow">Saved on this browser</p>
+            <h2 id="settings-title">Character studio</h2>
+          </div>
+          <button id="settings-close" type="button">Close</button>
+        </header>
+        <canvas id="preview" width="480" height="320" aria-label="Live avatar preview"></canvas>
+        <p class="label">Starter looks</p>
+        <div id="presets" class="row"></div>
+        <p class="label" id="body-label">Girl or boy</p>
+        <div id="bodies" class="segment" role="group" aria-labelledby="body-label"></div>
+        <p class="label" id="age-label">Age</p>
+        <div id="ages" class="segment" role="group" aria-labelledby="age-label"></div>
+        <p class="label" id="face-label">Face</p>
+        <div id="faces" class="tiles" role="group" aria-labelledby="face-label"></div>
+        <p class="label" id="hair-label">Hair color</p>
+        <div class="color-row" role="group" aria-labelledby="hair-label">
+          <div id="hair-swatches" class="row"></div>
+          <input id="hair-color" type="color" value="#f4e2b8" aria-label="Custom hair color" />
+        </div>
+        <p class="label" id="hair-style-label" data-i18n="studio.hairStyle">Hair style</p>
+        <div id="hair-styles" class="segment" role="group" aria-labelledby="hair-style-label"></div>
+        <p class="label" id="outfit-label">Outfit</p>
+        <div id="outfits" class="tiles" role="group" aria-labelledby="outfit-label"></div>
+        <p class="label" id="skin-label">Skin tone</p>
+        <div id="skin-swatches" class="row" role="group" aria-labelledby="skin-label"></div>
+        <p class="label">Accessory</p>
+        <button id="bow" type="button" class="toggle" aria-pressed="false">Bow off</button>
+        <p class="label" id="dance-label" data-i18n="studio.dance">Level-up dance</p>
+        <div id="dances" class="segment" role="group" aria-labelledby="dance-label"></div>
+        <p class="note" data-i18n="studio.danceNote">Your avatar does this dance when you reach a new level.</p>
+        <p class="label" id="quality-label">Graphics</p>
+        <div id="quality" class="segment" role="group" aria-labelledby="quality-label">
+          <button type="button" data-quality="high" aria-pressed="true">High</button>
+          <button type="button" data-quality="low" aria-pressed="false">Low</button>
+        </div>
+        <p id="quality-note" class="note">Bloom, glow, film grain, a vignette, and sharper shadows.</p>
+      </section>
+    </div>
+
+    <div id="boot">
+      <div class="boot-card">
+        <p class="eyebrow">ASMR squishy obby</p>
+        <h2>Warming the mochi</h2>
+        <p id="boot-status">Inflating the pads…</p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
