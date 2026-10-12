@@ -303,7 +303,10 @@ async function bootGame() {
       facing: frame.facing,
       faceAngle: Math.atan2(player.camera.position.x - frame.foot.x, player.camera.position.z - frame.foot.z),
       airborne: frame.airborne,
-      moving: frame.speed > 0.4,
+      trick: frame.trick,
+      trickP: frame.trickP,
+      // Input, not speed: a moving pad or a landing slide carries the body without any steps.
+      moving: frame.walking,
       stride: frame.onStair ? STAIR_RUN : 1,
       time: clock,
     });
@@ -1104,7 +1107,5 @@ function formatTime(seconds) {
 
 function hintCopy() {
   const coarse = window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("show-touch");
-  return coarse
-    ? "Drag the stick to run. Jump is on the right. Drag the course to look."
-    : "WASD or arrows to run. Space to jump. Drag to look.";
+  return coarse ? t("hint.touch") : t("hint.keys");
 }
