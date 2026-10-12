@@ -25,7 +25,8 @@ import { AIR_SPEED, GRAVITY, JUMP_SPEED, SPRING_AIR_SPEED, SPRING_POP } from "./
 import { createStairFlight, isRainbowSlot } from "./stairs.js";
 
 export const PAD_THICKNESS = PAD_TOP;
-export const LAVA_Y = -3.4;
+/** Sea level. The start pad's top sits about 2 m above it. */
+export const LAVA_Y = -1.3;
 export const PADS_PER_LEVEL = 8;
 /** One full circle per level, so the climb reads as a loop instead of a straight line. */
 const PADS_PER_LOOP = PADS_PER_LEVEL;
@@ -239,7 +240,8 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
         if (Math.abs(pad.along - here) < LAVA_REACH) lowest = Math.min(lowest, pad.homeY);
       }
       if (Number.isFinite(lowest)) {
-        const target = lowest - LAVA_DEPTH;
+        // Above the sea this is an invisible floor: falling through it sends you back.
+        const target = Math.max(LAVA_Y, lowest - LAVA_DEPTH);
         // Rise slowly, but drop at once so the lava is never above a pad you can reach.
         lava.y = target < lava.y ? target : lava.y + (target - lava.y) * Math.min(1, dt * 0.5);
       }

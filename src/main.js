@@ -35,6 +35,7 @@ import {
   SKIN_SWATCHES,
 } from "./look.js";
 import { OUTFITS } from "./outfits.js";
+import { smoothstep } from "./geometry.js";
 import { createPlayer, FOOT_OFFSET, STAIR_RUN } from "./player.js";
 import { isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, starsLeft, tryBuy } from "./rewards.js";
 import { createWorld } from "./world.js";
@@ -187,7 +188,7 @@ async function bootGame() {
     onStair(flight) {
       graphics?.addStair(flight);
     },
-  }, best);
+  });
 
   const avatar = buildAvatar(scene);
   avatar.apply(look);
@@ -219,13 +220,14 @@ async function bootGame() {
   bootProgress.set(0.92);
   const syncMenuMusic = () => audio.setMenuMusic(ui.startOpen || ui.settingsOpen);
   bindSettings(preview, graphics, avatar, syncMenuMusic);
+  let aimRaise = 0;
   bindStartMenu(
     best,
     (difficulty) => course.setDifficulty(difficulty),
     (background) => {
       world.setBackdrop(background);
       // The night skyline stands on the horizon, so tip the view up enough to see it.
-      player.setAimRaise(background === "newyork" ? NY_AIM_RAISE : 0);
+      aimRaise = background === "newyork" ? NY_AIM_RAISE : 0;
     },
     syncMenuMusic,
   );
@@ -288,7 +290,9 @@ async function bootGame() {
     const standing = frame.grounded ? frame.pad : null;
     course.update(clock, dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
     const here = frame.pad ?? lastSafePad;
-    const cover = world.update(clock, dt, frame.position, course.lava.y, here.index / PADS_PER_LEVEL + 1);
+    const cover = world.update(clock, dt, frame.position, here.index / PADS_PER_LEVEL + 1);
+    // High up the skyline is below you, so stop tipping the view toward the horizon.
+    player.setAimRaise(aimRaise * (1 - smoothstep(8, 120, world.altitude)));
     graphics.update(clock, cover);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
@@ -304,7 +308,7 @@ async function bootGame() {
       time: clock,
     });
 
-    const lavaCue = pop.tick(dt, frame.foot, course.lava.y);
+    const lavaCue = pop.tick(dt, frame.foot, world.seaY);
     if (lavaCue === "boom") audio.boom();
     if (lavaCue === "done" && meltHome) {
       const home = meltHome.removed ? checkpointPad : meltHome;
@@ -340,9 +344,18 @@ async function bootGame() {
     if (frame.grounded && frame.pad && guide.pad && frame.pad !== guide.pad) guide.hide();
 
     if (!pop.active && fallLock <= 0) {
-      const burned = frame.foot.y < course.lava.y + 0.15 || course.lavaBurn(frame.position);
-      const bonked = !burned && course.hazardHit(frame.position);
-      if (burned || bonked) {
+      const burned = frame.foot.y < world.seaY + 0.15 || course.lavaBurn(frame.position);
+      // Up high the sea is far below, so dropping past the course floor counts as the fall.
+      const dropped = !burned && course.lava.y > world.seaY + 0.5 && frame.foot.y < course.lava.y;
+      const bonked = !burned && !dropped && course.hazardHit(frame.position);
+      if (dropped) {
+        falls += 1;
+        fallLock = 0.6;
+        sendHome(lastSafePad.removed ? checkpointPad : lastSafePad);
+        showToast(t("toast.backToLevel"));
+        toastTimer = 1.4;
+        nextToast = t("toast.keepGoing");
+      } else if (burned || bonked) {
         const home = lastSafePad.removed ? checkpointPad : lastSafePad;
         if (burned && pop.begin()) {
           falls += 1;
@@ -401,7 +414,7 @@ async function bootGame() {
       }
     }
 
-    heightEl.textContent = `${Math.max(0, Math.round(frame.foot.y))} m`;
+    heightEl.textContent = `${Math.max(0, Math.round(frame.foot.y - LAVA_Y))} m`;
     timeEl.textContent = formatTime(started ? elapsed : 0);
     fallsEl.textContent = String(falls);
     if (showDebug) {

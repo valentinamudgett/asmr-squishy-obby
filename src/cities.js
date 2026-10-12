@@ -186,7 +186,10 @@ export function createCities(scene, lavaY, sky, ridge) {
     const scale = Math.max(viewWidth / NY_PLANE_WIDTH, viewHeight / NY_PLANE_HEIGHT) * 1.35;
     photo.scaling.set(scale, scale, 1);
     const planeH = NY_PLANE_HEIGHT * scale;
-    photo.position.y = camera.position.y - (NY_WATER - 0.5) * planeH - rootPos.y;
+    // The harbor sits where the sea meets the skyline ring, so it sinks below eye level as you climb.
+    const above = Math.max(0, camera.position.y - (rootPos.y + lavaY));
+    const horizon = camera.position.y - above * (dist / RING);
+    photo.position.y = horizon - (NY_WATER - 0.5) * planeH - rootPos.y;
     // The plane faces +Z. Turn that face back toward the camera.
     photo.rotation.y = Math.atan2(fx, fz) + Math.PI;
   }
@@ -234,13 +237,14 @@ export function createCities(scene, lavaY, sky, ridge) {
       if (Math.abs(cover - painted) > 0.004 || Math.abs(high - paintedSpace) > 0.004) applySky();
       fadeGround();
     },
-    update(time) {
+    /** `seen` is how high above the sea the view looks, in meters. */
+    update(time, seen = 0) {
       if (mode === "lava") return;
       if (!root.isEnabled(false)) {
         if (mode === "newyork") showNewYork();
         else showHollywood();
       }
-      if (ocean.mesh.isEnabled()) ocean.update(time);
+      if (ocean.mesh.isEnabled()) ocean.update(time, seen);
       if (mode === "newyork") aimPhoto();
     },
   };
@@ -753,12 +757,15 @@ function buildOcean(scene, parent, y) {
     diffuse: Color3.FromHexString("#1f78a6"),
     emissive: Color3.FromHexString("#14567c"),
     specular: Color3.FromHexString("#ffe0d0"),
+    far: Color3.FromHexString("#5fb4dc"),
   };
   const night = {
     diffuse: Color3.FromHexString("#0c1a40"),
     emissive: Color3.FromHexString("#070f2c"),
     specular: Color3.FromHexString("#ffc98a"),
+    far: Color3.FromHexString("#18285a"),
   };
+  let colors = sunset;
   material.diffuseColor = sunset.diffuse.clone();
   material.emissiveColor = sunset.emissive.clone();
   material.specularColor = sunset.specular.clone();
@@ -770,14 +777,17 @@ function buildOcean(scene, parent, y) {
   return {
     mesh,
     setNight(on) {
-      const colors = on ? night : sunset;
+      colors = on ? night : sunset;
       material.diffuseColor.copyFrom(colors.diffuse);
       material.emissiveColor.copyFrom(colors.emissive);
       material.specularColor.copyFrom(colors.specular);
     },
-    update(time) {
+    update(time, seen) {
       waves.uOffset = time * 0.012;
       waves.vOffset = time * 0.007;
+      // From high up the sea washes out paler, so it reads as far below instead of close.
+      const haze = smoothstep(15, 150, seen);
+      Color3.LerpToRef(colors.emissive, colors.far, haze * 0.8, material.emissiveColor);
       for (let i = 0; i < base.length; i += 3) {
         const x = base[i];
         const z = base[i + 2];

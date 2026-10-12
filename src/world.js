@@ -19,12 +19,17 @@ import { frameFor, mulberry32, smoothstep } from "./geometry.js";
 
 const LAVA_TILE = 14;
 const BUBBLES = 40;
-/** Clouds begin on this level and finish thickening over the next climb. */
-const CLOUD_LEVEL = 50;
-const CLOUD_SPAN = 18;
-/** Past the clouds the sky darkens, stars come out, and the Earth curves away below. Level 100 is space. */
-export const SPACE_LEVEL = 70;
-export const SPACE_FULL = 100;
+/** Clouds begin on this level and are thickest at level 100, with the city still showing below. */
+const CLOUD_LEVEL = 45;
+const CLOUD_SPAN = 55;
+/** Past the clouds the sky darkens, stars come out, and the Earth curves away below. */
+export const SPACE_LEVEL = 120;
+export const SPACE_FULL = 160;
+/**
+ * The backdrop sinks as you climb, but it seems to drop more slowly the higher you go and levels off near
+ * this height. At level 100 the city still looks about 240 m down instead of 700.
+ */
+const VIEW_HEIGHT = 260;
 // The Earth starts huge and close below (a gentle curve) and ends smaller and farther below.
 // That drops the horizon from about 7° to 18° under eye level, so it stays in the camera's view.
 // The horizon distance has to stay inside the sky sphere (radius 900) and the camera's far plane.
@@ -66,6 +71,8 @@ export function createWorld(scene, lavaY) {
   let backdrop = "hollywood";
   let cover = -1;
   let space = -1;
+  let height = -1;
+  let lift = 0;
   let hemi = null;
 
   return {
@@ -80,28 +87,41 @@ export function createWorld(scene, lavaY) {
       stars.mesh,
       ...earth.meshes,
     ],
-    /** 0 below level 70, 1 from level 100 up. */
+    /** 0 below SPACE_LEVEL, 1 from SPACE_FULL up. */
     get space() {
       return Math.max(0, space);
     },
-    /** `lavaNow` rises with the course; the backdrop rides along so the horizon stays put. */
-    update(time, dt, focus, lavaNow = lavaY, level = 1) {
+    /** Where the sea surface is drawn right now. Touching it is a lava or splash fall. */
+    get seaY() {
+      return lavaY + lift;
+    },
+    /** Eased height of the focus above sea level. */
+    get altitude() {
+      return Math.max(0, height);
+    },
+    update(time, dt, focus, level = 1) {
       const target = cloudTarget(level);
       if (cover < 0) cover = target;
       else cover += (target - cover) * (1 - Math.exp(-0.85 * dt));
       const high = spaceTarget(level);
       if (space < 0) space = high;
       else space += (high - space) * (1 - Math.exp(-0.6 * dt));
-      const left = 1 - smoothstep(0.32, 0.9, cover);
-      const rise = lavaNow - lavaY;
+      const climb = Math.max(0, focus.y - lavaY);
+      if (height < 0) height = climb;
+      else height += (climb - height) * (1 - Math.exp(-1.2 * dt));
+      // Raise the backdrop by however much the climb is ahead of its apparent height.
+      lift = height - VIEW_HEIGHT * (1 - Math.exp(-height / VIEW_HEIGHT));
+      const seaNow = lavaY + lift;
+      // The ground stays under the clouds and only gives way to the Earth in space.
+      const left = 1 - smoothstep(0, 0.35, space);
       const lavaFade = backdrop === "lava" ? left : 0;
       const lavaOn = lavaFade > 0.03;
       lava.mesh.setEnabled(lavaOn);
       if (lavaOn) {
-        lava.update(time, focus, lavaNow);
+        lava.update(time, focus, seaNow);
         fadeMaterial(lava.mesh.material, lavaFade);
-        bubbles.update(dt, focus, lavaNow);
-        embers.emitter.set(focus.x, lavaNow + 0.2, focus.z + 8);
+        bubbles.update(dt, focus, seaNow);
+        embers.emitter.set(focus.x, seaNow + 0.2, focus.z + 8);
       }
       bubbles.setFade(lavaFade);
       embers.setFade(lavaFade);
@@ -109,14 +129,15 @@ export function createWorld(scene, lavaY) {
       mountains.root.setEnabled(scenery);
       rainbow.setEnabled(scenery);
       if (scenery) {
-        mountains.root.position.set(focus.x * 0.9, rise, focus.z);
-        rainbow.position.set(focus.x * 0.9, rise, focus.z);
+        mountains.root.position.set(focus.x * 0.9, lift, focus.z);
+        rainbow.position.set(focus.x * 0.9, lift, focus.z);
         fadeMaterial(mountains.material, left);
         fadeMaterial(rainbowMat, left);
       }
-      sky.position.set(focus.x, rise, focus.z);
-      cities.root.position.set(focus.x, rise, focus.z);
-      cities.update(time);
+      // Centered on the sea, so the horizon band dips with the ocean's edge as you climb.
+      sky.position.set(focus.x, lift, focus.z);
+      cities.root.position.set(focus.x, lift, focus.z);
+      cities.update(time, height - lift);
       cities.setCloud(cover, backdrop === "lava" ? 1 : left, space);
       clouds.update(time, dt, focus, cover, space);
       stars.update(focus, space, time);
@@ -152,7 +173,7 @@ function cloudTarget(level) {
   if (level < CLOUD_LEVEL) return 0;
   const t = Math.min(1, (level - CLOUD_LEVEL) / CLOUD_SPAN);
   const eased = t * t * (3 - 2 * t);
-  // Level 50 already shows the first clouds. Later levels thicken them.
+  // The first level of clouds already shows a few. Later levels thicken them.
   return 0.2 + 0.8 * eased;
 }
 
@@ -588,6 +609,8 @@ function buildClouds(scene) {
     // A few higher puffs tucked around the next pads.
     { count: 10, minR: 10, maxR: 24, minY: -2.4, maxY: 0.6, minS: 4.5, maxS: 7.5, flat: 0.42, alpha: 0.9, appear: 0, drift: 0.6 },
     { count: 8, minR: 18, maxR: 48, minY: 2, maxY: 8, minS: 5, maxS: 9, flat: 0.46, alpha: 0.5, appear: 0.45, drift: 1.8 },
+    // Big banks far below, with gaps where the city shows through.
+    { count: 26, minR: 40, maxR: 220, minY: -60, maxY: -24, minS: 26, maxS: 60, flat: 0.3, alpha: 0.88, appear: 0.25, drift: 3 },
   ];
   const puffs = [];
   for (const band of bands) {
@@ -645,7 +668,7 @@ function buildClouds(scene) {
       }
       const deckFade = smoothstep(0.45, 0.9, cover) * thin;
       deck.setEnabled(deckFade > 0.03);
-      deckMat.alpha = deckFade * 0.22;
+      deckMat.alpha = deckFade * 0.45;
       deck.position.y = -8.5 - below;
     },
   };

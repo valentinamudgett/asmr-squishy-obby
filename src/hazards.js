@@ -180,7 +180,7 @@ export function createSpikes(scene, pad, difficulty, random) {
 
 /**
  * A lava blob that leaps out of the gap on a timer, with a glowing warning ring first.
- * `lava.y` is read live because the lava rises with the course.
+ * `lava.y` is read live because the course floor rises with the climb.
  */
 export function createFireball(scene, id, position, lava, peakY, difficulty, random) {
   const node = new TransformNode(`${id}-fire`, scene);

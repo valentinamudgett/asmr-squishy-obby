@@ -32,6 +32,10 @@ export const CAPSULE_RADIUS = 0.3;
 export const FOOT_OFFSET = CAPSULE_HEIGHT / 2;
 export const KILL_Y = -7;
 
+/** How fast the camera swings round behind the way the avatar faces. */
+const FOLLOW_TURN = 3.2;
+/** A held direction keeps its control frame until the input turns this far (radians). */
+const NEW_INPUT_TURN = 0.7;
 const AIR_BOOST = AIR_SPEED / MOVE_SPEED;
 const SPRING_BOOST = SPRING_AIR_SPEED / MOVE_SPEED;
 const UP = new Vector3(0, 1, 0);
@@ -99,7 +103,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
   let state = "IN_AIR";
   let yaw = heading;
   let aim = heading;
-  let guideHeading = heading;
+  let heldAngle = null;
+  let lookedAround = false;
   let steerPause = 0;
   let pitch = 0.48;
   let distance = 7.3;
@@ -136,7 +141,10 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       if (!dragging) return;
       const dx = x - lastX;
       const dy = y - lastY;
-      if (dx !== 0 || dy !== 0) steerPause = 0.7;
+      if (dx !== 0 || dy !== 0) {
+        steerPause = 0.7;
+        lookedAround = true;
+      }
       yaw -= dx * 0.005;
       pitch = clamp(pitch + dy * 0.0035, 0.2, 1.15);
       lastX = x;
@@ -190,6 +198,17 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       x /= length;
       z /= length;
     }
+    // Holding a direction keeps its frame, so the camera can swing round behind without bending
+    // the run. A new direction starts from wherever the camera points now.
+    const held = length > 0.2;
+    const angle = Math.atan2(x, z);
+    if (!held || dragging || steerPause > 0) {
+      aim = yaw;
+      heldAngle = held ? angle : null;
+    } else if (heldAngle === null || Math.abs(angleDelta(angle, heldAngle)) > NEW_INPUT_TURN) {
+      aim = yaw;
+      heldAngle = angle;
+    }
     const sin = Math.sin(aim);
     const cos = Math.cos(aim);
     wish.set(sin * z + cos * x, 0, cos * z - sin * x);
@@ -221,7 +240,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       jumpBuffer = 0;
       yaw = nextHeading;
       aim = nextHeading;
-      guideHeading = nextHeading;
+      heldAngle = null;
+      lookedAround = false;
       steerPause = 0;
       facing = nextHeading;
       dip = 0;
@@ -248,19 +268,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       foot.set(position.x, position.y - FOOT_OFFSET, position.z);
       const support = controller.checkSupport(dt, DOWN);
       const grounded = support.supportedState === CharacterSupportedState.SUPPORTED;
-      // Only the pad underfoot turns the run. Switching in the air curves the jump off the spiral.
-      if (grounded) {
-        const beneath = hooks.findPad(foot);
-        if (typeof beneath?.heading === "number") guideHeading = beneath.heading;
-      }
       if (!dragging) steerPause = Math.max(0, steerPause - dt);
-      if (!dragging && steerPause <= 0) {
-        // Movement locks onto the next pad immediately. The camera eases around behind it.
-        aim = guideHeading;
-        yaw = lerpAngle(yaw, guideHeading, 1 - Math.exp(-7 * dt));
-      } else {
-        aim = yaw;
-      }
 
       const previous = state;
       if (state === "START_JUMP") state = "IN_AIR";
@@ -271,7 +279,10 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       else coyote = Math.max(0, coyote - dt);
 
       if (allowInput) readWish();
-      else wish.set(0, 0, 0);
+      else {
+        wish.set(0, 0, 0);
+        heldAngle = null;
+      }
       const velocity = controller.getVelocity();
       next.copyFrom(velocity);
       forward.set(Math.sin(aim), 0, Math.cos(aim));
@@ -369,6 +380,11 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       if (wish.lengthSquared() > 0.4) {
         const targetFacing = Math.atan2(wish.x, wish.z);
         facing = lerpAngle(facing, targetFacing, 1 - Math.exp(-10 * dt));
+        lookedAround = false;
+      }
+      // Keep the camera behind the avatar. After a drag while standing still, hold the view until you move.
+      if (!dragging && steerPause <= 0 && !lookedAround) {
+        yaw = lerpAngle(yaw, facing, 1 - Math.exp(-FOLLOW_TURN * dt));
       }
 
       dipVel += (-90 * dip - 14 * dipVel) * dt;
@@ -490,9 +506,13 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function lerpAngle(from, to, t) {
+function angleDelta(to, from) {
   let delta = to - from;
   while (delta > Math.PI) delta -= Math.PI * 2;
   while (delta < -Math.PI) delta += Math.PI * 2;
-  return from + delta * t;
+  return delta;
+}
+
+function lerpAngle(from, to, t) {
+  return from + angleDelta(to, from) * t;
 }
