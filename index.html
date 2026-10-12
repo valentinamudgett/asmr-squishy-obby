@@ -4,20 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="ASMR squishy obby. A staircase of soft pads from the Earth's lava core to the Moon." />
+    <meta name="description" content="ASMR squishy obby. An endless course of soft pads over bubbling lava." />
     <title>ASMR squishy obby</title>
   </head>
   <body>
     <canvas id="view" tabindex="-1"></canvas>
 
     <header id="hud">
-      <button id="minimap" class="minimap" type="button" aria-haspopup="dialog" aria-controls="world-map" data-i18n-label="map.open">
-        <canvas id="minimap-canvas" width="200" height="130" aria-hidden="true"></canvas>
-        <span class="minimap-caption">
-          <span id="minimap-zone">Lava core</span>
-          <strong id="minimap-level">Lv 1/100</strong>
-        </span>
-      </button>
+      <div class="brand">
+        <p class="eyebrow">An endless soft course</p>
+        <h1>ASMR squishy obby</h1>
+      </div>
       <div class="stats">
         <p><span>Level</span> <strong id="level">1</strong></p>
         <p><span>Best</span> <strong id="best">1</strong></p>
@@ -72,16 +69,62 @@
           />
         </label>
 
-        <p class="start-journey" data-i18n="start.journey">Climb from the Earth's lava core, up through the sea and the sky, all the way to the Moon.</p>
+        <fieldset class="difficulty-picker">
+          <legend data-i18n="start.difficultyLabel">Choose your difficulty</legend>
+          <div class="difficulty-options">
+            <button type="button" data-difficulty="easy" aria-pressed="true">
+              <span class="difficulty-icon" aria-hidden="true">🌱</span>
+              <strong data-i18n="difficulty.easy">Easy</strong>
+              <small data-i18n="difficulty.easyHint">Soft &amp; steady</small>
+            </button>
+            <button type="button" data-difficulty="medium" aria-pressed="false">
+              <span class="difficulty-icon" aria-hidden="true">✨</span>
+              <strong data-i18n="difficulty.medium">Medium</strong>
+              <small data-i18n="difficulty.mediumHint">A little bouncy</small>
+            </button>
+            <button type="button" data-difficulty="hard" aria-pressed="false">
+              <span class="difficulty-icon" aria-hidden="true">🔥</span>
+              <strong data-i18n="difficulty.hard">Hard</strong>
+              <small data-i18n="difficulty.hardHint">Extra squishy</small>
+            </button>
+          </div>
+        </fieldset>
+
+        <fieldset class="background-picker">
+          <legend data-i18n="start.backgroundLabel">Choose your background</legend>
+          <div class="background-options">
+            <button type="button" data-background="hollywood" aria-pressed="true">
+              <span class="background-preview background-preview-hollywood" aria-hidden="true">
+                <span class="preview-ocean"></span>
+                <span class="preview-skyline"></span>
+                <span class="preview-palm preview-palm-left"></span>
+                <span class="preview-palm preview-palm-right"></span>
+                <span class="preview-sign">HOLLYWOOD</span>
+              </span>
+              <strong data-i18n="background.hollywood">Hollywood</strong>
+              <small data-i18n="background.hollywoodHint">Sunset ocean</small>
+            </button>
+            <button type="button" data-background="newyork" aria-pressed="false">
+              <span class="background-preview background-preview-newyork" aria-hidden="true"></span>
+              <strong data-i18n="background.newyork">New York</strong>
+              <small data-i18n="background.newyorkHint">Night skyline</small>
+            </button>
+            <button type="button" data-background="lava" aria-pressed="false">
+              <span class="background-preview background-preview-lava" aria-hidden="true">
+                <span class="preview-bubble preview-bubble-a"></span>
+                <span class="preview-bubble preview-bubble-b"></span>
+                <span class="preview-bubble preview-bubble-c"></span>
+              </span>
+              <strong data-i18n="background.lava">Lava</strong>
+              <small data-i18n="background.lavaHint">Bubbling sea</small>
+            </button>
+          </div>
+        </fieldset>
 
         <div class="start-actions">
           <button id="start-avatar" class="secondary-action" type="button">
             <span aria-hidden="true">🎀</span>
             <span data-i18n="start.avatar">Customize avatar</span>
-          </button>
-          <button id="start-pick" class="secondary-action" type="button" aria-haspopup="dialog" aria-controls="world-map">
-            <span aria-hidden="true">🗺️</span>
-            <span data-i18n="start.pickLevel">Pick a level</span>
           </button>
           <button id="start-play" class="play-action" type="button">
             <span data-i18n="start.play">Start bouncing</span>
@@ -117,29 +160,6 @@
           Each new best level earns 3 stars. Bought looks unlock in Customize avatar.
         </p>
         <div id="shop-list"></div>
-      </section>
-    </div>
-
-    <div id="world-map" hidden>
-      <section class="map-sheet" role="dialog" aria-modal="true" aria-labelledby="map-title">
-        <header class="map-head">
-          <div>
-            <p class="eyebrow" data-i18n="map.kicker">From the core to the Moon</p>
-            <h2 id="map-title" data-i18n="map.title">Journey map</h2>
-          </div>
-          <p id="map-here" class="map-here" aria-live="polite"></p>
-          <button id="map-close" type="button" data-i18n="map.close">Close</button>
-        </header>
-        <div class="map-stage">
-          <canvas id="map-canvas" data-i18n-label="map.title"></canvas>
-        </div>
-        <footer class="map-pick">
-          <p id="map-picked" aria-live="polite"></p>
-          <button id="map-play" class="play-action" type="button">
-            <span data-i18n="map.play">Play from here</span>
-            <span aria-hidden="true">→</span>
-          </button>
-        </footer>
       </section>
     </div>
 

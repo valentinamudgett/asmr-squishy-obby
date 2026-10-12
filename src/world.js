@@ -15,13 +15,16 @@ import {
   VertexData,
 } from "@babylonjs/core";
 import { createCities } from "./cities.js";
-import { createDepths } from "./depths.js";
 import { frameFor, mulberry32, smoothstep } from "./geometry.js";
-import { createMoon } from "./moon.js";
-import { zoneMix } from "./zones.js";
 
 const LAVA_TILE = 14;
 const BUBBLES = 40;
+/** Clouds begin on this level and finish thickening over the next climb. */
+const CLOUD_LEVEL = 50;
+const CLOUD_SPAN = 18;
+/** Past the clouds the sky darkens, stars come out, and the Earth curves away below. Level 100 is space. */
+export const SPACE_LEVEL = 70;
+export const SPACE_FULL = 100;
 // The Earth starts huge and close below (a gentle curve) and ends smaller and farther below.
 // That drops the horizon from about 7° to 18° under eye level, so it stays in the camera's view.
 // The horizon distance has to stay inside the sky sphere (radius 900) and the camera's far plane.
@@ -30,225 +33,68 @@ const EARTH_NEAR_RADIUS = 2400;
 const EARTH_DEPTH_START = 40;
 const EARTH_DEPTH_END = 125;
 const STAR_RADIUS = 780;
-
-const stops = (list) => list.map(([at, hex]) => [at, Color3.FromHexString(hex)]);
-const rgb = (r, g, b) => new Color3(r, g, b);
-/**
- * One look per layer of the climb. The ground zones blend in order (core, crust, ocean, city),
- * then clouds, the deep blue above them, and space are layered on top.
- */
-const LOOKS = {
-  core: {
-    sky: stops([
-      [-1, "#120203"],
-      [-0.2, "#3a0806"],
-      [-0.03, "#a8300e"],
-      [0, "#ff7a2a"],
-      [0.06, "#b8361a"],
-      [0.3, "#4a0e0c"],
-      [1, "#1a0405"],
-    ]),
-    fog: rgb(0.55, 0.17, 0.08),
-    clear: rgb(0.2, 0.04, 0.03),
-    ambient: rgb(0.3, 0.13, 0.1),
-    ground: rgb(1, 0.42, 0.16),
-    hemi: rgb(1, 0.82, 0.7),
-    fogStart: 34,
-    fogEnd: 115,
-  },
-  crust: {
-    sky: stops([
-      [-1, "#0e0c10"],
-      [-0.1, "#2a2026"],
-      [0, "#6a4a3c"],
-      [0.08, "#4a3e44"],
-      [0.4, "#2a2a36"],
-      [1, "#121218"],
-    ]),
-    fog: rgb(0.32, 0.26, 0.27),
-    clear: rgb(0.12, 0.1, 0.12),
-    ambient: rgb(0.22, 0.19, 0.22),
-    ground: rgb(0.72, 0.44, 0.32),
-    hemi: rgb(0.92, 0.88, 0.94),
-    fogStart: 34,
-    fogEnd: 115,
-  },
-  ocean: {
-    sky: stops([
-      [-1, "#020c1e"],
-      [-0.2, "#04234a"],
-      [0, "#0b5a8a"],
-      [0.25, "#1683b0"],
-      [0.6, "#3cb4d8"],
-      [1, "#8ee6f4"],
-    ]),
-    fog: rgb(0.06, 0.32, 0.45),
-    clear: rgb(0.03, 0.18, 0.3),
-    ambient: rgb(0.12, 0.25, 0.32),
-    ground: rgb(0.1, 0.3, 0.42),
-    hemi: rgb(0.72, 0.92, 1),
-    fogStart: 20,
-    fogEnd: 90,
-  },
-  city: {
-    sky: stops([
-      [-1, "#070b22"],
-      [-0.04, "#12183c"],
-      [0.04, "#1c2468"],
-      [0.28, "#2a2878"],
-      [0.62, "#221c62"],
-      [1, "#141048"],
-    ]),
-    fog: rgb(0.08, 0.1, 0.24),
-    clear: rgb(0.06, 0.07, 0.16),
-    ambient: rgb(0.1, 0.12, 0.22),
-    ground: rgb(0.08, 0.12, 0.28),
-    hemi: rgb(0.62, 0.68, 0.9),
-    fogStart: 46,
-    fogEnd: 120,
-  },
-  cloud: {
-    sky: stops([
-      [-1, "#b7cfe6"],
-      [-0.08, "#d0e4f4"],
-      [0.04, "#e4f1fb"],
-      [0.22, "#c3dff6"],
-      [0.5, "#8ec4f2"],
-      [0.8, "#6aadec"],
-      [1, "#4e96e4"],
-    ]),
-    fog: rgb(0.78, 0.86, 0.94),
-    clear: rgb(0.62, 0.78, 0.93),
-    ambient: rgb(0.5, 0.58, 0.68),
-    ground: rgb(0.58, 0.72, 0.88),
-    hemi: rgb(0.9, 0.95, 1),
-    fogStart: 42,
-    fogEnd: 110,
-  },
-  // High above the clouds, on the way to space: a pale rim and a deep blue overhead.
-  high: {
-    sky: stops([
-      [-1, "#1c3c78"],
-      [0, "#7fb2e6"],
-      [0.06, "#3d74c4"],
-      [0.25, "#1d3f8c"],
-      [1, "#0e1f56"],
-    ]),
-  },
-  // Space: nearly black, a touch of navy low down. The Earth's own rim supplies the blue horizon.
-  space: {
-    sky: stops([
-      [-1, "#000000"],
-      [-0.3, "#02030c"],
-      [0, "#070b24"],
-      [0.15, "#03051a"],
-      [1, "#010104"],
-    ]),
-    fog: rgb(0.02, 0.03, 0.08),
-    clear: rgb(0.01, 0.01, 0.03),
-    ambient: rgb(0.26, 0.28, 0.36),
-    ground: rgb(0.28, 0.46, 0.82),
-    hemi: rgb(1, 1, 1),
-    // No haze in space: the fog backs far off so the course stays crisp against the dark.
-    fogStart: 446,
-    fogEnd: 820,
-  },
-};
-const MIX_KEYS = ["core", "crust", "ocean", "city", "cloud", "space", "moon"];
+const GROUND_SPACE = new Color3(0.28, 0.46, 0.82);
+const HEMI_SPACE = new Color3(1, 1, 1);
+const AMBIENT_SPACE = new Color3(0.26, 0.28, 0.36);
+const CLEAR_SPACE = new Color4(0.01, 0.01, 0.03, 1);
+const GROUND_LAVA = new Color3(0.85, 0.36, 0.2);
+const GROUND_OCEAN = new Color3(0.22, 0.5, 0.66);
+const GROUND_NIGHT = new Color3(0.08, 0.12, 0.28);
+const GROUND_CLOUD = new Color3(0.58, 0.72, 0.88);
+const HEMI_WARM = new Color3(1, 0.95, 0.92);
+const HEMI_NIGHT = new Color3(0.62, 0.68, 0.9);
+const HEMI_CLOUD = new Color3(0.9, 0.95, 1);
+const AMBIENT_WARM = new Color3(0.24, 0.16, 0.2);
+const AMBIENT_NIGHT = new Color3(0.1, 0.12, 0.22);
+const AMBIENT_CLOUD = new Color3(0.5, 0.58, 0.68);
+const CLEAR_WARM = new Color4(0.35, 0.12, 0.14, 1);
+const CLEAR_NIGHT = new Color4(0.06, 0.07, 0.16, 1);
+const CLEAR_CLOUD = new Color4(0.62, 0.78, 0.93, 1);
 
 export function createWorld(scene, lavaY) {
   const sky = buildSky(scene);
-  const look = skyLook(sky);
   const lava = buildLava(scene, lavaY);
   const bubbles = buildBubbles(scene);
   const embers = buildEmbers(scene, lavaY);
-  const cities = createCities(scene, lavaY);
-  const depths = createDepths(scene, lavaY);
+  const mountains = buildMountains(scene, lavaY);
+  const rainbow = buildRainbow(scene, lavaY);
+  const cities = createCities(scene, lavaY, sky, mountains.material);
   const clouds = buildClouds(scene);
   const stars = buildStars(scene);
   const earth = buildEarth(scene);
-  const moon = createMoon(scene);
-  const mix = Object.fromEntries(MIX_KEYS.map((key) => [key, -1]));
-  const painted = Object.fromEntries(MIX_KEYS.map((key) => [key, -1]));
+  const rainbowMat = rainbow.getChildMeshes()[0].material;
+  let backdrop = "hollywood";
+  let cover = -1;
+  let space = -1;
   let hemi = null;
 
-  /** The ground zones blend in order, so each layer's amount is everything from that zone up. */
-  function groundLayers(pick) {
-    return [
-      [pick(LOOKS.crust), mix.crust + mix.ocean + mix.city],
-      [pick(LOOKS.ocean), mix.ocean + mix.city],
-      [pick(LOOKS.city), mix.city],
-    ];
-  }
-
-  function blendColor(pick, out) {
-    out.copyFrom(pick(LOOKS.core));
-    for (const [value, amount] of groundLayers(pick)) {
-      if (amount > 0) Color3.LerpToRef(out, value, amount, out);
-    }
-    Color3.LerpToRef(out, pick(LOOKS.cloud), mix.cloud, out);
-    Color3.LerpToRef(out, pick(LOOKS.space), mix.space, out);
-    return out;
-  }
-
-  function blendNumber(pick) {
-    let value = pick(LOOKS.core);
-    for (const [next, amount] of groundLayers(pick)) value += (next - value) * amount;
-    value += (pick(LOOKS.cloud) - value) * mix.cloud;
-    return value + (pick(LOOKS.space) - value) * mix.space;
-  }
-
-  function paintSky() {
-    // Through a deep blue first, so the climb doesn't pass through a muddy gray on the way to black.
-    const deep = Math.min(1, mix.space * 2.2);
-    const dark = smoothstep(0.45, 1, mix.space);
-    look.paint(
-      LOOKS.core.sky,
-      ...groundLayers((l) => l.sky),
-      [LOOKS.cloud.sky, mix.cloud],
-      [LOOKS.high.sky, deep],
-      [LOOKS.space.sky, dark],
-    );
-    Object.assign(painted, mix);
-  }
-
-  const clearHold = new Color3();
   return {
     lava: lava.mesh,
     glowExcluded: [
       sky,
       lava.mesh,
+      ...mountains.root.getChildMeshes(),
+      ...rainbow.getChildMeshes(),
       ...cities.glow,
-      ...depths.meshes,
       ...clouds.meshes,
       stars.mesh,
       ...earth.meshes,
-      ...moon.meshes,
     ],
-    /** 0 below level 70, 1 once space is fully dark. */
+    /** 0 below level 70, 1 from level 100 up. */
     get space() {
-      return Math.max(0, mix.space);
-    },
-    /** Current blend of every zone, eased toward the level you are on. */
-    get mix() {
-      return mix;
-    },
-    /** Jump straight to the next level's look instead of easing, after a teleport to another level. */
-    reset() {
-      for (const key of MIX_KEYS) mix[key] = -1;
+      return Math.max(0, space);
     },
     /** `lavaNow` rises with the course; the backdrop rides along so the horizon stays put. */
     update(time, dt, focus, lavaNow = lavaY, level = 1) {
-      const target = zoneMix(level);
-      const ease = 1 - Math.exp(-0.75 * dt);
-      for (const key of MIX_KEYS) {
-        mix[key] = mix[key] < 0 ? target[key] : mix[key] + (target[key] - mix[key]) * ease;
-      }
-      const { core, crust, ocean, city, cloud, space } = mix;
-      const left = 1 - smoothstep(0.32, 0.9, cloud);
+      const target = cloudTarget(level);
+      if (cover < 0) cover = target;
+      else cover += (target - cover) * (1 - Math.exp(-0.85 * dt));
+      const high = spaceTarget(level);
+      if (space < 0) space = high;
+      else space += (high - space) * (1 - Math.exp(-0.6 * dt));
+      const left = 1 - smoothstep(0.32, 0.9, cover);
       const rise = lavaNow - lavaY;
-
-      const lavaFade = core + crust * 0.7;
+      const lavaFade = backdrop === "lava" ? left : 0;
       const lavaOn = lavaFade > 0.03;
       lava.mesh.setEnabled(lavaOn);
       if (lavaOn) {
@@ -259,34 +105,59 @@ export function createWorld(scene, lavaY) {
       }
       bubbles.setFade(lavaFade);
       embers.setFade(lavaFade);
-
+      const scenery = left > 0.03 && backdrop !== "newyork";
+      mountains.root.setEnabled(scenery);
+      rainbow.setEnabled(scenery);
+      if (scenery) {
+        mountains.root.position.set(focus.x * 0.9, rise, focus.z);
+        rainbow.position.set(focus.x * 0.9, rise, focus.z);
+        fadeMaterial(mountains.material, left);
+        fadeMaterial(rainbowMat, left);
+      }
       sky.position.set(focus.x, rise, focus.z);
       cities.root.position.set(focus.x, rise, focus.z);
-      cities.setGround(city * left);
       cities.update(time);
-      depths.update(time, dt, focus, lavaNow, mix, level);
-      clouds.update(time, dt, focus, cloud, space);
+      cities.setCloud(cover, backdrop === "lava" ? 1 : left, space);
+      clouds.update(time, dt, focus, cover, space);
       stars.update(focus, space, time);
-      earth.update(focus, space, dt, 1 - mix.moon);
-      moon.update(time, focus, mix);
-
-      const changed = MIX_KEYS.some((key) => Math.abs(mix[key] - painted[key]) > 0.004);
-      if (changed) paintSky();
-      scene.fogStart = blendNumber((l) => l.fogStart);
-      scene.fogEnd = blendNumber((l) => l.fogEnd);
-      blendColor((l) => l.fog, scene.fogColor);
-      blendColor((l) => l.ambient, scene.ambientColor);
-      blendColor((l) => l.clear, clearHold);
-      scene.clearColor.set(clearHold.r, clearHold.g, clearHold.b, 1);
+      earth.update(focus, space, dt);
+      // No haze in space: the fog backs far off so the course stays crisp against the dark.
+      scene.fogStart = 46 - cover * 4 + space * 400;
+      scene.fogEnd = 120 - cover * 10 + space * 700;
+      const night = backdrop === "newyork";
+      Color3.LerpToRef(night ? AMBIENT_NIGHT : AMBIENT_WARM, AMBIENT_CLOUD, cover, scene.ambientColor);
+      Color3.LerpToRef(scene.ambientColor, AMBIENT_SPACE, space, scene.ambientColor);
+      Color4.LerpToRef(night ? CLEAR_NIGHT : CLEAR_WARM, CLEAR_CLOUD, cover, scene.clearColor);
+      Color4.LerpToRef(scene.clearColor, CLEAR_SPACE, space, scene.clearColor);
       if (!hemi) hemi = scene.getLightByName("hemi");
       if (hemi) {
-        blendColor((l) => l.ground, hemi.groundColor);
-        blendColor((l) => l.hemi, hemi.diffuse);
-        hemi.intensity = 0.6 + ocean * 0.08 + cloud * 0.18 * (1 - space) + space * 0.1;
+        const ground = backdrop === "lava" ? GROUND_LAVA : night ? GROUND_NIGHT : GROUND_OCEAN;
+        Color3.LerpToRef(ground, GROUND_CLOUD, cover, hemi.groundColor);
+        Color3.LerpToRef(hemi.groundColor, GROUND_SPACE, space, hemi.groundColor);
+        Color3.LerpToRef(night ? HEMI_NIGHT : HEMI_WARM, HEMI_CLOUD, cover, hemi.diffuse);
+        Color3.LerpToRef(hemi.diffuse, HEMI_SPACE, space, hemi.diffuse);
+        hemi.intensity = 0.6 + cover * 0.18 * (1 - space) + space * 0.1;
       }
-      return cloud;
+      return cover;
+    },
+    /** "hollywood" is the sunset city. "newyork" is the night photo. "lava" keeps the sea and embers. */
+    setBackdrop(mode) {
+      backdrop = mode === "lava" || mode === "newyork" ? mode : "hollywood";
+      cities.setBackdrop(backdrop);
     },
   };
+}
+
+function cloudTarget(level) {
+  if (level < CLOUD_LEVEL) return 0;
+  const t = Math.min(1, (level - CLOUD_LEVEL) / CLOUD_SPAN);
+  const eased = t * t * (3 - 2 * t);
+  // Level 50 already shows the first clouds. Later levels thicken them.
+  return 0.2 + 0.8 * eased;
+}
+
+function spaceTarget(level) {
+  return smoothstep(SPACE_LEVEL, SPACE_FULL, level);
 }
 
 function fadeMaterial(material, amount) {
@@ -301,19 +172,40 @@ function fadeMaterial(material, amount) {
   material.transparencyMode = amount > 0.985 ? material.metadata.baseMode : Material.MATERIAL_ALPHABLEND;
 }
 
+const SKY_STOPS = [
+  [-1, "#4a2030"],
+  [-0.12, "#d15b72"],
+  [0, "#ffc6aa"],
+  [0.1, "#ffd4c6"],
+  [0.32, "#ffb7c9"],
+  [0.62, "#ffc9aa"],
+  [1, "#ffe0bf"],
+].map(([at, hex]) => [at, Color3.FromHexString(hex)]);
+
+function skyColor(up, out) {
+  for (let i = 1; i < SKY_STOPS.length; i += 1) {
+    const [at, color] = SKY_STOPS[i];
+    if (up <= at) {
+      const [prevAt, prevColor] = SKY_STOPS[i - 1];
+      Color3.LerpToRef(prevColor, color, (up - prevAt) / (at - prevAt), out);
+      return out;
+    }
+  }
+  return out.copyFrom(SKY_STOPS[SKY_STOPS.length - 1][1]);
+}
+
 function buildSky(scene) {
   const sky = MeshBuilder.CreateSphere("sky", { diameter: 1800, segments: 40, sideOrientation: Mesh.BACKSIDE }, scene);
   const positions = sky.getVerticesData(VertexBuffer.PositionKind);
   const colors = new Float32Array((positions.length / 3) * 4);
   const color = new Color3();
   for (let i = 0, c = 0; i < positions.length; i += 3, c += 4) {
-    sampleStops(LOOKS.core.sky, positions[i + 1] / 900, color);
+    skyColor(positions[i + 1] / 900, color);
     colors[c] = color.r;
     colors[c + 1] = color.g;
     colors[c + 2] = color.b;
     colors[c + 3] = 1;
   }
-  // Updatable: the sky is repainted as the climb moves through the zones.
   sky.setVerticesData(VertexBuffer.ColorKind, colors, true);
   const material = new StandardMaterial("skyMat", scene);
   material.emissiveColor = Color3.White();
@@ -324,44 +216,6 @@ function buildSky(scene) {
   sky.isPickable = false;
   sky.applyFog = false;
   return sky;
-}
-
-function skyLook(sky) {
-  const positions = sky.getVerticesData(VertexBuffer.PositionKind);
-  const colors = new Float32Array((positions.length / 3) * 4);
-  const sample = new Color3();
-  const mixed = new Color3();
-  return {
-    /** Paints `base`, then blends toward each `[stops, amount]` layer in turn. */
-    paint(base, ...layers) {
-      for (let i = 0, c = 0; i < positions.length; i += 3, c += 4) {
-        const at = positions[i + 1] / 900;
-        sampleStops(base, at, mixed);
-        for (const [stops, amount] of layers) {
-          if (amount <= 0) continue;
-          sampleStops(stops, at, sample);
-          Color3.LerpToRef(mixed, sample, amount, mixed);
-        }
-        colors[c] = mixed.r;
-        colors[c + 1] = mixed.g;
-        colors[c + 2] = mixed.b;
-        colors[c + 3] = 1;
-      }
-      sky.updateVerticesData(VertexBuffer.ColorKind, colors);
-    },
-  };
-}
-
-function sampleStops(stops, up, out) {
-  for (let i = 1; i < stops.length; i += 1) {
-    const [at, color] = stops[i];
-    if (up <= at) {
-      const [prevAt, prev] = stops[i - 1];
-      Color3.LerpToRef(prev, color, (up - prevAt) / (at - prevAt || 1), out);
-      return out;
-    }
-  }
-  return out.copyFrom(stops[stops.length - 1][1]);
 }
 
 /** Cellular lava: dark crust plates with glowing cracks between them. Tiles seamlessly. */
@@ -552,6 +406,150 @@ function buildEmbers(scene, lavaY) {
       if (on) system.emitRate = 110 * amount;
     },
   };
+}
+
+function noise2(x, y, seed) {
+  const hash = (ix, iy) => {
+    let h = Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ seed;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const a = hash(ix, iy);
+  const b = hash(ix + 1, iy);
+  const c = hash(ix, iy + 1);
+  const d = hash(ix + 1, iy + 1);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+
+function ridged(x, y, seed) {
+  let sum = 0;
+  let amp = 0.5;
+  let freq = 1;
+  for (let o = 0; o < 5; o += 1) {
+    const n = 1 - Math.abs(noise2(x * freq, y * freq, seed + o * 31) * 2 - 1);
+    sum += n * n * amp;
+    amp *= 0.5;
+    freq *= 2.1;
+  }
+  return sum;
+}
+
+function mountain(scene, name, { radius, height, seed }) {
+  const mesh = MeshBuilder.CreateGround(name, { width: radius * 2, height: radius * 2, subdivisions: 140, updatable: true }, scene);
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const colors = new Float32Array((positions.length / 3) * 4);
+  const base = new Color3(0.5, 0.36, 0.6);
+  const rock = new Color3(0.66, 0.54, 0.8);
+  const snow = new Color3(1, 0.97, 1);
+  // Distance haze, so the range sits back in the sky instead of popping forward.
+  const haze = new Color3(1, 0.7, 0.62);
+  for (let i = 0, c = 0; i < positions.length; i += 3, c += 4) {
+    const x = positions[i];
+    const z = positions[i + 2];
+    const r = Math.hypot(x, z) / radius;
+    const shape = Math.max(0, 1 - r) ** 1.5;
+    const detail = ridged(x / (radius * 0.28), z / (radius * 0.28), seed);
+    const h = height * shape * (0.62 + 0.55 * detail);
+    positions[i + 1] = h;
+    const t = h / height;
+    const snowLine = smoothstep(0.55, 0.68, t + (detail - 0.5) * 0.15);
+    const mixed = Color3.Lerp(
+      Color3.Lerp(Color3.Lerp(base, rock, smoothstep(0.05, 0.4, t)), snow, snowLine),
+      haze,
+      0.38 * (1 - t * 0.6),
+    );
+    colors[c] = mixed.r;
+    colors[c + 1] = mixed.g;
+    colors[c + 2] = mixed.b;
+    colors[c + 3] = 1;
+  }
+  mesh.setVerticesData(VertexBuffer.PositionKind, positions);
+  mesh.setVerticesData(VertexBuffer.ColorKind, colors);
+  const normals = new Float32Array(positions.length);
+  VertexData.ComputeNormals(positions, mesh.getIndices(), normals);
+  mesh.setVerticesData(VertexBuffer.NormalKind, normals);
+  mesh.refreshBoundingInfo();
+  return mesh;
+}
+
+function buildMountains(scene, lavaY) {
+  const root = new Mesh("mountains", scene);
+  const material = new StandardMaterial("mountainMat", scene);
+  material.diffuseColor = Color3.White();
+  material.specularColor = Color3.Black();
+  material.emissiveColor = new Color3(0.32, 0.26, 0.38);
+  material.fogEnabled = false;
+  const peaks = [
+    { radius: 200, height: 125, seed: 3, x: 40, z: 680 },
+    { radius: 150, height: 80, seed: 11, x: -240, z: 620 },
+    { radius: 150, height: 88, seed: 19, x: 260, z: 640 },
+  ];
+  for (const peak of peaks) {
+    const mesh = mountain(scene, `mountain${peak.seed}`, peak);
+    mesh.parent = root;
+    mesh.position.set(peak.x, lavaY - 6, peak.z);
+    mesh.material = material;
+    mesh.isPickable = false;
+    mesh.applyFog = false;
+  }
+  return { root, material };
+}
+
+function buildRainbow(scene, lavaY) {
+  const bands = 7;
+  const segments = 96;
+  const inner = 170;
+  const width = 26;
+  const rows = bands * 4;
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const color = new Color3();
+  for (let j = 0; j <= rows; j += 1) {
+    const t = j / rows;
+    const radius = inner + width * t;
+    Color3.HSVtoRGBToRef(275 * (1 - t), 0.92, 1, color);
+    const edge = Math.min(1, Math.min(t, 1 - t) * 6);
+    for (let i = 0; i <= segments; i += 1) {
+      const angle = (i / segments) * Math.PI;
+      const fadeFoot = smoothstep(0, 0.25, Math.sin(angle));
+      positions.push(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+      colors.push(color.r, color.g, color.b, edge * fadeFoot * 0.85);
+    }
+  }
+  for (let j = 0; j < rows; j += 1) {
+    for (let i = 0; i < segments; i += 1) {
+      const a = j * (segments + 1) + i;
+      indices.push(a, a + segments + 1, a + 1, a + 1, a + segments + 1, a + segments + 2);
+    }
+  }
+  const mesh = new Mesh("rainbow", scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.colors = colors;
+  data.indices = indices;
+  data.normals = new Array(positions.length).fill(0).map((_, k) => (k % 3 === 2 ? -1 : 0));
+  data.applyToMesh(mesh);
+  mesh.hasVertexAlpha = true;
+  const material = new StandardMaterial("rainbowMat", scene);
+  material.disableLighting = true;
+  material.emissiveColor = Color3.White();
+  material.backFaceCulling = false;
+  material.fogEnabled = false;
+  material.alpha = 0.999;
+  mesh.material = material;
+  mesh.isPickable = false;
+  mesh.applyFog = false;
+  const root = new Mesh("rainbowRoot", scene);
+  mesh.parent = root;
+  mesh.position.set(-20, lavaY - 70, 560);
+  return root;
 }
 
 function buildClouds(scene) {
@@ -767,9 +765,8 @@ function buildEarth(scene) {
   root.setEnabled(false);
   return {
     meshes: [globe, air],
-    /** `fade` hides the Earth below once the Moon takes over as the ground. */
-    update(focus, space, dt, fade = 1) {
-      const show = smoothstep(0, 0.3, space) * fade;
+    update(focus, space, dt) {
+      const show = smoothstep(0, 0.3, space);
       const on = show > 0.01;
       if (root.isEnabled() !== on) root.setEnabled(on);
       if (!on) return;

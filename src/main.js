@@ -35,11 +35,9 @@ import {
   SKIN_SWATCHES,
 } from "./look.js";
 import { OUTFITS } from "./outfits.js";
-import { createMinimap } from "./minimap.js";
-import { createPlayer, FOOT_OFFSET, GRAVITY, STAIR_RUN } from "./player.js";
+import { createPlayer, FOOT_OFFSET, STAIR_RUN } from "./player.js";
 import { isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, starsLeft, tryBuy } from "./rewards.js";
 import { createWorld } from "./world.js";
-import { gravityScale, MAX_LEVEL, MOON_LEVEL, SPACE_FULL, ZONES, zoneAt } from "./zones.js";
 import "./style.css";
 
 const canvas = document.querySelector("#view");
@@ -63,8 +61,7 @@ const qualityNote = document.querySelector("#quality-note");
 const showDebug = new URLSearchParams(location.search).has("debug");
 const BEST_KEY = "asmr-squishy-obby:best";
 const PLAYER_KEY = "asmr-squishy-obby:player";
-// The night photo stands on the horizon. The usual view looks down at the course, which tucks that skyline into the top bar.
-const NY_AIM_RAISE = 0.9;
+const NY_AIM_RAISE = 0.5;
 
 const look = loadLook();
 const wallet = loadWallet(look);
@@ -72,7 +69,6 @@ let publishLook = () => {};
 const ui = {
   settingsOpen: false,
   startOpen: true,
-  mapOpen: false,
 };
 
 applyTranslations();
@@ -178,7 +174,7 @@ async function bootGame() {
   bootProgress.set(0.7);
   let graphics = null;
   let best = loadBest();
-  const courseHooks = {
+  const course = createCourse(scene, {
     onAdd(pad) {
       audio.attachPad(pad).catch((error) => console.warn("Pad sound failed", error));
       graphics?.addPad(pad);
@@ -191,9 +187,7 @@ async function bootGame() {
     onStair(flight) {
       graphics?.addStair(flight);
     },
-  };
-  // Replaying an earlier level from the map swaps in a new course.
-  let course = createCourse(scene, courseHooks, best);
+  }, best);
 
   const avatar = buildAvatar(scene);
   avatar.apply(look);
@@ -225,16 +219,16 @@ async function bootGame() {
   bootProgress.set(0.92);
   const syncMenuMusic = () => audio.setMenuMusic(ui.startOpen || ui.settingsOpen);
   bindSettings(preview, graphics, avatar, syncMenuMusic);
-  const closeMenu = bindStartMenu(best, () => minimap.open(), syncMenuMusic);
-  const minimap = createMinimap({
-    onPick(level) {
-      startAtLevel(level);
-      closeMenu();
+  bindStartMenu(
+    best,
+    (difficulty) => course.setDifficulty(difficulty),
+    (background) => {
+      world.setBackdrop(background);
+      // The night skyline stands on the horizon, so tip the view up enough to see it.
+      player.setAimRaise(background === "newyork" ? NY_AIM_RAISE : 0);
     },
-    onToggle(open) {
-      ui.mapOpen = open;
-    },
-  });
+    syncMenuMusic,
+  );
   syncMenuMusic();
   bindShop(best, () => publishLook());
   bindTouch(player);
@@ -251,52 +245,20 @@ async function bootGame() {
   const pop = createLavaPop(scene, avatar);
   const coinPop = createCoinPop(scene, player.camera);
   let meltHome = null;
-  let gravityNow = 1;
-  const setGravity = (level) => {
-    const scale = gravityScale(level);
-    if (scale === gravityNow) return;
-    gravityNow = scale;
-    player.setGravityScale(scale);
-    scene.getPhysicsEngine()?.setGravity(new Vector3(0, GRAVITY * scale, 0));
-  };
   const sendHome = (home) => {
     course.restoreStairs();
     const spot = course.standOn(home, FOOT_OFFSET);
     avatar.stopDance();
-    setGravity(home.level ?? checkpointPad.level);
     player.respawn(spot, home.heading ?? 0);
     pop.place({ x: spot.x, y: spot.y - FOOT_OFFSET, z: spot.z });
     const next = home.flight?.steps[0] ?? course.pads.find((pad) => pad.index > home.index);
     if (next) guide.show(home, next);
   };
-  /** Rebuilds the course from `level`. Best, stars, and coins only ever go up, so a replay can't lower them. */
-  const startAtLevel = (level) => {
-    course.dispose();
-    course = createCourse(scene, courseHooks, level);
-    if (showDebug) window.__obby.course = course;
-    checkpointPad = course.start;
-    lastSafePad = course.start;
-    meltHome = null;
-    started = false;
-    elapsed = 0;
-    falls = 0;
-    fallLock = 0.6;
-    guide.hide();
-    world.reset();
-    const spot = course.standOn(course.start, FOOT_OFFSET);
-    avatar.stopDance();
-    setGravity(course.start.level);
-    player.respawn(spot, course.start.heading ?? 0);
-    levelEl.textContent = String(course.start.level);
-    showToast(fmtLevel(course.start.level));
-    toastTimer = 1.6;
-    nextToast = t(zoneAt(course.start.level).nameKey);
-  };
   let hintTimer = 9;
   let clock = 0;
   levelEl.textContent = String(course.start.level);
   bestEl.textContent = String(best);
-  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, startAtLevel };
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -321,17 +283,13 @@ async function bootGame() {
     clock += dt;
     fallLock = Math.max(0, fallLock - dt);
     if (pop.active) player.easeFall(pop.phase === "boom" ? 0 : 0.5);
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !ui.mapOpen && !avatar.dancing && !pop.active;
+    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active;
     const frame = player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
-    if (standing) setGravity(standing.level ?? checkpointPad.level);
     course.update(clock, dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
     const here = frame.pad ?? lastSafePad;
-    const cover = world.update(clock, dt, frame.position, course.lava.y, (here.index ?? checkpointPad.index) / PADS_PER_LEVEL + 1);
-    graphics.update(clock, cover, world.space);
-    // The night skyline stands on the horizon, so tip the view up enough to see it.
-    player.setAimRaise(NY_AIM_RAISE * world.mix.city * (1 - Math.min(1, world.mix.cloud * 1.6)));
-    minimap.setLevel(here.level ?? checkpointPad.level, best, clock);
+    const cover = world.update(clock, dt, frame.position, course.lava.y, here.index / PADS_PER_LEVEL + 1);
+    graphics.update(clock, cover);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
       x: frame.foot.x,
@@ -341,10 +299,7 @@ async function bootGame() {
       facing: frame.facing,
       faceAngle: Math.atan2(player.camera.position.x - frame.foot.x, player.camera.position.z - frame.foot.z),
       airborne: frame.airborne,
-      trick: frame.trick,
-      trickP: frame.trickP,
-      // Input, not speed: a moving pad or a landing slide carries the body without any steps.
-      moving: frame.walking,
+      moving: frame.speed > 0.4,
       stride: frame.onStair ? STAIR_RUN : 1,
       time: clock,
     });
@@ -395,7 +350,7 @@ async function bootGame() {
           avatar.stopDance();
           audio.scream();
           audio.setWalking(false);
-          showToast(t(fallToastKey(checkpointPad.level)));
+          showToast(t("toast.tooHot"));
           toastTimer = 1.6;
           nextToast = t("toast.keepGoing");
         } else if (!burned) {
@@ -420,9 +375,9 @@ async function bootGame() {
         saveBest(best);
       }
       avatar.dance(look.dance);
-      showToast(fmtLevel(frame.pad.level));
+      showToast(`Level ${frame.pad.level}`);
       toastTimer = 1.6;
-      nextToast = milestoneToast(frame.pad.level);
+      nextToast = null;
       if (awardLevelCoin(coins, frame.pad.level)) {
         coinsEl.textContent = String(coins.coins);
         coinPop.burst(frame.position);
@@ -481,39 +436,45 @@ async function bootGame() {
   }
 }
 
-function fmtLevel(level) {
-  return t("toast.level").replace("{level}", String(level));
-}
-
-/** Big moments first, then the name of a zone on its first level. */
-function milestoneToast(level) {
-  if (level === MAX_LEVEL) return t("toast.finish");
-  if (level === MOON_LEVEL) return t("toast.moon");
-  if (level === SPACE_FULL) return t("toast.space");
-  const zone = ZONES.find((entry) => entry.from === level && entry.from > 1);
-  return zone ? t(zone.nameKey) : null;
-}
-
-/** Lava below the caves; water, sky, or space everywhere else. */
-function fallToastKey(level) {
-  const zone = zoneAt(level).id;
-  if (zone === "core" || zone === "crust") return "toast.tooHot";
-  if (zone === "ocean" || zone === "city") return "toast.splash";
-  return "toast.whoops";
-}
-
-/** Returns `closeMenu`, which also runs when a level is picked from the map. */
-function bindStartMenu(best, onPickLevel, syncMenuMusic) {
+function bindStartMenu(best, onDifficulty, onBackground, syncMenuMusic) {
   const menu = document.querySelector("#start-menu");
   const playButton = document.querySelector("#start-play");
   const avatarButton = document.querySelector("#start-avatar");
-  const pickButton = document.querySelector("#start-pick");
   const nameInput = document.querySelector("#player-name");
+  const difficultyButtons = [...menu.querySelectorAll("[data-difficulty]")];
+  const backgroundButtons = [...menu.querySelectorAll("[data-background]")];
   const preferences = loadPlayerPreferences();
 
   nameInput.value = preferences.name;
   document.querySelector("#menu-best").textContent = String(best);
   document.querySelector("#menu-stars").textContent = String(starsLeft(best, wallet));
+
+  const selectDifficulty = (difficulty) => {
+    preferences.difficulty = difficulty;
+    onDifficulty(difficulty);
+    difficultyButtons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.difficulty === difficulty));
+    });
+    savePlayerPreferences(preferences);
+  };
+
+  difficultyButtons.forEach((button) => {
+    button.addEventListener("click", () => selectDifficulty(button.dataset.difficulty));
+  });
+  selectDifficulty(preferences.difficulty);
+
+  const selectBackground = (background) => {
+    preferences.background = background;
+    onBackground(background);
+    backgroundButtons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.background === background));
+    });
+    savePlayerPreferences(preferences);
+  };
+  backgroundButtons.forEach((button) => {
+    button.addEventListener("click", () => selectBackground(button.dataset.background));
+  });
+  selectBackground(preferences.background);
 
   nameInput.addEventListener("input", () => {
     preferences.name = nameInput.value.trimStart();
@@ -523,10 +484,8 @@ function bindStartMenu(best, onPickLevel, syncMenuMusic) {
   avatarButton.addEventListener("click", () => {
     document.querySelector("#settings-open").click();
   });
-  pickButton.addEventListener("click", onPickLevel);
 
-  const closeMenu = () => {
-    if (!ui.startOpen) return;
+  playButton.addEventListener("click", () => {
     preferences.name = nameInput.value.trim() || "Player";
     nameInput.value = preferences.name;
     savePlayerPreferences(preferences);
@@ -536,19 +495,21 @@ function bindStartMenu(best, onPickLevel, syncMenuMusic) {
     document.body.classList.remove("start-open");
     document.querySelector("#view").focus();
     syncMenuMusic();
-  };
-  playButton.addEventListener("click", closeMenu);
+  });
 
   window.__obbyPreferences = preferences;
-  return closeMenu;
 }
 
 function loadPlayerPreferences() {
   try {
     const stored = JSON.parse(localStorage.getItem(PLAYER_KEY) ?? "{}");
-    return { name: typeof stored.name === "string" ? stored.name.slice(0, 18) : "" };
+    return {
+      name: typeof stored.name === "string" ? stored.name.slice(0, 18) : "",
+      difficulty: ["easy", "medium", "hard"].includes(stored.difficulty) ? stored.difficulty : "easy",
+      background: stored.background === "lava" || stored.background === "newyork" ? stored.background : "hollywood",
+    };
   } catch {
-    return { name: "" };
+    return { name: "", difficulty: "easy", background: "hollywood" };
   }
 }
 
@@ -598,9 +559,6 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   const faceBox = document.querySelector("#faces");
   const outfitBox = document.querySelector("#outfits");
   const bowButton = document.querySelector("#bow");
-  const necklaceButton = document.querySelector("#necklace");
-  const headbandButton = document.querySelector("#headband");
-  const braceletButton = document.querySelector("#bracelet");
   const qualityBox = document.querySelector("#quality");
 
   const makeButton = (className, onClick) => {
@@ -717,16 +675,6 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
     look.bow = !look.bow;
     publish();
   });
-  for (const [button, key] of [
-    [necklaceButton, "necklace"],
-    [headbandButton, "headband"],
-    [braceletButton, "bracelet"],
-  ]) {
-    button.addEventListener("click", () => {
-      look[key] = !look[key];
-      publish();
-    });
-  }
   qualityBox.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
@@ -760,12 +708,6 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   window.addEventListener("keydown", (event) => {
     if (event.code === "Escape" && ui.settingsOpen) setOpen(false);
   });
-  const accessoryLabel = (key, on) => {
-    if (key === "necklace") return t(on ? "accessory.necklaceOn" : "accessory.necklaceOff");
-    if (key === "headband") return t(on ? "accessory.headbandOn" : "accessory.headbandOff");
-    return t(on ? "accessory.braceletOn" : "accessory.braceletOff");
-  };
-
   publish();
 
   function publish() {
@@ -816,15 +758,7 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
     bowButton.disabled = !bowOwned;
     bowButton.title = bowOwned ? "" : lockTitle("extra", "bow");
     bowButton.setAttribute("aria-pressed", String(look.bow));
-    bowButton.textContent = bowOwned ? t(look.bow ? "accessory.bowOn" : "accessory.bowOff") : `${t("shop.bow")} · ${priceOf("extra:bow")} ⭐`;
-    for (const [button, key] of [
-      [necklaceButton, "necklace"],
-      [headbandButton, "headband"],
-      [braceletButton, "bracelet"],
-    ]) {
-      button.setAttribute("aria-pressed", String(Boolean(look[key])));
-      button.textContent = accessoryLabel(key, Boolean(look[key]));
-    }
+    bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${priceOf("extra:bow")} ⭐`;
     document.querySelectorAll("#quality button").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.quality === look.quality));
     });
@@ -1061,9 +995,7 @@ function createGraphics(scene, camera, world) {
   const sunCloud = new Color3(0.93, 0.96, 1);
   const vignetteWarm = imaging.vignetteColor.clone();
   const vignetteCloud = new Color4(0.5, 0.68, 0.88, 0);
-  const vignetteSpace = new Color4(0.02, 0.03, 0.1, 0);
   const vignetteHold = new Color4();
-  const sunSpace = new Color3(1, 1, 1);
 
   return {
     sun,
@@ -1081,20 +1013,17 @@ function createGraphics(scene, camera, world) {
     removeStair(flight) {
       for (const mesh of flight.meshes) shadow.removeShadowCaster(mesh, true);
     },
-    update(time, cover = 0, space = 0) {
+    update(time, cover = 0) {
       // Bloom breathes a little with the lava, then settles brighter in the clouds.
       if (pipeline.bloomEnabled) {
         pipeline.bloomWeight = 0.34 + Math.sin(time * 1.3) * 0.04 * (1 - cover * 0.5) + cover * 0.05;
       }
-      // Above the air, sunlight is whiter and harder, with crisper shadows.
       Color3.LerpToRef(sunWarm, sunCloud, cover, sun.diffuse);
-      Color3.LerpToRef(sun.diffuse, sunSpace, space, sun.diffuse);
-      sun.intensity = 1.35 - cover * 0.08 + space * 0.3;
+      sun.intensity = 1.35 - cover * 0.08;
       Color4.LerpToRef(vignetteWarm, vignetteCloud, cover, vignetteHold);
-      Color4.LerpToRef(vignetteHold, vignetteSpace, space, vignetteHold);
       imaging.vignetteColor.copyFrom(vignetteHold);
-      imaging.vignetteWeight = 0.85 - cover * 0.28 + space * 0.2;
-      shadow.darkness = 0.3 - cover * 0.08 + space * 0.15;
+      imaging.vignetteWeight = 0.85 - cover * 0.28;
+      shadow.darkness = 0.3 - cover * 0.08;
     },
     apply(quality) {
       const high = quality !== "low";
@@ -1162,5 +1091,7 @@ function formatTime(seconds) {
 
 function hintCopy() {
   const coarse = window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("show-touch");
-  return coarse ? t("hint.touch") : t("hint.keys");
+  return coarse
+    ? "Drag the stick to run. Jump is on the right. Drag the course to look."
+    : "WASD or arrows to run. Space to jump. Drag to look.";
 }

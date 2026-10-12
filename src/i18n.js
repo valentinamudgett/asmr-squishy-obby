@@ -7,8 +7,20 @@ export const messages = {
   "start.subtitle": "Bounce softly. Climb high. Have fun!",
   "start.nameLabel": "Player name",
   "start.namePlaceholder": "Your name",
-  "start.journey": "Climb from the Earth's lava core, up through the sea and the sky, all the way to the Moon.",
-  "start.pickLevel": "Pick a level",
+  "start.difficultyLabel": "Choose your difficulty",
+  "start.backgroundLabel": "Choose your background",
+  "background.hollywood": "Hollywood",
+  "background.hollywoodHint": "Sunset ocean",
+  "background.newyork": "New York",
+  "background.newyorkHint": "Night skyline",
+  "background.lava": "Lava",
+  "background.lavaHint": "Bubbling sea",
+  "difficulty.easy": "Easy",
+  "difficulty.easyHint": "Soft & steady",
+  "difficulty.medium": "Medium",
+  "difficulty.mediumHint": "A little bouncy",
+  "difficulty.hard": "Hard",
+  "difficulty.hardHint": "Extra squishy",
   "start.avatar": "Customize avatar",
   "start.play": "Start bouncing",
   "start.rewards": "Your rewards",
@@ -32,32 +44,10 @@ export const messages = {
   "shop.bow": "Hair bow",
   "shop.rainbow": "Rainbow hair",
   "toast.tooHot": "Too hot!",
-  "toast.splash": "Splash!",
-  "toast.whoops": "Whoops!",
   "toast.ouch": "Ouch!",
   "toast.keepGoing": "Keep going!",
   "toast.backToLevel": "Back to your level!",
-  "toast.level": "Level {level}",
   "toast.space": "You made it to space!",
-  "toast.moon": "Welcome to the Moon! Jumps are floaty here.",
-  "toast.finish": "You reached the Moon! Level 100!",
-  "zone.core": "Lava core",
-  "zone.crust": "Rocky crust",
-  "zone.ocean": "Deep ocean",
-  "zone.city": "New York",
-  "zone.clouds": "Cloud layer",
-  "zone.space": "Outer space",
-  "zone.moon": "The Moon",
-  "map.open": "Open the journey map",
-  "map.kicker": "From the core to the Moon",
-  "map.title": "Journey map",
-  "map.here": "You are here: Level {level} of {max}",
-  "map.short": "Lv {level}/{max}",
-  "map.youAreHere": "You are here",
-  "map.level": "Level {level} · {zone}",
-  "map.locked": "Level {level} is locked. Reach it first!",
-  "map.play": "Play from here",
-  "map.close": "Close",
   "studio.hairStyle": "Hair style",
   "studio.accessory": "Accessories",
   "accessory.bowOn": "Bow on",
@@ -117,10 +107,5 @@ export function applyTranslations(root = document) {
   root.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
     const value = messages[element.dataset.i18nPlaceholder];
     if (value) element.setAttribute("placeholder", value);
-  });
-
-  root.querySelectorAll("[data-i18n-label]").forEach((element) => {
-    const value = messages[element.dataset.i18nLabel];
-    if (value) element.setAttribute("aria-label", value);
   });
 }

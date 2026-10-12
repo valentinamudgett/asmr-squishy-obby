@@ -85,21 +85,8 @@ function slabExit(origin, half, direction) {
 
 const HULL_SLICES = 12;
 const HULL_BINS = 16;
-// Radius rings of the walkable top. Height slices alone keep the widest point,
-// and on a bun that point sits below the shoulder, so the hull cuts the puff off.
-const HULL_RINGS = 14;
 // Circumscribes the 16-sided rings so a flat facet still covers the smooth mesh.
 const HULL_GROW = 1.02;
-// A steeper shoulder dumps a walking foot even though the puff is still underneath.
-const HULL_MAX_SLOPE = 0.85;
-// The foot sphere reaches past the body. This lip keeps that reach on the bun.
-const HULL_LIP = 0.18;
-
-function angleBin(dx, dz) {
-  let bin = Math.floor(((Math.atan2(dz, dx) + Math.PI) / (Math.PI * 2)) * HULL_BINS);
-  if (bin < 0 || bin >= HULL_BINS) bin = 0;
-  return bin;
-}
 
 /**
  * A low convex hull of the visible body, plus the horizontal area it covers.
@@ -133,15 +120,6 @@ export function colliderFromMesh(mesh, kind) {
   cz /= count;
   const span = yMax - yMin || 1;
   const grid = Array.from({ length: HULL_SLICES }, () => new Array(HULL_BINS).fill(null));
-  const tops = Array.from({ length: HULL_RINGS }, () => new Array(HULL_BINS).fill(null));
-  let maxRadius = 0;
-  for (let i = 0; i < positions.length; i += 3) {
-    const dx = positions[i] - cx;
-    const dz = positions[i + 2] - cz;
-    const radius = Math.hypot(dx, dz);
-    if (radius > maxRadius) maxRadius = radius;
-  }
-  const ringSpan = maxRadius || 1;
   for (let i = 0; i < positions.length; i += 3) {
     const x = positions[i];
     const y = positions[i + 1];
@@ -149,38 +127,11 @@ export function colliderFromMesh(mesh, kind) {
     const dx = x - cx;
     const dz = z - cz;
     const radius = Math.hypot(dx, dz);
-    const bin = angleBin(dx, dz);
     const slice = Math.min(HULL_SLICES - 1, Math.max(0, Math.floor(((y - yMin) / span) * HULL_SLICES)));
+    let bin = Math.floor(((Math.atan2(dz, dx) + Math.PI) / (Math.PI * 2)) * HULL_BINS);
+    if (bin >= HULL_BINS) bin = 0;
     const row = grid[slice];
     if (!row[bin] || radius > row[bin].radius) row[bin] = { x, y, z, radius };
-    const ring = Math.min(HULL_RINGS - 1, Math.floor((radius / ringSpan) * HULL_RINGS));
-    const top = tops[ring];
-    if (!top[bin] || y > top[bin].y) top[bin] = { x, y, z };
-  }
-  const lips = [];
-  if (kind === "circle") {
-    for (let bin = 0; bin < HULL_BINS; bin += 1) {
-      let prev = null;
-      let rim = null;
-      for (let ring = 0; ring < HULL_RINGS; ring += 1) {
-        const point = tops[ring][bin];
-        if (!point) continue;
-        const r = Math.hypot(point.x - cx, point.z - cz);
-        if (prev && r > prev.r + 1e-4) {
-          const floorY = prev.y - (r - prev.r) * HULL_MAX_SLOPE;
-          if (point.y < floorY) point.y = floorY;
-        }
-        prev = { r, y: point.y, x: point.x, z: point.z };
-        if (!rim || r > rim.r) rim = prev;
-      }
-      if (!rim || rim.r < 1e-3) continue;
-      const scale = (rim.r + HULL_LIP) / rim.r;
-      lips.push({
-        x: cx + (rim.x - cx) * scale,
-        y: rim.y,
-        z: cz + (rim.z - cz) * scale,
-      });
-    }
   }
   const points = [];
   let boundMinX = Infinity;
@@ -201,8 +152,6 @@ export function colliderFromMesh(mesh, kind) {
     if (radius > maxR) maxR = radius;
   };
   for (const row of grid) for (const point of row) push(point);
-  for (const row of tops) for (const point of row) push(point);
-  for (const point of lips) push(point);
   push(maxX);
   push(minX);
   push(maxZ);

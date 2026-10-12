@@ -23,7 +23,6 @@ import { mulberry32 } from "./geometry.js";
 import { createFireball, createLavaLine, createSpikes, createSweeper } from "./hazards.js";
 import { AIR_SPEED, GRAVITY, JUMP_SPEED, SPRING_AIR_SPEED, SPRING_POP } from "./player.js";
 import { createStairFlight, isRainbowSlot } from "./stairs.js";
-import { gravityScale, MOON_LEVEL } from "./zones.js";
 
 export const PAD_THICKNESS = PAD_TOP;
 export const LAVA_Y = -3.4;
@@ -35,10 +34,10 @@ const TURN = (Math.PI * 2) / PADS_PER_LOOP;
 const STAGGER = (4.5 * Math.PI) / 180;
 /** Fixed outward shove per pad, so the coil widens instead of copying the loop below. */
 const SPREAD = 0.14;
-/** Added to a normal step up. A full loop then sits higher, so food hanging under it clears the pad you are on. */
-const LOOP_CLIMB = 0.9;
-/** Tallest normal step that still leaves a horizontal jump. Matches the jump used when spacing pads. */
-const MAX_CLIMB = 1.08;
+/** Added to a normal step up. One loop then clears the food sticking out underneath. */
+const LOOP_CLIMB = 0.72;
+/** Tallest normal step that still leaves a horizontal jump. Springs climb on their own. */
+const MAX_CLIMB = 0.94;
 /** Air between neighboring meshes on the same loop, before a jump trims it back. */
 const MESH_GAP = 0.55;
 /** How far the lava sits below the lowest nearby pad. Deep enough that the loop below stays above it. */
@@ -52,38 +51,20 @@ const JELLY_COLORS = ["#ff6f9e", "#9a7bff", "#7ed957", "#4fc3ff", "#ffa53d"];
 /** Visual diameter 9.6: 2.5× a 3.8 dumpling and about 2.1× a 4.6 one. */
 const LAVA_DISC_RADIUS = 4.8;
 const LAVA_DISC_WALK = 4.5;
-/** Radians per second before the level multiplier. */
+/** Radians per second before the menu multiplier. Easy 1.2, medium 1.5, hard 1.85. */
 const LAVA_SPIN_BASE = 0.75;
-
-/**
- * First level each obstacle can show up on. Difficulty comes from this list, then
- * `difficultyFor` keeps pushing speeds and odds up after each one arrives.
- */
-export const UNLOCK = {
-  slide: 2,
-  lavaDisc: 3,
-  bob: 4,
-  sweeper: 6,
-  fireball: 9,
-  spikes: 13,
-  narrow: 18,
-};
-
-/** 1.2x when the disc first appears, up to 1.85x by level 40. */
-function lavaSpinScale(level) {
-  const t = Math.min(1, Math.max(0, (level - UNLOCK.lavaDisc) / (40 - UNLOCK.lavaDisc)));
-  return 1.2 + 0.65 * t;
-}
+const LAVA_SPIN_SCALE = { easy: 1.2, medium: 1.5, hard: 1.85 };
 
 /** Horizontal distance a jump covers before dropping back to `dy` above takeoff. */
-function airReach(dy, launch = JUMP_SPEED, speed = AIR_SPEED, g = -GRAVITY) {
+function airReach(dy, launch = JUMP_SPEED, speed = AIR_SPEED) {
+  const g = -GRAVITY;
   const disc = launch * launch - 2 * g * dy;
   if (disc < 0) return 0;
   return (speed * (launch + Math.sqrt(disc))) / g;
 }
 
 export function difficultyFor(level) {
-  return Math.min(1, (level - 1) / 60);
+  return Math.min(1, (level - 1) / 10);
 }
 
 export function createCourse(scene, hooks = {}, fromLevel = 1) {
@@ -91,6 +72,9 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
   const pads = [];
   const flights = [];
   const lava = { y: LAVA_Y };
+  // Picked on the start menu. Easy leaves out sweeping bars, spikes, and lava balls.
+  // lavaSpin is only the lava disc. Sweeper bars keep their own speeds.
+  const options = { padHazards: true, fireballs: true, lavaSpin: LAVA_SPIN_SCALE.easy };
   let nextIndex = 0;
   // The last pad skipped so a resumed run can place its checkpoint without building level 1.
   let skipped = null;
@@ -121,7 +105,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
     pad.motion = spec.motion ?? null;
     addMarker(scene, pad);
     addBody(scene, pad);
-    addHazards(scene, pad, prev, lava, random);
+    addHazards(scene, pad, prev, lava, options, random);
 
     if (isRainbowSlot(index, PADS_PER_LEVEL)) {
       // Built only so plan/locate/hazards consume the same rolls, then swapped for stairs.
@@ -215,8 +199,6 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
   chain = skipped;
   while (pads.length < 4 || pads[pads.length - 1].along < pads[0].along + BUILD_AHEAD) spawn();
   const start = pads[0];
-  // A run that starts high up shouldn't wait for the lava to crawl up from the bottom.
-  lava.y = Math.max(LAVA_Y, start.homeY - LAVA_DEPTH);
 
   return {
     get pads() {
@@ -230,11 +212,19 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
     restoreStairs() {
       for (const flight of flights) flight.restore();
     },
-    /** Tears down every pad and stair so a new course can be built from another level. */
-    dispose() {
-      while (pads.length) remove(pads.pop());
-      for (const flight of flights) flight.dispose();
-      flights.length = 0;
+    setDifficulty(difficulty) {
+      const hazards = difficulty !== "easy";
+      options.padHazards = hazards;
+      options.fireballs = hazards;
+      options.lavaSpin = LAVA_SPIN_SCALE[difficulty] ?? LAVA_SPIN_SCALE.easy;
+      if (hazards) return;
+      const gone = (hazard) => hazard.kind === "sweeper" || hazard.kind === "spikes" || hazard.kind === "fireball";
+      for (const pad of pads) {
+        for (const hazard of pad.hazards) {
+          if (gone(hazard)) hazard.dispose();
+        }
+        pad.hazards = pad.hazards.filter((hazard) => !gone(hazard));
+      }
     },
     update(time, dt, { standing, position, keepFrom }) {
       if (standing?.stair) standing.startFade();
@@ -255,7 +245,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
       }
       for (const pad of pads) {
         if (pad.spin) {
-          pad.spin.rate = pad.spin.base * lavaSpinScale(pad.level);
+          pad.spin.rate = pad.spin.base * options.lavaSpin;
           pad.spin.angle += pad.spin.rate * dt;
           if (pad.spinner) pad.spinner.rotation.y = pad.spin.angle;
         }
@@ -327,7 +317,6 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
 /** Pad before the checkpoint on levels 1, 3, 5… Springs cannot roll here, and it is not a stair slot. */
 function lavaDiscSlot(index) {
   if (index % 16 !== 7) return false;
-  if (Math.floor(index / PADS_PER_LEVEL) + 1 < UNLOCK.lavaDisc) return false;
   if (isRainbowSlot(index, PADS_PER_LEVEL)) return false;
   if (isRainbowSlot(index - 1, PADS_PER_LEVEL) || isRainbowSlot(index + 1, PADS_PER_LEVEL)) return false;
   return true;
@@ -372,12 +361,10 @@ function plan(index, prev, random) {
     return { id, food: "cheese", kind: "firm", role: "pad", size: 3.5, seed };
   }
   const beforeCheckpoint = (index + 1) % PADS_PER_LEVEL === 0;
-  // Still rolled on the Moon so the stream stays put. A spring pop in low gravity would overshoot.
-  const springRoll = beforeCheckpoint ? 1 : random();
-  if (springRoll < 0.08 + 0.06 * d && level < MOON_LEVEL) {
+  if (!beforeCheckpoint && random() < 0.08 + 0.06 * d) {
     return { id, food: "dumpling", kind: "spring", role: "pad", color: "#86dc72", seed };
   }
-  const narrow = level < UNLOCK.narrow ? 0.25 : 0.8 + 1.6 * d;
+  const narrow = 0.6 + 1.6 * d;
   const food = weighted(
     [
       ["dumpling", 1.3],
@@ -401,8 +388,8 @@ function plan(index, prev, random) {
   if (food === "block") spec.size = 2.1 - 0.5 * d * random();
 
   const roll = random();
-  const slide = level >= UNLOCK.slide ? 0.12 + 0.25 * d : 0;
-  const bob = level >= UNLOCK.bob ? 0.12 + 0.3 * d : 0;
+  const slide = level >= 2 ? 0.12 + 0.25 * d : 0;
+  const bob = level >= 3 ? 0.12 + 0.3 * d : 0;
   if (roll < slide) {
     spec.motion = { type: "slide", amp: 0.7 + 0.9 * d, speed: 1.1 + 0.9 * d, phase: random() * 6.28 };
   } else if (roll < slide + bob) {
@@ -421,7 +408,7 @@ function paintBlob(spec, index) {
 function consumeHazardRolls(pad, prev, random) {
   if (!prev || pad.role !== "pad" || pad.kind === "spring") return;
   random();
-  if (pad.level >= UNLOCK.fireball && prev.kind !== "spring") random();
+  if (pad.level >= 4 && prev.kind !== "spring") random();
 }
 
 /** How far the visible mesh sticks out from the pad origin, in pad-local XZ. */
@@ -467,8 +454,6 @@ function decorSupport(decor, dirX, dirZ, meshYaw) {
 function locate(spec, prev, level, footprint, random) {
   if (!prev) return { x: 0, y: 0, z: 0, heading: 0, meshYaw: 0 };
   const d = difficultyFor(level);
-  // The jump happens under the takeoff pad's gravity, so Moon pads are spaced for the floaty arc.
-  const g = -GRAVITY * gravityScale(prev.level ?? level);
   // Forward follows the previous heading, so a held jump walks the spiral. The extra
   // turn and the outward shove keep the next loop from sitting in this one's column.
   const travel = prev.heading ?? 0;
@@ -485,11 +470,11 @@ function locate(spec, prev, level, footprint, random) {
     // Springs are the big climbs: a full step up, far enough out that the pads don't overlap.
     const dy = 1.1 + random() * 1.0;
     y = prev.homeY + dy;
-    const across = airReach(dy, SPRING_POP, SPRING_AIR_SPEED, g) * 0.9;
+    const across = airReach(dy, SPRING_POP, SPRING_AIR_SPEED) * 0.9;
     const prevReach = reachAlong(prev.footprint, dirX, dirZ, prev.meshYaw ?? 0);
     const selfReach = reachAlong(footprint, dirX, dirZ, meshYaw);
     const span = prevReach + selfReach + 1.7;
-    const flight = airReach(dy, SPRING_POP, SPRING_AIR_SPEED, g);
+    const flight = airReach(dy, SPRING_POP, SPRING_AIR_SPEED);
     const jumpCap = prevReach - 0.2 + flight + selfReach - 0.35;
     const vis =
       decorSupport(prev.decor, dirX, dirZ, prev.meshYaw ?? 0) +
@@ -521,7 +506,7 @@ function locate(spec, prev, level, footprint, random) {
     let guard = 0;
     while (guard < 12) {
       const worstDy = dy + bobAmp(dy) * 0.6;
-      flight = airReach(Math.min(1.08, worstDy), JUMP_SPEED, AIR_SPEED, g);
+      flight = airReach(Math.min(1.08, worstDy));
       const landAt = prevReach - inset + flight;
       const room = Math.max(0.05, selfReach - 0.32);
       const lateralRoom = Math.sqrt(Math.max(0, room * room - SPREAD * SPREAD));
@@ -601,21 +586,23 @@ function nearestAlong(pads, position) {
   return best.along ?? 0;
 }
 
-function addHazards(scene, pad, prev, lava, random) {
+function addHazards(scene, pad, prev, lava, options, random) {
   pad.hazards = [];
   if (!prev || pad.role !== "pad" || pad.kind === "spring") return;
   const d = difficultyFor(pad.level);
   const print = pad.hazardFootprint ?? pad.footprint;
   const wide = print.type === "circle" || Math.min(print.hx, print.hz) > 1.1;
   const roll = random();
-  if (pad.level >= UNLOCK.sweeper && wide && roll < 0.22 + 0.3 * d) {
-    pad.hazards.push(createSweeper(scene, pad, d, random));
-  } else if (pad.level >= UNLOCK.spikes && roll > 1 - (0.18 + 0.25 * d)) {
-    pad.hazards.push(createSpikes(scene, pad, d, random));
+  if (options.padHazards) {
+    if (pad.level >= 3 && wide && roll < 0.22 + 0.3 * d) {
+      pad.hazards.push(createSweeper(scene, pad, d, random));
+    } else if (pad.level >= 5 && roll > 1 - (0.18 + 0.25 * d)) {
+      pad.hazards.push(createSpikes(scene, pad, d, random));
+    }
   }
   // Always roll so a skipped pad and a built pad stay on the same random stream.
-  const fireRoll = pad.level >= UNLOCK.fireball && prev.kind !== "spring" ? random() : 1;
-  if (fireRoll < 0.2 + 0.3 * d) {
+  const fireRoll = pad.level >= 4 && prev.kind !== "spring" ? random() : 1;
+  if (options.fireballs && fireRoll < 0.2 + 0.3 * d) {
     const dx = pad.homeX - prev.homeX;
     const dz = pad.homeZ - prev.homeZ;
     const dist = Math.hypot(dx, dz) || 1;
