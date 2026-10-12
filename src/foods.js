@@ -22,8 +22,16 @@ import {
 
 export const PAD_TOP = 0.74;
 
-/** Collider size for a pad spec. Course layout uses this without building the mesh. */
+/**
+ * Jump-spacing reach for a pad spec. Course layout uses this without building the mesh.
+ * It stays on the crown so stairs and gaps keep their current distances. The physics
+ * shape is the full body, from `colliderFromMesh`.
+ */
 export function footprintFor(spec) {
+  if (spec.food === "lavadisc") {
+    const radius = spec.radius ?? 4.8;
+    return { type: "circle", r: spec.walk ?? radius * 0.9375 };
+  }
   if (spec.food === "dumpling") {
     const radius = spec.radius ?? 1.9;
     return { type: "circle", r: spec.walk ?? radius * 0.66 };
@@ -32,7 +40,7 @@ export function footprintFor(spec) {
     const walk = (spec.size ?? 3) / 2 - 0.15;
     return { type: "box", hx: walk, hz: walk };
   }
-  if (spec.food === "jelly") {
+  if (spec.food === "jelly" || spec.food === "blob") {
     const walk = (spec.size ?? 2.4) / 2 - 0.2;
     return { type: "box", hx: walk, hz: walk };
   }
@@ -46,14 +54,132 @@ export function footprintFor(spec) {
   return { type: "box", hx: walk, hz: walk };
 }
 
+/** How far `footprint` reaches from the pad origin along a world XZ direction. */
+export function footprintReach(footprint, dirX, dirZ, meshYaw = 0) {
+  if (!footprint) return 0;
+  const c = Math.cos(meshYaw);
+  const s = Math.sin(meshYaw);
+  const lx = dirX * c - dirZ * s;
+  const lz = dirX * s + dirZ * c;
+  const len = Math.hypot(lx, lz) || 1;
+  const ux = lx / len;
+  const uz = lz / len;
+  if (footprint.type === "circle") return circleReach(footprint, ux, uz);
+  return Math.min(slabExit(footprint.cx ?? 0, footprint.hx, ux), slabExit(footprint.cz ?? 0, footprint.hz, uz));
+}
+
+function circleReach(footprint, ux, uz) {
+  const ox = footprint.cx ?? 0;
+  const oz = footprint.cz ?? 0;
+  const toward = ox * ux + oz * uz;
+  const outside = ox * ox + oz * oz - footprint.r * footprint.r;
+  const disc = toward * toward - outside;
+  if (disc <= 0) return Math.max(0, toward);
+  return toward + Math.sqrt(disc);
+}
+
+function slabExit(origin, half, direction) {
+  if (Math.abs(direction) < 1e-6) return Infinity;
+  return Math.max((origin - half) / direction, (origin + half) / direction);
+}
+
+const HULL_SLICES = 12;
+const HULL_BINS = 16;
+// Circumscribes the 16-sided rings so a flat facet still covers the smooth mesh.
+const HULL_GROW = 1.02;
+
+/**
+ * A low convex hull of the visible body, plus the horizontal area it covers.
+ * The old inset cylinder sat on the crown, so anything off center fell through.
+ */
+export function colliderFromMesh(mesh, kind) {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const count = positions.length / 3;
+  let cx = 0;
+  let cz = 0;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let maxX = null;
+  let minX = null;
+  let maxZ = null;
+  let minZ = null;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+    cx += x;
+    cz += z;
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
+    if (!maxX || x > maxX.x) maxX = { x, y, z };
+    if (!minX || x < minX.x) minX = { x, y, z };
+    if (!maxZ || z > maxZ.z) maxZ = { x, y, z };
+    if (!minZ || z < minZ.z) minZ = { x, y, z };
+  }
+  cx /= count;
+  cz /= count;
+  const span = yMax - yMin || 1;
+  const grid = Array.from({ length: HULL_SLICES }, () => new Array(HULL_BINS).fill(null));
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+    const dx = x - cx;
+    const dz = z - cz;
+    const radius = Math.hypot(dx, dz);
+    const slice = Math.min(HULL_SLICES - 1, Math.max(0, Math.floor(((y - yMin) / span) * HULL_SLICES)));
+    let bin = Math.floor(((Math.atan2(dz, dx) + Math.PI) / (Math.PI * 2)) * HULL_BINS);
+    if (bin >= HULL_BINS) bin = 0;
+    const row = grid[slice];
+    if (!row[bin] || radius > row[bin].radius) row[bin] = { x, y, z, radius };
+  }
+  const points = [];
+  let boundMinX = Infinity;
+  let boundMaxX = -Infinity;
+  let boundMinZ = Infinity;
+  let boundMaxZ = -Infinity;
+  let maxR = 0;
+  const push = (point) => {
+    if (!point) return;
+    const x = cx + (point.x - cx) * HULL_GROW;
+    const z = cz + (point.z - cz) * HULL_GROW;
+    points.push(x, point.y, z);
+    if (x < boundMinX) boundMinX = x;
+    if (x > boundMaxX) boundMaxX = x;
+    if (z < boundMinZ) boundMinZ = z;
+    if (z > boundMaxZ) boundMaxZ = z;
+    const radius = Math.hypot(x - cx, z - cz);
+    if (radius > maxR) maxR = radius;
+  };
+  for (const row of grid) for (const point of row) push(point);
+  push(maxX);
+  push(minX);
+  push(maxZ);
+  push(minZ);
+  points.push(cx, yMax, cz, cx, yMin, cz);
+  const solid =
+    kind === "circle"
+      ? { type: "circle", r: maxR, cx, cz }
+      : {
+          type: "box",
+          hx: (boundMaxX - boundMinX) / 2,
+          hz: (boundMaxZ - boundMinZ) / 2,
+          cx: (boundMinX + boundMaxX) / 2,
+          cz: (boundMinZ + boundMaxZ) / 2,
+        };
+  return { points, solid };
+}
+
 /**
  * Every food is built in pad-local space with its walkable top at PAD_TOP.
  * Returns the merged squishy mesh, rigid extras, the collider footprint, and squish tuning.
  */
 export function buildFood(scene, spec) {
   if (spec.food === "block") return toyBlocks(scene, spec);
-  const builders = { dumpling, cheese, butter, carrot, cucumber, jelly };
+  const builders = { dumpling, cheese, butter, carrot, cucumber, jelly, blob };
   const food = builders[spec.food](scene, spec);
+  const round = spec.food === "dumpling" || spec.food === "blob";
+  const collider = colliderFromMesh(food.body, round ? "circle" : "box");
   const material = shared(scene, `squishy-${spec.food}-${spec.kind}`, () => {
     const made = squishyMaterial(scene, `squishy-${spec.food}`, food.surface);
     if (spec.kind === "spring") made.emissiveColor = new Color3(0.06, 0.24, 0.05);
@@ -76,7 +202,7 @@ export function buildFood(scene, spec) {
     mesh = Mesh.MergeMeshes([merged, food.decal.mesh], true, true, undefined, false, true);
     mesh.name = spec.id;
   }
-  return { ...food, mesh };
+  return { ...food, mesh, solid: collider.solid, hull: collider.points };
 }
 
 const caches = new WeakMap();
@@ -458,6 +584,56 @@ function jelly(scene, spec) {
   };
 }
 
+/**
+ * Plump hot-pink oval. The crown is flat so it lands like the other pads;
+ * the sides stay round so it still reads as the circled blob.
+ */
+function blob(scene, spec) {
+  const size = spec.size ?? 2.4;
+  const radius = size / 2;
+  const height = Math.min(2.05, size * 0.72);
+  const top = PAD_TOP;
+  const bottom = top - height;
+  const body = MeshBuilder.CreateSphere(`${spec.id}-blob`, { diameter: 1, segments: 36 }, scene);
+  body.scaling.set(radius * 2, height, radius * 2);
+  body.position.y = (top + bottom) / 2;
+  body.bakeCurrentTransformIntoVertices();
+
+  const positions = body.getVerticesData(VertexBuffer.PositionKind);
+  const crown = radius - 0.12;
+  for (let i = 0; i < positions.length; i += 3) {
+    const radial = Math.hypot(positions[i], positions[i + 2]);
+    if (radial >= crown) continue;
+    const y = positions[i + 1];
+    const blend = smoothstep(crown * 0.62, crown, radial);
+    positions[i + 1] = y + (top - y) * (1 - blend);
+  }
+  body.setVerticesData(VertexBuffer.PositionKind, positions);
+  faceOutward(body, new Vector3(0, (top + bottom) / 2, 0));
+  smoothNormals(body);
+
+  const core = hexToColor3("#ff36e7");
+  const rim = hexToColor3("#e21496");
+  const deep = hexToColor3("#c01078");
+  const hot = hexToColor3("#ff62ee");
+  setColors(body, (x, y, z) => {
+    const radial = Math.min(1, Math.hypot(x, z) / radius);
+    const up = smoothstep(bottom, top, y);
+    const tone = mix(deep, mix(rim, core, up), 0.35 + 0.65 * (1 - radial));
+    return mix(tone, hot, (1 - radial) * (1 - radial) * up * 0.55);
+  });
+
+  return {
+    body,
+    face: [],
+    top,
+    bottom,
+    footprint: footprintFor(spec),
+    deform: { bx: 0.26, bz: 0.26, from: 0 },
+    surface: { roughness: 0.32, coat: 0.65 },
+  };
+}
+
 const BLOCK_COLORS = ["#e94b5a", "#3f86e0", "#45b86a", "#f6c12f", "#ff8a3d", "#9a63d8", "#ff7fb0", "#2cb9b0"];
 const BLOCK_TILES = 16;
 
@@ -503,7 +679,7 @@ function blockAtlas(scene) {
   });
 }
 
-/** A tower of wooden ABC blocks rising out of the lava. The top block is solid ground: it doesn't squish. */
+/** A short stack of wooden ABC blocks. The top block is solid ground: it doesn't squish. */
 function toyBlocks(scene, spec) {
   const size = spec.size ?? 1.9;
   const random = mulberry32(spec.seed ?? 77);
@@ -515,7 +691,8 @@ function toyBlocks(scene, spec) {
   };
   const blocks = [];
   let y = PAD_TOP;
-  for (let level = 0; level < 4; level += 1) {
+  // Two blocks stay in the air under this pad. A taller tower reaches the loop below.
+  for (let level = 0; level < 2; level += 1) {
     const edge = level === 0 ? size : size * (0.88 + random() * 0.2);
     const faceUV = Array.from({ length: 6 }, () => tileUV(Math.floor(random() * BLOCK_TILES)));
     const block = MeshBuilder.CreateBox(`${spec.id}-block${level}`, { size: edge, faceUV, wrap: true }, scene);
@@ -531,6 +708,7 @@ function toyBlocks(scene, spec) {
   }
   const mesh = Mesh.MergeMeshes(blocks, true, true);
   mesh.name = spec.id;
+  const collider = colliderFromMesh(mesh, "box");
   return {
     mesh,
     hard: true,
@@ -538,6 +716,8 @@ function toyBlocks(scene, spec) {
     bottom: PAD_TOP - size,
     colliderDepth: PAD_TOP - y,
     footprint: footprintFor(spec),
+    solid: collider.solid,
+    hull: collider.points,
   };
 }
 

@@ -142,6 +142,29 @@ const DRAWERS = {
     ctx.ellipse(w * 0.53, h * 0.615, w * 0.025, h * 0.035, 0, 0, Math.PI * 2);
     ctx.fill();
   },
+  scream(ctx, w, h) {
+    for (const x of [0.37, 0.63]) {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.ellipse(w * x, h * 0.39, w * 0.072, h * 0.105, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = w * 0.012;
+      ctx.stroke();
+      ovalEye(ctx, w * x, h * 0.4, w * 0.026, h * 0.042);
+    }
+    ctx.fillStyle = "#6e1f2a";
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h * 0.68, w * 0.1, h * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = w * 0.014;
+    ctx.stroke();
+    ctx.fillStyle = "#ff8fa3";
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h * 0.73, w * 0.05, h * 0.04, 0, 0, Math.PI * 2);
+    ctx.fill();
+  },
   surprised(ctx, w, h) {
     for (const x of [0.37, 0.63]) {
       ctx.fillStyle = "#ffffff";

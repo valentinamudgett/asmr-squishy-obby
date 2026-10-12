@@ -18,6 +18,11 @@
       <div class="stats">
         <p><span>Level</span> <strong id="level">1</strong></p>
         <p><span>Best</span> <strong id="best">1</strong></p>
+        <p id="coin-stat">
+          <span class="coin-name" data-i18n="hud.coins">Coins</span>
+          <span class="coin-glyph" aria-hidden="true"></span>
+          <strong id="coins">0</strong>
+        </p>
         <p><span>Height</span> <strong id="height">0 m</strong></p>
         <p><span>Time</span> <strong id="time">0.00</strong></p>
         <p><span>Falls</span> <strong id="falls">0</strong></p>
@@ -85,6 +90,37 @@
           </div>
         </fieldset>
 
+        <fieldset class="background-picker">
+          <legend data-i18n="start.backgroundLabel">Choose your background</legend>
+          <div class="background-options">
+            <button type="button" data-background="hollywood" aria-pressed="true">
+              <span class="background-preview background-preview-hollywood" aria-hidden="true">
+                <span class="preview-ocean"></span>
+                <span class="preview-skyline"></span>
+                <span class="preview-palm preview-palm-left"></span>
+                <span class="preview-palm preview-palm-right"></span>
+                <span class="preview-sign">HOLLYWOOD</span>
+              </span>
+              <strong data-i18n="background.hollywood">Hollywood</strong>
+              <small data-i18n="background.hollywoodHint">Sunset ocean</small>
+            </button>
+            <button type="button" data-background="newyork" aria-pressed="false">
+              <span class="background-preview background-preview-newyork" aria-hidden="true"></span>
+              <strong data-i18n="background.newyork">New York</strong>
+              <small data-i18n="background.newyorkHint">Night skyline</small>
+            </button>
+            <button type="button" data-background="lava" aria-pressed="false">
+              <span class="background-preview background-preview-lava" aria-hidden="true">
+                <span class="preview-bubble preview-bubble-a"></span>
+                <span class="preview-bubble preview-bubble-b"></span>
+                <span class="preview-bubble preview-bubble-c"></span>
+              </span>
+              <strong data-i18n="background.lava">Lava</strong>
+              <small data-i18n="background.lavaHint">Bubbling sea</small>
+            </button>
+          </div>
+        </fieldset>
+
         <div class="start-actions">
           <button id="start-avatar" class="secondary-action" type="button">
             <span aria-hidden="true">🎀</span>
@@ -135,7 +171,13 @@
             <p class="eyebrow">Saved on this browser</p>
             <h2 id="settings-title">Character studio</h2>
           </div>
-          <button id="settings-close" type="button">Close</button>
+          <div class="sheet-tools">
+            <button id="settings-menu" type="button">
+              <span aria-hidden="true">⌂</span>
+              <span data-i18n="studio.mainMenu">Main menu</span>
+            </button>
+            <button id="settings-close" type="button">Close</button>
+          </div>
         </header>
         <canvas id="preview" width="480" height="320" aria-label="Live avatar preview"></canvas>
         <p class="label">Starter looks</p>
@@ -157,8 +199,13 @@
         <div id="outfits" class="tiles" role="group" aria-labelledby="outfit-label"></div>
         <p class="label" id="skin-label">Skin tone</p>
         <div id="skin-swatches" class="row" role="group" aria-labelledby="skin-label"></div>
-        <p class="label">Accessory</p>
-        <button id="bow" type="button" class="toggle" aria-pressed="false">Bow off</button>
+        <p class="label" data-i18n="studio.accessory">Accessories</p>
+        <div id="accessories" class="row">
+          <button id="bow" type="button" class="toggle" aria-pressed="false">Bow off</button>
+          <button id="necklace" type="button" class="toggle" aria-pressed="false">Necklace off</button>
+          <button id="headband" type="button" class="toggle" aria-pressed="false">Headband off</button>
+          <button id="bracelet" type="button" class="toggle" aria-pressed="false">Bracelet off</button>
+        </div>
         <p class="label" id="dance-label" data-i18n="studio.dance">Level-up dance</p>
         <div id="dances" class="segment" role="group" aria-labelledby="dance-label"></div>
         <p class="note" data-i18n="studio.danceNote">Your avatar does this dance when you reach a new level.</p>
@@ -173,9 +220,17 @@
 
     <div id="boot">
       <div class="boot-card">
-        <p class="eyebrow">ASMR squishy obby</p>
-        <h2>Warming the mochi</h2>
-        <p id="boot-status">Inflating the pads…</p>
+        <p id="boot-status" class="boot-title" data-i18n="boot.title">Loading...</p>
+        <div
+          id="boot-bar"
+          class="boot-bar"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="boot-fill" class="boot-fill"></div>
+        </div>
       </div>
     </div>
 

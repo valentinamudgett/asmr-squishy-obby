@@ -15,10 +15,11 @@ The dev server listens on `0.0.0.0` port **41723**.
 
 ## Play
 
-- Desktop: WASD or the arrow keys to move, Space to jump. Drag to look around, scroll to zoom.
-- Touch: the stick on the left moves you, Jump is on the right, and dragging the course looks around.
+- Desktop: WASD or the arrow keys to move, Space to jump. Press Space again in the air to jump higher and farther — the avatar does a random front flip, back flip, or spin. Drag to look around, scroll to zoom.
+- Touch: the stick on the left moves you, Jump is on the right, and tapping Jump again in the air does the second jump. Dragging the course looks around.
 - The course is generated as you go, with a new layout on every visit. Every 8th pad is a gold checkpoint dumpling with the level number on its flag. Touching it starts the next level and becomes your respawn point.
 - The course trends upward, roughly 2 to 4 meters per level. The lava rises behind you, so it's always bubbling a few meters under the pads near you.
+- From level 50 the climb goes into the clouds. They start under the course and thicken as you go higher, until the sea and skyline fade out and you're up in a bright cloud layer.
 - Lava or a hazard counts as a fall and puts you back on the last safe platform you stood on. A glowing arrow on its floor points to the next squishy, and a "Keep going!" message pops up.
 - Green dumplings are springs. They launch you a big step up to the next squishy.
 - Difficulty ramps up over the first 10 levels, then stays at its hardest:
@@ -27,7 +28,7 @@ The dev server listens on `0.0.0.0` port **41723**.
   - From level 3, some pads bob up and down, and candy-striped bars sweep across wide pads.
   - From level 4, fireballs leap out of the lava between pads. A glowing ring on the lava warns you just before one launches.
   - From level 5, spiky gummies orbit some pads.
-  - On Easy there are no sweeping bars or spiky gummies. Medium and Hard have both.
+  - On Easy there are no sweeping bars, spiky gummies, or lava balls. Medium and Hard have all three.
 - Every gap is checked against the real jump physics, so every pad can be reached.
 - The HUD shows your level, your best level (saved in this browser), how high you've climbed, the run time, and falls.
 - The gear opens the character studio.
