@@ -78,7 +78,12 @@ export function createGuideArrow(scene) {
       const dz = to.mesh.position.z - from.mesh.position.z;
       const angle = Math.atan2(dx, dz);
       root.rotation.y = angle;
-      const edgeDistance = distanceToEdge(from.footprint, Math.sin(angle), Math.cos(angle));
+      const yaw = from.meshYaw ?? 0;
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      const dirX = Math.sin(angle);
+      const dirZ = Math.cos(angle);
+      const edgeDistance = distanceToEdge(from.footprint, dirX * c - dirZ * s, dirX * s + dirZ * c);
       start = edgeDistance > 1 ? 0.3 : 0.1;
       length = Math.max(0.5, Math.min(1.5, edgeDistance - start - 0.12));
       slide.scaling.set(Math.min(1, length / 0.9), 1, length);

@@ -15,8 +15,10 @@ import {
 import HavokPhysics from "@babylonjs/havok";
 import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { createAudio } from "./audio.js";
+import { createLavaPop } from "./boom.js";
+import { awardLevelCoin, createCoinPop, loadCoins } from "./coins.js";
 import { buildAvatar, createPreview } from "./avatar.js";
-import { createCourse, LAVA_Y } from "./course.js";
+import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
 import { drawFace, FACES } from "./faces.js";
 import { DANCES } from "./dances.js";
 import { createGuideArrow } from "./guide.js";
@@ -33,19 +35,26 @@ import {
   SKIN_SWATCHES,
 } from "./look.js";
 import { OUTFITS } from "./outfits.js";
-import { createPlayer, FOOT_OFFSET } from "./player.js";
+import { createMinimap } from "./minimap.js";
+import { createPlayer, FOOT_OFFSET, GRAVITY, STAIR_RUN } from "./player.js";
 import { isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, starsLeft, tryBuy } from "./rewards.js";
 import { createWorld } from "./world.js";
+import { gravityScale, MAX_LEVEL, MOON_LEVEL, SPACE_FULL, ZONES, zoneAt } from "./zones.js";
 import "./style.css";
 
 const canvas = document.querySelector("#view");
 const boot = document.querySelector("#boot");
 const bootStatus = document.querySelector("#boot-status");
+const bootBar = document.querySelector("#boot-bar");
+const bootFill = document.querySelector("#boot-fill");
 const timeEl = document.querySelector("#time");
 const fallsEl = document.querySelector("#falls");
 const levelEl = document.querySelector("#level");
 const heightEl = document.querySelector("#height");
 const bestEl = document.querySelector("#best");
+const coinsEl = document.querySelector("#coins");
+const coins = loadCoins();
+coinsEl.textContent = String(coins.coins);
 const hintEl = document.querySelector("#hint");
 const toastEl = document.querySelector("#toast");
 const debugEl = document.querySelector("#debug");
@@ -54,6 +63,8 @@ const qualityNote = document.querySelector("#quality-note");
 const showDebug = new URLSearchParams(location.search).has("debug");
 const BEST_KEY = "asmr-squishy-obby:best";
 const PLAYER_KEY = "asmr-squishy-obby:player";
+// The night photo stands on the horizon. The usual view looks down at the course, which tucks that skyline into the top bar.
+const NY_AIM_RAISE = 0.9;
 
 const look = loadLook();
 const wallet = loadWallet(look);
@@ -61,21 +72,92 @@ let publishLook = () => {};
 const ui = {
   settingsOpen: false,
   startOpen: true,
+  mapOpen: false,
 };
 
 applyTranslations();
 document.body.classList.add("start-open");
+const bootProgress = createBootProgress();
 bootGame().catch((error) => {
   console.error(error);
-  bootStatus.textContent = "The course could not start. Refresh and try again.";
+  bootProgress.fail();
+  bootStatus.textContent = t("boot.error");
   boot.hidden = false;
+  boot.classList.remove("is-done");
 });
 
+/**
+ * Drives the loading bar. The shown value only ever grows: each stage sets a
+ * target and the bar creeps toward (but never past) it so long awaits do not
+ * look frozen. Resolves `finish()` once the bar has visibly reached 100%.
+ */
+function createBootProgress() {
+  const CREEP_RATE = 0.4;
+  const CREEP_HEADROOM = 0.14;
+  let target = 0;
+  let shown = 0;
+  let last = performance.now();
+  let frame = 0;
+  bootBar.setAttribute("aria-label", t("boot.title"));
+
+  const paint = () => {
+    bootFill.style.width = `${(shown * 100).toFixed(2)}%`;
+    bootBar.setAttribute("aria-valuenow", String(Math.round(shown * 100)));
+  };
+
+  // While waiting on a stage, ease a little past it (never near 100%) so the bar is never frozen.
+  const ceiling = () => (target >= 1 ? 1 : Math.min(0.99, target + CREEP_HEADROOM));
+
+  const tick = (now) => {
+    const dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    const room = ceiling() - shown;
+    shown = Math.max(shown, shown + room * Math.min(1, CREEP_RATE * dt));
+    paint();
+    frame = room > 0.001 ? requestAnimationFrame(tick) : 0;
+  };
+
+  const set = (fraction) => {
+    target = Math.max(target, Math.min(1, fraction));
+    shown = Math.max(shown, target);
+    paint();
+    last = performance.now();
+    if (!frame && shown < ceiling()) frame = requestAnimationFrame(tick);
+  };
+
+  return {
+    set,
+    finish() {
+      set(1);
+      return new Promise((resolve) => {
+        const done = () => {
+          bootFill.removeEventListener("transitionend", done);
+          resolve();
+        };
+        bootFill.addEventListener("transitionend", done);
+        setTimeout(done, 450);
+      });
+    },
+    fail() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    },
+  };
+}
+
+async function hideBoot() {
+  await bootProgress.finish();
+  boot.classList.add("is-done");
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  boot.hidden = true;
+}
+
 async function bootGame() {
-  bootStatus.textContent = "Inflating the pads…";
+  bootProgress.set(0.04);
   const engine = await createEngine(canvas);
   fit(engine);
   const scene = new Scene(engine);
+  bootProgress.set(0.1);
   scene.clearColor = new Color4(0.35, 0.12, 0.14, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
   scene.fogStart = 40;
@@ -88,12 +170,15 @@ async function bootGame() {
   });
   const plugin = new HavokPlugin(true, havok);
   scene.enablePhysics(new Vector3(0, -24, 0), plugin);
+  bootProgress.set(0.3);
 
   const world = createWorld(scene, LAVA_Y);
+  bootProgress.set(0.5);
   const audio = await createAudio();
+  bootProgress.set(0.7);
   let graphics = null;
   let best = loadBest();
-  const course = createCourse(scene, {
+  const courseHooks = {
     onAdd(pad) {
       audio.attachPad(pad).catch((error) => console.warn("Pad sound failed", error));
       graphics?.addPad(pad);
@@ -101,11 +186,18 @@ async function bootGame() {
     onRemove(pad) {
       audio.detachPad(pad);
       graphics?.removePad(pad);
+      if (pad.flight) graphics?.removeStair(pad.flight);
     },
-  }, best);
+    onStair(flight) {
+      graphics?.addStair(flight);
+    },
+  };
+  // Replaying an earlier level from the map swaps in a new course.
+  let course = createCourse(scene, courseHooks, best);
 
   const avatar = buildAvatar(scene);
   avatar.apply(look);
+  bootProgress.set(0.85);
 
   const spawn = course.standOn(course.start, FOOT_OFFSET);
   let checkpointPad = course.start;
@@ -120,17 +212,30 @@ async function bootGame() {
     onJump: (pad) => {
       pad.kick(pad.kind === "spring" ? 0.38 : 0.22);
     },
-  });
+  }, course.start.heading ?? 0);
   audio.attachListener(player.camera);
   graphics = createGraphics(scene, player.camera, world);
   for (const mesh of avatar.parts) graphics.shadow.addShadowCaster(mesh, true);
   for (const pad of course.pads) graphics.addPad(pad);
+  for (const flight of course.flights) graphics.addStair(flight);
   graphics.apply(look.quality);
 
   const preview = createPreview(document.querySelector("#preview"));
   preview.avatar.apply(look);
-  bindSettings(preview, graphics, avatar);
-  bindStartMenu(best, (difficulty) => course.setDifficulty(difficulty));
+  bootProgress.set(0.92);
+  const syncMenuMusic = () => audio.setMenuMusic(ui.startOpen || ui.settingsOpen);
+  bindSettings(preview, graphics, avatar, syncMenuMusic);
+  const closeMenu = bindStartMenu(best, () => minimap.open(), syncMenuMusic);
+  const minimap = createMinimap({
+    onPick(level) {
+      startAtLevel(level);
+      closeMenu();
+    },
+    onToggle(open) {
+      ui.mapOpen = open;
+    },
+  });
+  syncMenuMusic();
   bindShop(best, () => publishLook());
   bindTouch(player);
 
@@ -143,11 +248,55 @@ async function bootGame() {
   let nextToast = null;
   let lastSafePad = course.start;
   const guide = createGuideArrow(scene);
+  const pop = createLavaPop(scene, avatar);
+  const coinPop = createCoinPop(scene, player.camera);
+  let meltHome = null;
+  let gravityNow = 1;
+  const setGravity = (level) => {
+    const scale = gravityScale(level);
+    if (scale === gravityNow) return;
+    gravityNow = scale;
+    player.setGravityScale(scale);
+    scene.getPhysicsEngine()?.setGravity(new Vector3(0, GRAVITY * scale, 0));
+  };
+  const sendHome = (home) => {
+    course.restoreStairs();
+    const spot = course.standOn(home, FOOT_OFFSET);
+    avatar.stopDance();
+    setGravity(home.level ?? checkpointPad.level);
+    player.respawn(spot, home.heading ?? 0);
+    pop.place({ x: spot.x, y: spot.y - FOOT_OFFSET, z: spot.z });
+    const next = home.flight?.steps[0] ?? course.pads.find((pad) => pad.index > home.index);
+    if (next) guide.show(home, next);
+  };
+  /** Rebuilds the course from `level`. Best, stars, and coins only ever go up, so a replay can't lower them. */
+  const startAtLevel = (level) => {
+    course.dispose();
+    course = createCourse(scene, courseHooks, level);
+    if (showDebug) window.__obby.course = course;
+    checkpointPad = course.start;
+    lastSafePad = course.start;
+    meltHome = null;
+    started = false;
+    elapsed = 0;
+    falls = 0;
+    fallLock = 0.6;
+    guide.hide();
+    world.reset();
+    const spot = course.standOn(course.start, FOOT_OFFSET);
+    avatar.stopDance();
+    setGravity(course.start.level);
+    player.respawn(spot, course.start.heading ?? 0);
+    levelEl.textContent = String(course.start.level);
+    showToast(fmtLevel(course.start.level));
+    toastTimer = 1.6;
+    nextToast = t(zoneAt(course.start.level).nameKey);
+  };
   let hintTimer = 9;
   let clock = 0;
   levelEl.textContent = String(course.start.level);
   bestEl.textContent = String(best);
-  if (showDebug) window.__obby = { scene, course, player, world };
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, startAtLevel };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -171,12 +320,18 @@ async function bootGame() {
     }
     clock += dt;
     fallLock = Math.max(0, fallLock - dt);
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing;
+    if (pop.active) player.easeFall(pop.phase === "boom" ? 0 : 0.5);
+    const allowInput = !ui.settingsOpen && !ui.startOpen && !ui.mapOpen && !avatar.dancing && !pop.active;
     const frame = player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
-    course.update(clock, dt, { standing, playerZ: frame.position.z, keepFrom: checkpointPad.index });
-    world.update(clock, dt, frame.position, course.lava.y);
-    graphics.update(clock);
+    if (standing) setGravity(standing.level ?? checkpointPad.level);
+    course.update(clock, dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
+    const here = frame.pad ?? lastSafePad;
+    const cover = world.update(clock, dt, frame.position, course.lava.y, (here.index ?? checkpointPad.index) / PADS_PER_LEVEL + 1);
+    graphics.update(clock, cover, world.space);
+    // The night skyline stands on the horizon, so tip the view up enough to see it.
+    player.setAimRaise(NY_AIM_RAISE * world.mix.city * (1 - Math.min(1, world.mix.cloud * 1.6)));
+    minimap.setLevel(here.level ?? checkpointPad.level, best, clock);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
       x: frame.foot.x,
@@ -186,40 +341,72 @@ async function bootGame() {
       facing: frame.facing,
       faceAngle: Math.atan2(player.camera.position.x - frame.foot.x, player.camera.position.z - frame.foot.z),
       airborne: frame.airborne,
-      moving: frame.speed > 0.4,
+      trick: frame.trick,
+      trickP: frame.trickP,
+      // Input, not speed: a moving pad or a landing slide carries the body without any steps.
+      moving: frame.walking,
+      stride: frame.onStair ? STAIR_RUN : 1,
       time: clock,
     });
+
+    const lavaCue = pop.tick(dt, frame.foot, course.lava.y);
+    if (lavaCue === "boom") audio.boom();
+    if (lavaCue === "done" && meltHome) {
+      const home = meltHome.removed ? checkpointPad : meltHome;
+      meltHome = null;
+      sendHome(home);
+      fallLock = 0.6;
+    }
 
     graphics.sun.position.set(frame.position.x + 8, frame.position.y + 18, frame.position.z - 6);
     graphics.sun.setDirectionToTarget(frame.position);
 
     const startDx = frame.foot.x - course.start.mesh.position.x;
     const startDz = frame.foot.z - course.start.mesh.position.z;
-    const leftStart = Math.hypot(startDx, startDz) > course.start.walkRadius * 0.98;
+    const startReach = course.start.solid?.r ?? course.start.walkRadius;
+    const leftStart = Math.hypot(startDx, startDz) > startReach * 0.98;
     if (!started && (leftStart || frame.jumped)) {
       started = true;
       startMs = performance.now();
     }
     if (started) elapsed = (performance.now() - startMs) / 1000;
 
-    if (frame.grounded && frame.pad && isSafe(frame.pad)) lastSafePad = frame.pad;
+    if (frame.grounded && frame.pad && frame.pad.index < checkpointPad.index && !pop.active && fallLock <= 0) {
+      falls += 1;
+      fallLock = 0.6;
+      lastSafePad = checkpointPad;
+      sendHome(checkpointPad);
+      showToast(t("toast.backToLevel"));
+      toastTimer = 1.4;
+      nextToast = t("toast.keepGoing");
+    } else if (frame.grounded && frame.pad && isSafe(frame.pad)) {
+      lastSafePad = frame.pad;
+    }
     if (frame.grounded && frame.pad && guide.pad && frame.pad !== guide.pad) guide.hide();
 
-    if (fallLock <= 0) {
-      const burned = frame.foot.y < course.lava.y + 0.15;
+    if (!pop.active && fallLock <= 0) {
+      const burned = frame.foot.y < course.lava.y + 0.15 || course.lavaBurn(frame.position);
       const bonked = !burned && course.hazardHit(frame.position);
       if (burned || bonked) {
-        falls += 1;
-        fallLock = 0.6;
         const home = lastSafePad.removed ? checkpointPad : lastSafePad;
-        // The pad may be moving, so ask for its current top.
-        avatar.stopDance();
-        player.respawn(course.standOn(home, FOOT_OFFSET));
-        const next = course.pads.find((pad) => pad.index === home.index + 1);
-        if (next) guide.show(home, next);
-        showToast(burned ? t("toast.tooHot") : t("toast.ouch"));
-        toastTimer = 0.9;
-        nextToast = t("toast.keepGoing");
+        if (burned && pop.begin()) {
+          falls += 1;
+          meltHome = home;
+          avatar.stopDance();
+          audio.scream();
+          audio.setWalking(false);
+          showToast(t(fallToastKey(checkpointPad.level)));
+          toastTimer = 1.6;
+          nextToast = t("toast.keepGoing");
+        } else if (!burned) {
+          falls += 1;
+          fallLock = 0.6;
+          // The pad may be moving, so ask for its current top.
+          sendHome(home);
+          showToast(t("toast.ouch"));
+          toastTimer = 0.9;
+          nextToast = t("toast.keepGoing");
+        }
       }
     }
     guide.update(dt, clock);
@@ -233,9 +420,13 @@ async function bootGame() {
         saveBest(best);
       }
       avatar.dance(look.dance);
-      showToast(`Level ${frame.pad.level}`);
+      showToast(fmtLevel(frame.pad.level));
       toastTimer = 1.6;
-      nextToast = null;
+      nextToast = milestoneToast(frame.pad.level);
+      if (awardLevelCoin(coins, frame.pad.level)) {
+        coinsEl.textContent = String(coins.coins);
+        coinPop.burst(frame.position);
+      }
     }
 
     if (hintTimer > 0) {
@@ -273,10 +464,16 @@ async function bootGame() {
       ].join("\n");
     }
 
+    coinPop.tick(dt, frame.position);
     scene.render();
   });
 
-  boot.hidden = true;
+  // Let the first frame's shaders/textures settle, but never hold the screen hostage.
+  await new Promise((resolve) => {
+    scene.executeWhenReady(resolve);
+    setTimeout(resolve, 3000);
+  });
+  await hideBoot();
 
   function showToast(text) {
     toastEl.textContent = text;
@@ -284,31 +481,39 @@ async function bootGame() {
   }
 }
 
-function bindStartMenu(best, onDifficulty) {
+function fmtLevel(level) {
+  return t("toast.level").replace("{level}", String(level));
+}
+
+/** Big moments first, then the name of a zone on its first level. */
+function milestoneToast(level) {
+  if (level === MAX_LEVEL) return t("toast.finish");
+  if (level === MOON_LEVEL) return t("toast.moon");
+  if (level === SPACE_FULL) return t("toast.space");
+  const zone = ZONES.find((entry) => entry.from === level && entry.from > 1);
+  return zone ? t(zone.nameKey) : null;
+}
+
+/** Lava below the caves; water, sky, or space everywhere else. */
+function fallToastKey(level) {
+  const zone = zoneAt(level).id;
+  if (zone === "core" || zone === "crust") return "toast.tooHot";
+  if (zone === "ocean" || zone === "city") return "toast.splash";
+  return "toast.whoops";
+}
+
+/** Returns `closeMenu`, which also runs when a level is picked from the map. */
+function bindStartMenu(best, onPickLevel, syncMenuMusic) {
   const menu = document.querySelector("#start-menu");
   const playButton = document.querySelector("#start-play");
   const avatarButton = document.querySelector("#start-avatar");
+  const pickButton = document.querySelector("#start-pick");
   const nameInput = document.querySelector("#player-name");
-  const difficultyButtons = [...menu.querySelectorAll("[data-difficulty]")];
   const preferences = loadPlayerPreferences();
 
   nameInput.value = preferences.name;
   document.querySelector("#menu-best").textContent = String(best);
   document.querySelector("#menu-stars").textContent = String(starsLeft(best, wallet));
-
-  const selectDifficulty = (difficulty) => {
-    preferences.difficulty = difficulty;
-    onDifficulty(difficulty);
-    difficultyButtons.forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.difficulty === difficulty));
-    });
-    savePlayerPreferences(preferences);
-  };
-
-  difficultyButtons.forEach((button) => {
-    button.addEventListener("click", () => selectDifficulty(button.dataset.difficulty));
-  });
-  selectDifficulty(preferences.difficulty);
 
   nameInput.addEventListener("input", () => {
     preferences.name = nameInput.value.trimStart();
@@ -318,8 +523,10 @@ function bindStartMenu(best, onDifficulty) {
   avatarButton.addEventListener("click", () => {
     document.querySelector("#settings-open").click();
   });
+  pickButton.addEventListener("click", onPickLevel);
 
-  playButton.addEventListener("click", () => {
+  const closeMenu = () => {
+    if (!ui.startOpen) return;
     preferences.name = nameInput.value.trim() || "Player";
     nameInput.value = preferences.name;
     savePlayerPreferences(preferences);
@@ -328,20 +535,20 @@ function bindStartMenu(best, onDifficulty) {
     document.querySelector("#shop").hidden = true;
     document.body.classList.remove("start-open");
     document.querySelector("#view").focus();
-  });
+    syncMenuMusic();
+  };
+  playButton.addEventListener("click", closeMenu);
 
   window.__obbyPreferences = preferences;
+  return closeMenu;
 }
 
 function loadPlayerPreferences() {
   try {
     const stored = JSON.parse(localStorage.getItem(PLAYER_KEY) ?? "{}");
-    return {
-      name: typeof stored.name === "string" ? stored.name.slice(0, 18) : "",
-      difficulty: ["easy", "medium", "hard"].includes(stored.difficulty) ? stored.difficulty : "easy",
-    };
+    return { name: typeof stored.name === "string" ? stored.name.slice(0, 18) : "" };
   } catch {
-    return { name: "", difficulty: "easy" };
+    return { name: "" };
   }
 }
 
@@ -355,6 +562,7 @@ function savePlayerPreferences(preferences) {
 
 /** A platform you can be dropped back onto: no spring launch and nothing spinning or orbiting on it. */
 function isSafe(pad) {
+  if (pad.stair) return false;
   return pad.kind !== "spring" && !pad.hazards.some((hazard) => hazard.kind !== "fireball");
 }
 
@@ -374,9 +582,10 @@ function saveBest(level) {
   }
 }
 
-function bindSettings(preview, graphics, avatar) {
+function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   const openButton = document.querySelector("#settings-open");
   const closeButton = document.querySelector("#settings-close");
+  const menuButton = document.querySelector("#settings-menu");
   const backdrop = document.querySelector("#settings-backdrop");
   const hairInput = document.querySelector("#hair-color");
   const hairBox = document.querySelector("#hair-swatches");
@@ -389,6 +598,9 @@ function bindSettings(preview, graphics, avatar) {
   const faceBox = document.querySelector("#faces");
   const outfitBox = document.querySelector("#outfits");
   const bowButton = document.querySelector("#bow");
+  const necklaceButton = document.querySelector("#necklace");
+  const headbandButton = document.querySelector("#headband");
+  const braceletButton = document.querySelector("#bracelet");
   const qualityBox = document.querySelector("#quality");
 
   const makeButton = (className, onClick) => {
@@ -505,6 +717,16 @@ function bindSettings(preview, graphics, avatar) {
     look.bow = !look.bow;
     publish();
   });
+  for (const [button, key] of [
+    [necklaceButton, "necklace"],
+    [headbandButton, "headband"],
+    [braceletButton, "bracelet"],
+  ]) {
+    button.addEventListener("click", () => {
+      look[key] = !look[key];
+      publish();
+    });
+  }
   qualityBox.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
@@ -523,13 +745,27 @@ function bindSettings(preview, graphics, avatar) {
       preview.stop();
       (ui.startOpen ? document.querySelector("#start-avatar") : openButton).focus();
     }
+    syncMenuMusic();
   };
   openButton.addEventListener("click", () => setOpen(true));
   closeButton.addEventListener("click", () => setOpen(false));
+  menuButton.addEventListener("click", () => {
+    ui.startOpen = true;
+    document.querySelector("#start-menu").hidden = false;
+    document.body.classList.add("start-open");
+    setOpen(false);
+    document.querySelector("#start-play").focus();
+  });
   backdrop.addEventListener("click", () => setOpen(false));
   window.addEventListener("keydown", (event) => {
     if (event.code === "Escape" && ui.settingsOpen) setOpen(false);
   });
+  const accessoryLabel = (key, on) => {
+    if (key === "necklace") return t(on ? "accessory.necklaceOn" : "accessory.necklaceOff");
+    if (key === "headband") return t(on ? "accessory.headbandOn" : "accessory.headbandOff");
+    return t(on ? "accessory.braceletOn" : "accessory.braceletOff");
+  };
+
   publish();
 
   function publish() {
@@ -580,7 +816,15 @@ function bindSettings(preview, graphics, avatar) {
     bowButton.disabled = !bowOwned;
     bowButton.title = bowOwned ? "" : lockTitle("extra", "bow");
     bowButton.setAttribute("aria-pressed", String(look.bow));
-    bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${priceOf("extra:bow")} ⭐`;
+    bowButton.textContent = bowOwned ? t(look.bow ? "accessory.bowOn" : "accessory.bowOff") : `${t("shop.bow")} · ${priceOf("extra:bow")} ⭐`;
+    for (const [button, key] of [
+      [necklaceButton, "necklace"],
+      [headbandButton, "headband"],
+      [braceletButton, "bracelet"],
+    ]) {
+      button.setAttribute("aria-pressed", String(Boolean(look[key])));
+      button.textContent = accessoryLabel(key, Boolean(look[key]));
+    }
     document.querySelectorAll("#quality button").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.quality === look.quality));
     });
@@ -813,6 +1057,13 @@ function createGraphics(scene, camera, world) {
   pipeline.grain.intensity = 9;
 
   const casters = (pad) => [pad.mesh, ...pad.hazards.flatMap((hazard) => hazard.meshes)];
+  const sunWarm = sun.diffuse.clone();
+  const sunCloud = new Color3(0.93, 0.96, 1);
+  const vignetteWarm = imaging.vignetteColor.clone();
+  const vignetteCloud = new Color4(0.5, 0.68, 0.88, 0);
+  const vignetteSpace = new Color4(0.02, 0.03, 0.1, 0);
+  const vignetteHold = new Color4();
+  const sunSpace = new Color3(1, 1, 1);
 
   return {
     sun,
@@ -824,9 +1075,26 @@ function createGraphics(scene, camera, world) {
     removePad(pad) {
       for (const mesh of casters(pad)) shadow.removeShadowCaster(mesh, true);
     },
-    update(time) {
-      // Bloom breathes a little with the lava.
-      if (pipeline.bloomEnabled) pipeline.bloomWeight = 0.34 + Math.sin(time * 1.3) * 0.04;
+    addStair(flight) {
+      for (const mesh of flight.meshes) shadow.addShadowCaster(mesh, true);
+    },
+    removeStair(flight) {
+      for (const mesh of flight.meshes) shadow.removeShadowCaster(mesh, true);
+    },
+    update(time, cover = 0, space = 0) {
+      // Bloom breathes a little with the lava, then settles brighter in the clouds.
+      if (pipeline.bloomEnabled) {
+        pipeline.bloomWeight = 0.34 + Math.sin(time * 1.3) * 0.04 * (1 - cover * 0.5) + cover * 0.05;
+      }
+      // Above the air, sunlight is whiter and harder, with crisper shadows.
+      Color3.LerpToRef(sunWarm, sunCloud, cover, sun.diffuse);
+      Color3.LerpToRef(sun.diffuse, sunSpace, space, sun.diffuse);
+      sun.intensity = 1.35 - cover * 0.08 + space * 0.3;
+      Color4.LerpToRef(vignetteWarm, vignetteCloud, cover, vignetteHold);
+      Color4.LerpToRef(vignetteHold, vignetteSpace, space, vignetteHold);
+      imaging.vignetteColor.copyFrom(vignetteHold);
+      imaging.vignetteWeight = 0.85 - cover * 0.28 + space * 0.2;
+      shadow.darkness = 0.3 - cover * 0.08 + space * 0.15;
     },
     apply(quality) {
       const high = quality !== "low";
@@ -894,7 +1162,5 @@ function formatTime(seconds) {
 
 function hintCopy() {
   const coarse = window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("show-touch");
-  return coarse
-    ? "Drag the stick to run. Jump is on the right. Drag the course to look."
-    : "WASD or arrows to run. Space to jump. Drag to look.";
+  return coarse ? t("hint.touch") : t("hint.keys");
 }

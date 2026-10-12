@@ -114,7 +114,7 @@ export const OUTFITS = [
   {
     id: "buns",
     label: t("outfit.buns"),
-    swatch: ["#e6e2dc", "#c9a36a"],
+    swatch: ["#eceae4", "#d2b48c"],
     torso: "#eceae4",
     overlay: "tank",
     sleeve: "skin",
@@ -573,15 +573,15 @@ function paintRest(ctx, size, overlay) {
     ctx.fillStyle = ctx.createPattern(swatch, "repeat");
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(size * 0.36, 0);
-    ctx.lineTo(size * 0.16, size);
+    ctx.lineTo(size * 0.42, 0);
+    ctx.lineTo(size * 0.28, size);
     ctx.lineTo(0, size);
     ctx.closePath();
     ctx.fill();
     ctx.beginPath();
     ctx.moveTo(size, 0);
-    ctx.lineTo(size * 0.64, 0);
-    ctx.lineTo(size * 0.84, size);
+    ctx.lineTo(size * 0.58, 0);
+    ctx.lineTo(size * 0.72, size);
     ctx.lineTo(size, size);
     ctx.closePath();
     ctx.fill();

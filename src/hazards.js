@@ -3,6 +3,7 @@ import {
   DynamicTexture,
   Mesh,
   MeshBuilder,
+  PointLight,
   Quaternion,
   StandardMaterial,
   TransformNode,
@@ -75,7 +76,8 @@ function fireMaterial(scene, name, core) {
 /** A striped candy bar spinning just above the pad top. Jump it as it sweeps past. */
 export function createSweeper(scene, pad, difficulty, random) {
   const height = pad.thickness + 0.4;
-  const length = 2 * (pad.walkRadius + 0.45);
+  const reach = pad.solid?.type === "circle" ? pad.solid.r : pad.walkRadius;
+  const length = 2 * (reach + 0.45);
   const node = new TransformNode(`${pad.id}-sweeper`, scene);
   node.parent = pad.mesh;
   node.position.y = height;
@@ -102,8 +104,9 @@ export function createSweeper(scene, pad, difficulty, random) {
       if (p.y - CORE - RADIUS > barY + 0.1 - GRACE || p.y + CORE + RADIUS < barY - 0.1) return false;
       const dx = p.x - pad.mesh.position.x;
       const dz = p.z - pad.mesh.position.z;
-      const dirX = Math.cos(angle);
-      const dirZ = -Math.sin(angle);
+      const yaw = angle + (pad.meshYaw ?? 0);
+      const dirX = Math.cos(yaw);
+      const dirZ = -Math.sin(yaw);
       const half = length / 2;
       const t = Math.max(-half, Math.min(half, dx * dirX + dz * dirZ));
       const ex = dx - t * dirX;
@@ -141,7 +144,10 @@ export function createSpikes(scene, pad, difficulty, random) {
   ball.parent = node;
   ball.material = gummyMaterial(scene);
   ball.isPickable = false;
-  const radius = Math.max(0.9, pad.walkRadius * 0.8, (pad.footprint.hz ?? 0) * 0.7);
+  const radius =
+    pad.solid?.type === "circle"
+      ? pad.solid.r * 0.75
+      : Math.max(0.9, pad.walkRadius * 0.8, (pad.footprint.hz ?? 0) * 0.7);
   const height = pad.thickness + 0.45;
   const speed = (1.2 + 1.1 * difficulty) * (random() < 0.5 ? -1 : 1);
   let angle = random() * Math.PI * 2;
@@ -155,10 +161,14 @@ export function createSpikes(scene, pad, difficulty, random) {
       ball.rotation.y += dt * 3;
     },
     hit(p) {
+      const c = Math.cos(pad.meshYaw ?? 0);
+      const s = Math.sin(pad.meshYaw ?? 0);
+      const lx = node.position.x;
+      const lz = node.position.z;
       world.set(
-        pad.mesh.position.x + node.position.x,
+        pad.mesh.position.x + lx * c + lz * s,
         pad.mesh.position.y + node.position.y,
-        pad.mesh.position.z + node.position.z,
+        pad.mesh.position.z - lx * s + lz * c,
       );
       return capsuleSphereHit(p, world, 0.4);
     },
@@ -222,6 +232,75 @@ export function createFireball(scene, id, position, lava, peakY, difficulty, ran
       return capsuleSphereHit(p, center, 0.38);
     },
     dispose() {
+      node.dispose();
+    },
+  };
+}
+
+/** One red stripe across the disc. It spins with `pad.spinner` and uses the lava-sea death, not a bonk. */
+const LAVA_LINE_WIDTH = 0.92;
+
+function lavaLineMaterial(scene) {
+  return shared(scene, "lavaLine", () => {
+    const material = new StandardMaterial("lavaLine", scene);
+    material.diffuseColor = new Color3(1, 0.16, 0.02);
+    material.emissiveColor = new Color3(1.65, 0.18, 0.02);
+    material.specularColor = Color3.Black();
+    material.disableLighting = true;
+    material.zOffset = -2;
+    return material;
+  });
+}
+
+export function createLavaLine(scene, pad) {
+  const node = new TransformNode(`${pad.id}-lavaLine`, scene);
+  node.parent = pad.spinner ?? pad.mesh;
+  const length = pad.radius * 1.94;
+  const stripe = MeshBuilder.CreateBox(
+    `${pad.id}-lavaStripe`,
+    { width: length, height: 0.24, depth: LAVA_LINE_WIDTH },
+    scene,
+  );
+  stripe.parent = node;
+  stripe.position.y = pad.thickness + 0.14;
+  stripe.material = lavaLineMaterial(scene);
+  stripe.isPickable = false;
+  const glow = new PointLight(`${pad.id}-lavaGlow`, new Vector3(0, 0.45, 0), scene);
+  glow.parent = node;
+  glow.diffuse = new Color3(1, 0.28, 0.04);
+  glow.specular = new Color3(1, 0.16, 0.02);
+  glow.intensity = 1.15;
+  glow.range = 4.2;
+  const half = length / 2;
+  const reach = LAVA_LINE_WIDTH * 0.5 + RADIUS - GRACE;
+  return {
+    kind: "lavaLine",
+    meshes: [stripe],
+    update() {},
+    hit() {
+      return false;
+    },
+    burns(p) {
+      const spin = pad.spin;
+      if (!spin) return false;
+      const lineY = pad.mesh.position.y + pad.thickness + 0.14;
+      if (p.y - CORE - RADIUS > lineY + 0.28) return false;
+      if (p.y + CORE + RADIUS < lineY - 0.22) return false;
+      const dx = p.x - pad.mesh.position.x;
+      const dz = p.z - pad.mesh.position.z;
+      const limit = (pad.solid?.r ?? pad.footprint.r) + 0.08;
+      if (dx * dx + dz * dz > limit * limit) return false;
+      const yaw = (pad.meshYaw ?? 0) + spin.angle;
+      const dirX = Math.cos(yaw);
+      const dirZ = -Math.sin(yaw);
+      const along = dx * dirX + dz * dirZ;
+      const clamped = Math.max(-half, Math.min(half, along));
+      const ex = dx - clamped * dirX;
+      const ez = dz - clamped * dirZ;
+      return ex * ex + ez * ez < reach * reach;
+    },
+    dispose() {
+      glow.dispose();
       node.dispose();
     },
   };

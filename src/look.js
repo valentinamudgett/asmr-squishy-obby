@@ -72,6 +72,9 @@ export function defaultLook() {
     outfit: "pinafore",
     skinColor: "#eab892",
     bow: false,
+    necklace: false,
+    headband: false,
+    bracelet: false,
     dance: "cheer",
     quality: "high",
   };
@@ -95,6 +98,9 @@ export function loadLook() {
     if (OUTFITS.some((outfit) => outfit.id === data.outfit)) look.outfit = data.outfit;
     if (isHex(data.skinColor)) look.skinColor = data.skinColor.toLowerCase();
     if (typeof data.bow === "boolean") look.bow = data.bow;
+    if (typeof data.necklace === "boolean") look.necklace = data.necklace;
+    if (typeof data.headband === "boolean") look.headband = data.headband;
+    if (typeof data.bracelet === "boolean") look.bracelet = data.bracelet;
     if (DANCES.some((dance) => dance.id === data.dance)) look.dance = data.dance;
     if (data.quality === "high" || data.quality === "low") look.quality = data.quality;
   } catch {
@@ -115,6 +121,9 @@ export function saveLook(look) {
       outfit: look.outfit,
       skinColor: look.skinColor,
       bow: look.bow,
+      necklace: look.necklace,
+      headband: look.headband,
+      bracelet: look.bracelet,
       dance: look.dance,
       quality: look.quality,
     }),

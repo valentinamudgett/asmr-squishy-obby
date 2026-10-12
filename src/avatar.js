@@ -8,6 +8,7 @@ import {
   DirectionalLight,
   Mesh,
   MeshBuilder,
+  Quaternion,
   Scene,
   StandardMaterial,
   Texture,
@@ -24,11 +25,16 @@ import { fabricFontsReady, outfitById, paintOverlay, paintPattern, patternKey, p
 export { hexToColor3 };
 
 const HIP_Y = 0.5;
+// Flip around the chest so the feet and head trade places instead of spinning around the toes.
+const FLIP_PIVOT = 0.7;
 const SHOULDER_Y = 0.96;
 const HEAD_Y = 1.19;
 const HEAD_HALF = 0.18;
 const NECK = 0.03;
 const TORSO_H = 0.48;
+// The bow sits on the upper back of the head, pushed out to wherever the current hair ends.
+const BOW_ORIGIN = new Vector3(0, 0.06, -0.02);
+const BOW_DIRECTION = new Vector3(0.1, 0.11, -0.15).normalize();
 const FACE_W = 512;
 const FACE_H = 536;
 
@@ -164,7 +170,7 @@ export function buildAvatar(scene) {
     long: { mesh: buildHair(scene), extras: [] },
     short: { mesh: buildShortHair(scene), extras: [] },
     shaggy: { mesh: buildShaggyHair(scene), extras: [] },
-    buns: { mesh: buildBunHair(scene), extras: [...buildGlasses(scene), ...buildSparkles(scene)] },
+    buns: { mesh: buildBunHair(scene), extras: buildSparkles(scene) },
     headphones: { mesh: buildBraidHair(scene), extras: [...buildHeadphones(scene), ...buildChoker(scene)] },
     waves: { mesh: buildWaveHair(scene), extras: buildHeadband(scene) },
   };
@@ -172,7 +178,11 @@ export function buildAvatar(scene) {
     entry.mesh.parent = headNode;
     entry.mesh.material = hairMat;
     const ys = entry.mesh.getVerticesData(VertexBuffer.PositionKind).filter((_, index) => index % 3 === 1);
-    entry.mesh.metadata = { top: Math.max(...ys), bottom: Math.min(...ys) };
+    entry.mesh.metadata = {
+      top: Math.max(...ys),
+      bottom: Math.min(...ys),
+      bowDepth: Math.max(HEAD_HALF + 0.02, surfaceDepth(entry.mesh, BOW_ORIGIN, BOW_DIRECTION)),
+    };
     for (const extra of entry.extras) {
       extra.parent = headNode;
       extra.isPickable = false;
@@ -183,9 +193,20 @@ export function buildAvatar(scene) {
   bowMat.diffuseColor = hexToColor3("#ff8fb8");
   const bow = buildBow(scene);
   bow.parent = headNode;
-  bow.position.set(0.1, 0.17, -0.17);
-  bow.rotation.set(0.5, 0.35, 0.25);
+  bow.rotationQuaternion = new Quaternion();
+  Quaternion.FromUnitVectorsToRef(new Vector3(0, 0, -1), BOW_DIRECTION, bow.rotationQuaternion);
+  bow.scaling.setAll(1.15);
   bow.material = bowMat;
+
+  const necklace = buildNecklace(scene);
+  necklace.root.parent = headNode;
+  necklace.root.setEnabled(false);
+  const wearBand = buildWearHeadband(scene);
+  wearBand.parent = headNode;
+  wearBand.setEnabled(false);
+  const bracelet = buildBracelet(scene);
+  bracelet.root.parent = arms[0].pivot;
+  bracelet.root.setEnabled(false);
 
   const furTexture = new DynamicTexture("avatarFur", { width: 256, height: 256 }, scene, true);
   paintFur(furTexture.getContext(), 256);
@@ -225,6 +246,14 @@ export function buildAvatar(scene) {
   hipCloth.position.set(-0.13, -0.01, 0.13);
   hipCloth.material = hipClothMat;
   let hipClothColor = null;
+  let faceId = "grin";
+  let screaming = false;
+  const paintFace = () => {
+    const ctx = faceTexture.getContext();
+    ctx.clearRect(0, 0, FACE_W, FACE_H);
+    drawFace(ctx, screaming ? "scream" : faceId, FACE_W, FACE_H);
+    faceTexture.update();
+  };
 
   const parts = [
     torso,
@@ -232,6 +261,9 @@ export function buildAvatar(scene) {
     head,
     ...Object.values(hairStyles).flatMap((entry) => [entry.mesh, ...entry.extras]),
     bow,
+    ...necklace.meshes,
+    wearBand,
+    ...bracelet.meshes,
     hood,
     beltStrap,
     buckle,
@@ -240,6 +272,7 @@ export function buildAvatar(scene) {
     ...legs.flatMap((l) => l.parts),
   ];
   let squash = 0;
+  let rigLift = 0;
   let phase = 0;
   let walkBlend = 0;
   let airBlend = 0;
@@ -256,7 +289,8 @@ export function buildAvatar(scene) {
     const torsoH = TORSO_H * build.torso;
     rig.scaling.setAll(build.scale);
     // Longer legs reach further below the hip, so lift the rig to keep the feet on the ground.
-    rig.position.y = HIP_Y * (build.legs - 1) * build.scale;
+    rigLift = HIP_Y * (build.legs - 1) * build.scale;
+    rig.position.y = rigLift;
     torso.scaling.set(wide, build.torso, 1);
     torso.position.y = HIP_Y + torsoH / 2;
     overlay.scaling.set(wide, build.torso, 1);
@@ -308,20 +342,23 @@ export function buildAvatar(scene) {
         leg.parts[1].material = materialFor(outfit.shin);
         leg.parts[2].material = materialFor(outfit.shoes);
       }
-      const ctx = faceTexture.getContext();
-      ctx.clearRect(0, 0, FACE_W, FACE_H);
-      drawFace(ctx, look.face, FACE_W, FACE_H);
-      faceTexture.update();
+      faceId = look.face;
+      paintFace();
       const hairStyle = hairStyles[look.hair] ? look.hair : boy ? "short" : "long";
       for (const [style, entry] of Object.entries(hairStyles)) {
         const active = style === hairStyle;
         entry.mesh.setEnabled(active);
         for (const extra of entry.extras) extra.setEnabled(active);
-        if (active) colorHair(entry.mesh, look.hairColor, entry.mesh.metadata.top, entry.mesh.metadata.bottom);
+        if (!active) continue;
+        colorHair(entry.mesh, look.hairColor, entry.mesh.metadata.top, entry.mesh.metadata.bottom);
+        bow.position.copyFrom(BOW_DIRECTION).scaleInPlace(entry.mesh.metadata.bowDepth + 0.022).addInPlace(BOW_ORIGIN);
       }
       hood.setEnabled(Boolean(outfit.hood));
       if (outfit.hood) hoodMat.diffuseColor = hexToColor3(outfit.hood);
       bow.setEnabled(look.bow && !outfit.hood);
+      necklace.root.setEnabled(Boolean(look.necklace));
+      wearBand.setEnabled(Boolean(look.headband) && !outfit.hood);
+      bracelet.root.setEnabled(Boolean(look.bracelet));
       belt.setEnabled(Boolean(outfit.belt));
       if (outfit.belt) beltMat.diffuseColor = hexToColor3(outfit.belt);
       hipCloth.setEnabled(Boolean(outfit.hipCloth));
@@ -347,6 +384,12 @@ export function buildAvatar(scene) {
     stopDance() {
       move = null;
     },
+    /** Open-mouth yell while a lava fall plays out. Restores the chosen face when it ends. */
+    setScreaming(on) {
+      if (screaming === on) return;
+      screaming = on;
+      paintFace();
+    },
     update(dt, pose) {
       root.position.set(pose.x, pose.y - (pose.sink ?? 0), pose.z);
       if (move) {
@@ -360,7 +403,7 @@ export function buildAvatar(scene) {
       const airborne = pose.airborne;
       walkBlend += ((pose.moving && !airborne ? 1 : 0) - walkBlend) * Math.min(1, dt * 10);
       airBlend += ((airborne ? 1 : 0) - airBlend) * Math.min(1, dt * 12);
-      phase += dt * (pose.moving ? 11 : 0);
+      phase += dt * (pose.moving ? 11 * (pose.stride ?? 1) : 0);
       const swing = Math.sin(phase) * 0.75 * walkBlend;
       const breathe = Math.sin(pose.time * 2.4) * 0.03 * (1 - walkBlend);
       arms[0].pivot.rotation.set(-swing - airBlend * 2.6, 0, -0.08 - airBlend * 0.35 - breathe);
@@ -387,6 +430,39 @@ export function buildAvatar(scene) {
         body.rotation.z = step.lean * danceBlend;
         stretch += step.squash * danceBlend;
       }
+
+      const trick = pose.trick ?? null;
+      const trickP = trick ? Math.min(1, Math.max(0, pose.trickP ?? 0)) : 0;
+      const wave = trick ? Math.sin(trickP * Math.PI) : 0;
+      const blendPose = (node, x, y, z, amount) => {
+        node.rotation.x += (x - node.rotation.x) * amount;
+        node.rotation.y += (y - node.rotation.y) * amount;
+        node.rotation.z += (z - node.rotation.z) * amount;
+      };
+      if (trick === "spin") {
+        blendPose(arms[0].pivot, -0.2, 0, -2.2, wave);
+        blendPose(arms[1].pivot, -0.2, 0, 2.2, wave);
+        blendPose(legs[0].pivot, 0.2, 0, -0.28, wave);
+        blendPose(legs[1].pivot, -0.15, 0, 0.28, wave);
+      } else if (wave > 0) {
+        blendPose(arms[0].pivot, -1.65, 0, 0.9, wave);
+        blendPose(arms[1].pivot, -1.65, 0, -0.9, wave);
+        blendPose(legs[0].pivot, -1.2, 0, -0.1, wave);
+        blendPose(legs[1].pivot, -1.2, 0, 0.1, wave);
+        blendPose(headNode, 0.5, 0, 0, wave);
+        stretch += 0.12 * wave;
+      }
+
+      const eased = trickP * trickP * (3 - 2 * trickP);
+      const turns = eased * Math.PI * 2;
+      const pitch = trick === "front" ? turns : trick === "back" ? -turns : 0;
+      const spin = trick === "spin" ? turns : 0;
+      const pivot = FLIP_PIVOT * rig.scaling.y;
+      const cos = Math.cos(pitch);
+      const sin = Math.sin(pitch);
+      rig.rotation.set(pitch, spin, 0);
+      rig.position.set(0, rigLift + pivot * (1 - cos), -pivot * sin);
+
       body.scaling.set(1 - stretch * 0.5, 1 + stretch, 1 - stretch * 0.5);
     },
   };
@@ -540,46 +616,179 @@ function buildShaggyHair(scene) {
   return Mesh.MergeMeshes(pieces, true, true);
 }
 
-/** Blonde space buns with a short fringe, worn with the glasses extra. */
-function buildBunHair(scene) {
-  const cap = MeshBuilder.CreateSphere("bunCap", { diameter: 0.44, segments: 18, slice: 0.55 }, scene);
-  cap.position.set(0, 0.04, -0.01);
-  cap.scaling.set(1, 0.9, 1);
-  const pieces = [cap];
-  const add = (name, w, h, d, x, y, z, rz = 0, rx = 0) => {
-    const mesh = roundedBox(scene, name, { width: w, height: h, depth: d, radius: Math.min(w, h, d) * 0.45, segments: 4 });
-    mesh.position.set(x, y, z);
-    mesh.rotation.set(rx, 0, rz);
-    pieces.push(mesh);
+/**
+ * One flat lock hanging from the side of the head.
+ * It eases out of the bun, then falls in loose S-waves that taper to a point.
+ */
+function wavySideLock(scene, name, side) {
+  const steps = 48;
+  const around = 14;
+  const length = 0.48;
+  const sample = (t) => {
+    const phase = t * Math.PI * 2 * 1.85;
+    const emerge = Math.min(1, t / 0.2);
+    const swing = 0.068 * emerge;
+    return {
+      x: side * (0.15 + emerge * 0.08 + Math.sin(phase) * swing),
+      y: 0.16 - t * length,
+      z: -0.03 + Math.cos(phase) * swing * 0.72,
+      phase,
+      emerge,
+      t,
+    };
   };
-  add("bunFringe", 0.28, 0.08, 0.08, 0.02, 0.14, 0.16, -0.15, -0.2);
+  const points = Array.from({ length: steps + 1 }, (_, i) => sample(i / steps));
+  const frames = points.map((p, i) => {
+    const prev = points[Math.max(0, i - 1)];
+    const next = points[Math.min(steps, i + 1)];
+    let tx = next.x - prev.x;
+    let ty = next.y - prev.y;
+    let tz = next.z - prev.z;
+    const len = Math.hypot(tx, ty, tz) || 1;
+    tx /= len;
+    ty /= len;
+    tz /= len;
+    let wx = side;
+    let wy = 0;
+    let wz = 0;
+    const dot = wx * tx + wy * ty + wz * tz;
+    wx -= tx * dot;
+    wy -= ty * dot;
+    wz -= tz * dot;
+    let wlen = Math.hypot(wx, wy, wz);
+    if (wlen < 1e-5) {
+      wx = 0;
+      wy = 0;
+      wz = 1;
+      wlen = 1;
+    }
+    wx /= wlen;
+    wy /= wlen;
+    wz /= wlen;
+    const nx = ty * wz - tz * wy;
+    const ny = tz * wx - tx * wz;
+    const nz = tx * wy - ty * wx;
+    const twist = Math.sin(p.phase) * 0.35;
+    const c = Math.cos(twist);
+    const s = Math.sin(twist);
+    const bunch = 0.86 + 0.14 * Math.max(0, Math.sin(p.phase));
+    const halfWidth = (0.012 + 0.014 * p.emerge) * (1 - p.t * 0.78) * bunch;
+    return {
+      p,
+      bx: wx * c + nx * s,
+      by: wy * c + ny * s,
+      bz: wz * c + nz * s,
+      hx: -wx * s + nx * c,
+      hy: -wy * s + ny * c,
+      hz: -wz * s + nz * c,
+      halfWidth,
+      halfThick: halfWidth * 0.7,
+      tx,
+      ty,
+      tz,
+    };
+  });
+
+  const positions = [];
+  const normals = [];
+  const uvs = [];
+  const indices = [];
+  const ring = around + 1;
+  for (let i = 0; i <= steps; i += 1) {
+    const f = frames[i];
+    for (let j = 0; j <= around; j += 1) {
+      const a = (j / around) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      positions.push(
+        f.p.x + f.bx * ca * f.halfWidth + f.hx * sa * f.halfThick,
+        f.p.y + f.by * ca * f.halfWidth + f.hy * sa * f.halfThick,
+        f.p.z + f.bz * ca * f.halfWidth + f.hz * sa * f.halfThick,
+      );
+      const nx = f.bx * (ca / f.halfWidth) + f.hx * (sa / f.halfThick);
+      const ny = f.by * (ca / f.halfWidth) + f.hy * (sa / f.halfThick);
+      const nz = f.bz * (ca / f.halfWidth) + f.hz * (sa / f.halfThick);
+      const nlen = Math.hypot(nx, ny, nz) || 1;
+      normals.push(nx / nlen, ny / nlen, nz / nlen);
+      uvs.push(j / around, i / steps);
+    }
+  }
+  for (let i = 0; i < steps; i += 1) {
+    for (let j = 0; j < around; j += 1) {
+      const a = i * ring + j;
+      indices.push(a, a + ring, a + 1, a + 1, a + ring, a + ring + 1);
+    }
+  }
+  const root = frames[0];
+  const tip = frames[steps];
+  const rootIndex = positions.length / 3;
+  positions.push(root.p.x, root.p.y, root.p.z);
+  normals.push(-root.tx, -root.ty, -root.tz);
+  uvs.push(0.5, 0);
+  const tipIndex = positions.length / 3;
+  positions.push(tip.p.x, tip.p.y, tip.p.z);
+  normals.push(tip.tx, tip.ty, tip.tz);
+  uvs.push(0.5, 1);
+  for (let j = 0; j < around; j += 1) {
+    indices.push(rootIndex, j + 1, j);
+    const tipRing = steps * ring;
+    indices.push(tipIndex, tipRing + j, tipRing + j + 1);
+  }
+
+  const mesh = new Mesh(name, scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.normals = normals;
+  data.uvs = uvs;
+  data.indices = indices;
+  data.applyToMesh(mesh);
+  return mesh;
+}
+
+/** Space buns with one wavy lock hanging from each side of the head. */
+function buildBunHair(scene) {
+  const cap = MeshBuilder.CreateSphere("bunCap", { diameter: 0.44, segments: 18, slice: 0.46 }, scene);
+  cap.position.set(0, 0.07, -0.05);
+  cap.scaling.set(1, 0.84, 0.86);
+  const pieces = [cap];
   for (const side of [-1, 1]) {
-    const bun = MeshBuilder.CreateSphere("spaceBun", { diameter: 0.16, segments: 12 }, scene);
-    bun.position.set(side * 0.15, 0.16, -0.02);
-    pieces.push(bun);
-    add("bunCurl", 0.07, 0.22, 0.07, side * 0.18, -0.02, 0.1, side * 0.35, 0.2);
+    const bun = MeshBuilder.CreateSphere("spaceBun", { diameter: 0.2, segments: 14 }, scene);
+    bun.position.set(side * 0.12, 0.23, -0.03);
+    pieces.push(bun, wavySideLock(scene, "bunWave", side));
   }
   for (const mesh of pieces) paint(mesh, Color3.White());
   return Mesh.MergeMeshes(pieces, true, true);
 }
 
-/** Long hair gathered into two low braids, worn with the headphone extra. */
+/** Fringe and two braids that start beside the temples and hang down the sides of the head. */
 function buildBraidHair(scene) {
-  const cap = MeshBuilder.CreateSphere("braidCap", { diameter: 0.45, segments: 18, slice: 0.55 }, scene);
-  cap.position.set(0, 0.03, -0.01);
-  const pieces = [cap];
+  const cap = MeshBuilder.CreateSphere("braidCap", { diameter: 0.46, segments: 18, slice: 0.46 }, scene);
+  cap.position.set(0, 0.07, -0.01);
+  cap.scaling.set(1, 0.84, 0.92);
+  // The cap stops above the eyes. This wraps the sides and back below it, leaving the face open.
+  const faceGap = 1.9;
+  const under = MeshBuilder.CreateCylinder(
+    "braidUnder",
+    { height: 0.24, diameter: 0.4, tessellation: 32, arc: 1 - faceGap / (Math.PI * 2), cap: 0 },
+    scene,
+  );
+  under.position.y = -0.02;
+  under.rotation.y = -(Math.PI / 2 - faceGap / 2);
+  const pieces = [cap, under];
   const add = (name, w, h, d, x, y, z, rz = 0, rx = 0) => {
     const mesh = roundedBox(scene, name, { width: w, height: h, depth: d, radius: Math.min(w, h, d) * 0.4, segments: 4 });
     mesh.position.set(x, y, z);
     mesh.rotation.set(rx, 0, rz);
     pieces.push(mesh);
   };
-  add("braidBack", 0.4, 0.22, 0.12, 0, -0.02, -0.15, 0, 0.08);
-  add("braidFringe", 0.26, 0.08, 0.08, 0, 0.13, 0.15, 0, -0.25);
+  add("braidBack", 0.38, 0.3, 0.14, 0, -0.08, -0.16, 0, 0.1);
+  add("braidFringe", 0.3, 0.06, 0.07, 0, 0.12, 0.165, 0, -0.22);
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 5; i += 1) {
-      const bead = MeshBuilder.CreateSphere(`braidBead${side}${i}`, { diameter: 0.07 - i * 0.006, segments: 8 }, scene);
-      bead.position.set(side * 0.16, 0.02 - i * 0.07, 0.06);
+    add("braidSide", 0.1, 0.14, 0.12, side * 0.2, 0.1, 0.02);
+    for (let i = 0; i < 11; i += 1) {
+      const t = i / 10;
+      const bead = MeshBuilder.CreateSphere(`braidBead${side}${i}`, { diameter: 0.08 - i * 0.002, segments: 8 }, scene);
+      bead.position.set(side * (0.195 + t * 0.035), 0.07 - i * 0.055, 0.11 - t * 0.1);
       pieces.push(bead);
     }
   }
@@ -587,23 +796,165 @@ function buildBraidHair(scene) {
   return Mesh.MergeMeshes(pieces, true, true);
 }
 
-/** Long wavy hair, worn with the headband extra. */
-function buildWaveHair(scene) {
-  const cap = MeshBuilder.CreateSphere("waveCap", { diameter: 0.45, segments: 18, slice: 0.55 }, scene);
-  cap.position.set(0, 0.03, -0.012);
-  const pieces = [cap];
-  const add = (name, w, h, d, x, y, z, rz = 0, rx = 0) => {
-    const mesh = roundedBox(scene, name, { width: w, height: h, depth: d, radius: Math.min(w, h, d) * 0.45, segments: 4 });
-    mesh.position.set(x, y, z);
-    mesh.rotation.set(rx, 0, rz);
-    pieces.push(mesh);
-  };
-  add("waveBack", 0.42, 0.55, 0.14, 0, -0.22, -0.12, 0, 0.08);
-  add("waveFringe", 0.3, 0.1, 0.09, 0.02, 0.12, 0.15, -0.1, -0.2);
-  for (const side of [-1, 1]) {
-    add("waveSide", 0.1, 0.62, 0.12, side * 0.18, -0.22, 0.04, side * 0.12, 0.15);
-    add("waveTip", 0.08, 0.22, 0.08, side * 0.22, -0.5, 0.08, side * -0.3, 0.4);
+/**
+ * A loose S-wave. It falls from `start` and drifts outward along `out`, bending side to side
+ * a few times instead of coiling into a corkscrew.
+ */
+function waveStrand(scene, start, out, { length, waves, amp, thick, phase, spread = 1 }) {
+  const forward = out.clone();
+  if (forward.lengthSquared() < 1e-8) forward.set(0, 0, 1);
+  else forward.normalize();
+  const across = new Vector3(forward.z, 0, -forward.x);
+  if (across.lengthSquared() < 1e-8) across.set(1, 0, 0);
+  else across.normalize();
+  const steps = Math.max(12, Math.round(waves * 18));
+  const path = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const angle = phase + t * waves * Math.PI * 2;
+    const envelope = Math.sin(Math.min(1, t / 0.14) * Math.PI * 0.5);
+    const swing = amp * envelope * (0.7 + 0.3 * t);
+    const drift = (0.03 * t + 0.05 * t * t) * spread;
+    const along = drift + Math.cos(angle) * swing * 0.22;
+    const sideways = Math.sin(angle) * swing;
+    path.push(
+      new Vector3(
+        start.x + forward.x * along + across.x * sideways,
+        start.y - t * length,
+        start.z + forward.z * along + across.z * sideways,
+      ),
+    );
   }
+  return MeshBuilder.CreateTube(
+    "waveStrand",
+    { path, tessellation: 6, cap: Mesh.CAP_ALL, radiusFunction: (i) => thick * (1 - (i / steps) * 0.32) },
+    scene,
+  );
+}
+
+function crownWave(scene, x, phase, radius) {
+  const steps = 16;
+  const path = [];
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    const z = 0.02 - t * 0.3;
+    const y = 0.16 + Math.sin(t * Math.PI) * 0.07 - t * 0.06;
+    const sway = Math.sin(phase + t * Math.PI * 1.25) * 0.03;
+    path.push(new Vector3(x + sway, y, z));
+  }
+  return MeshBuilder.CreateTube("crownWave", { path, radius, tessellation: 6, cap: Mesh.CAP_ALL }, scene);
+}
+
+/**
+ * Loose waves under a headband: sweeps over the crown, soft bangs, shoulder-length waves
+ * at the sides, and longer waves down the back.
+ */
+function buildWaveHair(scene) {
+  const rand = mulberry32(31);
+  const cap = MeshBuilder.CreateSphere("curlCap", { diameter: 0.43, segments: 18, slice: 0.5 }, scene);
+  cap.position.set(0, 0.05, -0.04);
+  cap.scaling.set(1, 0.9, 0.92);
+  // Hair behind the waves on the sides and back, so gaps between locks show hair, not skin.
+  const faceGap = 1.9;
+  const under = MeshBuilder.CreateCylinder(
+    "curlUnder",
+    { height: 0.26, diameter: 0.4, tessellation: 32, arc: 1 - faceGap / (Math.PI * 2), cap: 0 },
+    scene,
+  );
+  under.position.y = -0.06;
+  under.rotation.y = -(Math.PI / 2 - faceGap / 2);
+  const pieces = [cap, under];
+
+  // Loose sweeps over the crown, with a second set tucked between them.
+  // The forehead stays clear for the headband and the face.
+  const crown = 5;
+  for (let i = 0; i < crown; i += 1) {
+    const x = -0.12 + (i / (crown - 1)) * 0.24;
+    pieces.push(crownWave(scene, x, i * 0.85, 0.022));
+  }
+  for (let i = 0; i < crown - 1; i += 1) {
+    const x = -0.12 + ((i + 0.5) / (crown - 1)) * 0.24;
+    pieces.push(crownWave(scene, x, i * 0.85 + 1.4, 0.016));
+  }
+
+  // Soft bangs under the headband. They end above the eyes.
+  const bang = (angle, phase, thick) => {
+    const out = new Vector3(Math.sin(angle), 0, Math.cos(angle));
+    const start = new Vector3(out.x * 0.19, 0.145, out.z * 0.19);
+    pieces.push(
+      waveStrand(scene, start, out, {
+        length: 0.085,
+        waves: 0.55,
+        amp: 0.016,
+        thick,
+        phase,
+        spread: 0.2,
+      }),
+    );
+  };
+  for (let i = 0; i < 5; i += 1) bang((i - 2) * 0.28, i * 0.9, 0.011);
+  for (let i = 0; i < 4; i += 1) bang((i - 1.5) * 0.28, i * 0.9 + 0.45, 0.009);
+
+  // One layer from the temples round to the back. Angles are measured from the face.
+  // Side waves stop at the shoulders. The long ones hang behind the back of the shirt.
+  const angles = [1.05, 1.5, 1.95, 2.4, 2.85];
+  for (const side of [-1, 1]) {
+    for (const angle of angles) {
+      const out = new Vector3(side * Math.sin(angle), 0, Math.cos(angle));
+      const long = angle >= 2.15;
+      let z = out.z * 0.2 - 0.02;
+      if (long) z = Math.min(z, -0.16);
+      const top = 0.07 + Math.max(0, -out.z) * 0.05;
+      const start = new Vector3(out.x * 0.2, top, z);
+      pieces.push(
+        waveStrand(scene, start, out, {
+          length: long ? 0.48 + rand() * 0.06 : top + 0.2 + rand() * 0.02,
+          waves: long ? 2 + rand() * 0.35 : 1.15 + rand() * 0.2,
+          amp: 0.04 + rand() * 0.01,
+          thick: 0.016 + rand() * 0.003,
+          phase: rand() * Math.PI * 2,
+          spread: 0.55,
+        }),
+      );
+    }
+  }
+
+  // More locks between the ones above, plus one down the middle of the back.
+  // A separate roll keeps the original waves from shifting.
+  const extra = mulberry32(73);
+  const fill = [1.28, 1.72, 2.18, 2.62];
+  for (const side of [-1, 1]) {
+    for (const angle of fill) {
+      const out = new Vector3(side * Math.sin(angle), 0, Math.cos(angle));
+      const long = angle >= 2.15;
+      let z = out.z * 0.17 - 0.01;
+      if (long) z = Math.min(z, -0.13);
+      const top = 0.05 + Math.max(0, -out.z) * 0.05;
+      const start = new Vector3(out.x * 0.17, top, z);
+      pieces.push(
+        waveStrand(scene, start, out, {
+          length: long ? 0.42 + extra() * 0.06 : top + 0.17 + extra() * 0.02,
+          waves: long ? 2 + extra() * 0.35 : 1.15 + extra() * 0.2,
+          amp: 0.032 + extra() * 0.01,
+          thick: 0.013 + extra() * 0.002,
+          phase: extra() * Math.PI * 2,
+          spread: 0.45,
+        }),
+      );
+    }
+  }
+  const back = new Vector3(0, 0, -1);
+  pieces.push(
+    waveStrand(scene, new Vector3(0, 0.1, -0.18), back, {
+      length: 0.5 + extra() * 0.05,
+      waves: 2.1,
+      amp: 0.038,
+      thick: 0.015,
+      phase: extra() * Math.PI * 2,
+      spread: 0.4,
+    }),
+  );
+
   for (const mesh of pieces) paint(mesh, Color3.White());
   return Mesh.MergeMeshes(pieces, true, true);
 }
@@ -615,51 +966,73 @@ function accessoryMaterial(scene, name, hex) {
   return material;
 }
 
-function buildGlasses(scene) {
-  const frame = accessoryMaterial(scene, "glassesMat", "#3a3438");
-  const pieces = [];
-  for (const side of [-1, 1]) {
-    const ring = MeshBuilder.CreateTorus("glassRing", { diameter: 0.085, thickness: 0.012, tessellation: 14 }, scene);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(side * 0.05, 0.02, 0.155);
-    ring.material = frame;
-    pieces.push(ring);
-    const arm = MeshBuilder.CreateBox("glassArm", { width: 0.01, height: 0.01, depth: 0.14 }, scene);
-    arm.position.set(side * 0.09, 0.025, 0.08);
-    arm.material = frame;
-    pieces.push(arm);
-  }
-  const bridge = MeshBuilder.CreateBox("glassBridge", { width: 0.028, height: 0.008, depth: 0.008 }, scene);
-  bridge.position.set(0, 0.028, 0.16);
-  bridge.material = frame;
-  pieces.push(bridge);
-  return pieces;
+function buildSparkles(scene) {
+  const material = accessoryMaterial(scene, "sparkleMat", "#fff8ee");
+  material.emissiveColor = new Color3(1, 0.96, 0.88);
+  const spots = [
+    [0.16, 0.3, 0.1],
+    [-0.14, 0.28, 0.12],
+    [0.04, 0.32, 0.02],
+    [-0.2, 0.16, 0.16],
+  ];
+  return spots.map(([x, y, z], index) => {
+    const mesh = MeshBuilder.CreateBox(`sparkle${index}`, { size: 0.038 }, scene);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(0.5, 0.7, 0.8);
+    mesh.material = material;
+    return mesh;
+  });
 }
 
 function buildHeadphones(scene) {
-  const silver = accessoryMaterial(scene, "headphoneBandMat", "#c5c6cb");
-  const cupMat = accessoryMaterial(scene, "headphoneCupMat", "#2c2c30");
-  const band = MeshBuilder.CreateTorus("headphoneBand", { diameter: 0.46, thickness: 0.028, tessellation: 18 }, scene);
-  band.scaling.set(1, 0.72, 0.55);
-  band.position.y = 0.02;
+  const silver = accessoryMaterial(scene, "headphoneBandMat", "#d5d6db");
+  const cupMat = accessoryMaterial(scene, "headphoneCupMat", "#3a3a40");
+  const padMat = accessoryMaterial(scene, "headphonePadMat", "#ececef");
+  const path = [];
+  for (let i = 0; i <= 18; i += 1) {
+    const theta = Math.PI - (i / 18) * Math.PI;
+    path.push(new Vector3(Math.cos(theta) * 0.27, Math.sin(theta) * 0.32 + 0.02, Math.sin(theta) * -0.02));
+  }
+  const band = MeshBuilder.CreateTube("headphoneBand", { path, radius: 0.016, tessellation: 10, cap: Mesh.CAP_ALL }, scene);
   band.material = silver;
   const pieces = [band];
   for (const side of [-1, 1]) {
-    const cup = MeshBuilder.CreateCylinder("headphoneCup", { height: 0.045, diameter: 0.11, tessellation: 14 }, scene);
+    const cup = MeshBuilder.CreateCylinder("headphoneCup", { height: 0.05, diameter: 0.15, tessellation: 16 }, scene);
     cup.rotation.z = Math.PI / 2;
-    cup.position.set(side * 0.2, 0.0, 0.01);
+    cup.position.set(side * 0.26, 0.02, 0.02);
     cup.material = cupMat;
     pieces.push(cup);
+    const pad = MeshBuilder.CreateCylinder("headphonePad", { height: 0.018, diameter: 0.1, tessellation: 16 }, scene);
+    pad.rotation.z = Math.PI / 2;
+    pad.position.set(side * 0.23, 0.02, 0.02);
+    pad.material = padMat;
+    pieces.push(pad);
   }
   return pieces;
 }
 
+function buildChoker(scene) {
+  const material = accessoryMaterial(scene, "chokerMat", "#1a1a1a");
+  material.zOffset = -3;
+  const band = MeshBuilder.CreateBox("choker", { width: 0.18, height: 0.03, depth: 0.045 }, scene);
+  band.position.set(0, -0.155, 0.2);
+  band.material = material;
+  return [band];
+}
+
 function buildHeadband(scene) {
-  const band = MeshBuilder.CreateTorus("headband", { diameter: 0.4, thickness: 0.032, tessellation: 16 }, scene);
-  band.rotation.x = Math.PI / 2;
-  band.scaling.set(1.05, 0.72, 1);
-  band.position.set(0, 0.1, 0.02);
-  band.material = accessoryMaterial(scene, "headbandMat", "#4a342c");
+  const material = accessoryMaterial(scene, "headbandMat", "#3a261c");
+  material.zOffset = -4;
+  const path = [];
+  const steps = 28;
+  for (let i = 0; i <= steps; i += 1) {
+    const angle = (i / steps) * Math.PI * 2;
+    const x = Math.sin(angle) * 0.23;
+    const z = Math.cos(angle) * 0.21;
+    path.push(new Vector3(x, 0.165 - Math.max(0, z) * 0.02, z));
+  }
+  const band = MeshBuilder.CreateTube("headband", { path, radius: 0.022, tessellation: 8 }, scene);
+  band.material = material;
   return [band];
 }
 
@@ -762,6 +1135,70 @@ function paintHipCloth(ctx, w, h, color) {
   ctx.fill();
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
+}
+
+/** How far a mesh reaches from `origin` along `direction`, counting only vertices near that line. */
+function surfaceDepth(mesh, origin, direction, reach = 0.045) {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  let depth = 0;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i] - origin.x;
+    const y = positions[i + 1] - origin.y;
+    const z = positions[i + 2] - origin.z;
+    const along = x * direction.x + y * direction.y + z * direction.z;
+    if (along <= depth) continue;
+    if (x * x + y * y + z * z - along * along < reach * reach) depth = along;
+  }
+  return depth;
+}
+
+/** A gold chain under the chin with a pink pendant on the chest. */
+function buildNecklace(scene) {
+  const root = new TransformNode("necklace", scene);
+  const gold = accessoryMaterial(scene, "necklaceGold", "#f0c14d");
+  gold.specularColor = new Color3(0.7, 0.6, 0.3);
+  const gemMat = accessoryMaterial(scene, "necklaceGem", "#ff8fb8");
+  const chain = MeshBuilder.CreateTorus("necklaceChain", { diameter: 0.28, thickness: 0.022, tessellation: 22 }, scene);
+  chain.parent = root;
+  chain.position.y = -0.21;
+  chain.scaling.set(1, 0.85, 0.9);
+  chain.material = gold;
+  const drop = MeshBuilder.CreateCylinder("necklaceDrop", { height: 0.045, diameter: 0.016, tessellation: 8 }, scene);
+  drop.parent = root;
+  drop.position.set(0, -0.25, 0.125);
+  drop.material = gold;
+  const pendant = MeshBuilder.CreateSphere("necklacePendant", { diameter: 0.05, segments: 12 }, scene);
+  pendant.parent = root;
+  pendant.position.set(0, -0.285, 0.14);
+  pendant.material = gemMat;
+  return { root, meshes: [chain, drop, pendant] };
+}
+
+/** A pink band worn over the hair, above the eyes. */
+function buildWearHeadband(scene) {
+  const band = MeshBuilder.CreateTorus("wearHeadband", { diameter: 0.46, thickness: 0.038, tessellation: 28 }, scene);
+  band.position.y = 0.15;
+  band.scaling.set(1, 1, 0.92);
+  const material = accessoryMaterial(scene, "wearHeadbandMat", "#ff7eb3");
+  material.zOffset = -5;
+  band.material = material;
+  return band;
+}
+
+/** A slim gold bangle with a pink bead, on the wrist. */
+function buildBracelet(scene) {
+  const root = new TransformNode("bracelet", scene);
+  const gold = accessoryMaterial(scene, "braceletGold", "#f0c14d");
+  gold.specularColor = new Color3(0.7, 0.6, 0.3);
+  const band = MeshBuilder.CreateTorus("braceletBand", { diameter: 0.27, thickness: 0.022, tessellation: 16 }, scene);
+  band.parent = root;
+  band.position.y = -0.37;
+  band.material = gold;
+  const bead = MeshBuilder.CreateSphere("braceletBead", { diameter: 0.04, segments: 10 }, scene);
+  bead.parent = root;
+  bead.position.set(-0.12, -0.37, 0.04);
+  bead.material = accessoryMaterial(scene, "braceletBeadMat", "#ff8fb8");
+  return { root, meshes: [band, bead] };
 }
 
 function buildBow(scene) {

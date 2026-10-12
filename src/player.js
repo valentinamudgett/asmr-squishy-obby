@@ -8,7 +8,28 @@ import {
 
 export const GRAVITY = -24;
 export const MOVE_SPEED = 4.4;
+// Ground run on a rainbow stair. Jumps keep the normal air speed.
+export const STAIR_RUN = 1.3;
+const STEP_HEIGHT = 0.28;
+// Rainbow treads rise up to ~0.26, too close to STEP_HEIGHT for the step-up probe.
+const STAIR_STEP_HEIGHT = 0.42;
+// The bun and the other rounded foods curve down well before the silhouette.
+// 0.32 keeps that slope underfoot. A vertical side is still a wall.
+const SLOPE_COSINE = 0.32;
+// Stair risers meet the capsule at a contact normal only ~0.37 up.
+const STAIR_SLOPE_COSINE = 0.2;
+const STEP_HOP_SECONDS = 0.2;
+// A pad this much longer than wide (cucumber, carrot, butter) lies along the jump or stairs that reach it.
+const LONG_PAD = 1.5;
+// Share of the half-length to run along a long pad before turning toward the next one.
+const LONG_PAD_TURN = 0.45;
+const LONG_PAD_AIM = 0.6;
 export const JUMP_SPEED = 7.6;
+// Second press in the air. Keeps some of the upward speed, then adds another hop.
+export const DOUBLE_JUMP_SPEED = 7.8;
+const DOUBLE_CARRY = 1.34;
+const TRICK_SECONDS = 0.5;
+const TRICKS = ["front", "back", "spin"];
 // Horizontal speed of a normal jump. With JUMP_SPEED this carries about 4.7m.
 export const AIR_SPEED = 7.5;
 // Springs stay on the shorter carry the pads were spaced for, so a pop still lands on the next one.
@@ -51,9 +72,7 @@ function actionFor(event) {
   return KEY_ACTIONS[event.key] ?? KEY_ACTIONS[event.key?.toLowerCase?.()] ?? KEY_ACTIONS[event.code];
 }
 const DOWN = new Vector3(0, -1, 0);
-const GRAVITY_VECTOR = new Vector3(0, GRAVITY, 0);
-
-export function createPlayer(scene, spawn, hooks) {
+export function createPlayer(scene, spawn, hooks, heading = 0) {
   const controller = new PhysicsCharacterController(
     spawn.clone(),
     { capsuleHeight: CAPSULE_HEIGHT, capsuleRadius: CAPSULE_RADIUS },
@@ -62,7 +81,7 @@ export function createPlayer(scene, spawn, hooks) {
   controller.acceleration = 1;
   controller.maxAcceleration = 80;
   controller.maxCharacterSpeedForSolver = 40;
-  controller.maxStepHeight = 0.28;
+  controller.maxStepHeight = STEP_HEIGHT;
   controller.keepDistance = 0.04;
   controller.staticFriction = 0.2;
   controller.dynamicFriction = 0.4;
@@ -74,24 +93,41 @@ export function createPlayer(scene, spawn, hooks) {
 
   const position = spawn.clone();
   const next = new Vector3();
+  const eased = new Vector3();
   const forward = new Vector3();
   const wish = new Vector3();
+  const move = new Vector3();
   const desiredCam = new Vector3();
   const camHold = new Vector3();
   const look = new Vector3();
+  const aimPoint = new Vector3();
   const foot = new Vector3();
   const ray = new Ray(Vector3.Zero(), Vector3.Up(), 1);
 
   let state = "IN_AIR";
-  let yaw = 0;
+  let yaw = heading;
+  let aim = heading;
+  let guideHeading = heading;
+  let steerPause = 0;
   let pitch = 0.48;
   let distance = 7.3;
-  let facing = 0;
+  let aimRaise = 0;
+  let gravity = GRAVITY;
+  const gravityVector = new Vector3(0, GRAVITY, 0);
+  let facing = heading;
   let coyote = 0;
   let jumpBuffer = 0;
+  let jumpQueued = 0;
+  let airJumpLeft = false;
+  let trick = null;
+  let trickTime = 0;
+  let trickFresh = false;
+  let lastTrick = -1;
   let mute = 0.3;
   let airImpact = 0;
   let airTime = 0;
+  let launched = true;
+  let stairRun = false;
   let airCarry = AIR_BOOST;
   let dip = 0;
   let dipVel = 0;
@@ -105,7 +141,7 @@ export function createPlayer(scene, spawn, hooks) {
   const canvas = scene.getEngine().getRenderingCanvas();
   bindDesktop(canvas, keys, {
     onJump: () => {
-      jumpBuffer = 0.12;
+      queueJump();
     },
     onDragStart: (x, y) => {
       dragging = true;
@@ -114,8 +150,11 @@ export function createPlayer(scene, spawn, hooks) {
     },
     onDrag: (x, y) => {
       if (!dragging) return;
-      yaw -= (x - lastX) * 0.005;
-      pitch = clamp(pitch + (y - lastY) * 0.0035, 0.2, 1.15);
+      const dx = x - lastX;
+      const dy = y - lastY;
+      if (dx !== 0 || dy !== 0) steerPause = 0.7;
+      yaw -= dx * 0.005;
+      pitch = clamp(pitch + dy * 0.0035, 0.2, 1.15);
       lastX = x;
       lastY = y;
     },
@@ -133,7 +172,14 @@ export function createPlayer(scene, spawn, hooks) {
     look.set(from.x, from.y - FOOT_OFFSET + 1.05, from.z);
     cameraOffset(camHold, look);
     camera.position.copyFrom(camHold);
-    camera.setTarget(look);
+    camera.setTarget(raisedAim(look));
+  }
+
+  // Aims above the avatar by a share of the camera's height over it, so the view tips toward the horizon.
+  function raisedAim(focus) {
+    aimPoint.copyFrom(focus);
+    aimPoint.y += Math.sin(pitch) * distance * aimRaise;
+    return aimPoint;
   }
 
   function cameraOffset(target, focus) {
@@ -160,8 +206,8 @@ export function createPlayer(scene, spawn, hooks) {
       x /= length;
       z /= length;
     }
-    const sin = Math.sin(yaw);
-    const cos = Math.cos(yaw);
+    const sin = Math.sin(aim);
+    const cos = Math.cos(aim);
     wish.set(sin * z + cos * x, 0, cos * z - sin * x);
     if (wish.lengthSquared() > 1) wish.normalize();
     wish.scaleInPlace(MOVE_SPEED);
@@ -171,33 +217,83 @@ export function createPlayer(scene, spawn, hooks) {
     camera,
     stick,
     requestJump() {
-      jumpBuffer = 0.12;
+      queueJump();
     },
     setStick(x, y) {
       stick.x = x;
       stick.y = y;
     },
-    respawn(spot) {
+    setAimRaise(share) {
+      aimRaise = share;
+    },
+    /** 1 on Earth. The Moon's lower value makes every jump higher and longer. */
+    setGravityScale(scale) {
+      gravity = GRAVITY * scale;
+      gravityVector.y = gravity;
+    },
+    respawn(spot, nextHeading = 0) {
       controller.setPosition(spot);
       controller.setVelocity(Vector3.Zero());
       state = "IN_AIR";
+      launched = true;
+      stairRun = false;
       mute = 0.35;
       coyote = 0;
       jumpBuffer = 0;
-      yaw = 0;
-      facing = 0;
+      jumpQueued = 0;
+      airJumpLeft = false;
+      trick = null;
+      trickTime = 0;
+      trickFresh = false;
+      yaw = nextHeading;
+      aim = nextHeading;
+      guideHeading = nextHeading;
+      steerPause = 0;
+      facing = nextHeading;
       dip = 0;
       dipVel = 0;
       position.copyFrom(spot);
       snapCamera(spot);
     },
+    // Keeps a lava fall from shooting through the crust while the yell plays.
+    easeFall(maxDrop) {
+      const velocity = controller.getVelocity();
+      eased.copyFrom(velocity);
+      const limit = maxDrop > 0 ? maxDrop : 0;
+      if (eased.y < -limit) eased.y = -limit;
+      eased.x *= 0.2;
+      eased.z *= 0.2;
+      controller.setVelocity(eased);
+    },
     update(dt, allowInput) {
       mute = Math.max(0, mute - dt);
+      trickFresh = false;
       jumpBuffer = Math.max(0, jumpBuffer - dt);
-      if (!allowInput) jumpBuffer = 0;
+      if (!allowInput) {
+        jumpBuffer = 0;
+        jumpQueued = 0;
+        trick = null;
+        trickTime = 0;
+      } else if (jumpBuffer <= 0) jumpQueued = 0;
 
+      position.copyFrom(controller.getPosition());
+      foot.set(position.x, position.y - FOOT_OFFSET, position.z);
       const support = controller.checkSupport(dt, DOWN);
       const grounded = support.supportedState === CharacterSupportedState.SUPPORTED;
+      // Only the pad underfoot turns the run. Switching in the air curves the jump off the spiral.
+      if (grounded) {
+        const beneath = hooks.findPad(foot);
+        if (typeof beneath?.heading === "number") guideHeading = guideFor(beneath, foot);
+      }
+      if (!dragging) steerPause = Math.max(0, steerPause - dt);
+      if (!dragging && steerPause <= 0) {
+        // Movement locks onto the next pad immediately. The camera eases around behind it.
+        aim = guideHeading;
+        yaw = lerpAngle(yaw, guideHeading, 1 - Math.exp(-7 * dt));
+      } else {
+        aim = yaw;
+      }
+
       const previous = state;
       if (state === "START_JUMP") state = "IN_AIR";
       else state = grounded ? "ON_GROUND" : "IN_AIR";
@@ -210,56 +306,87 @@ export function createPlayer(scene, spawn, hooks) {
       else wish.set(0, 0, 0);
       const velocity = controller.getVelocity();
       next.copyFrom(velocity);
-      forward.set(Math.sin(yaw), 0, Math.cos(yaw));
+      forward.set(Math.sin(aim), 0, Math.cos(aim));
       if (forward.lengthSquared() < 1e-6) forward.set(0, 0, 1);
 
       position.copyFrom(controller.getPosition());
       foot.set(position.x, position.y - FOOT_OFFSET, position.z);
       const pad = hooks.findPad(foot);
       const canJump = state === "ON_GROUND" || coyote > 0;
-      const wantJump = allowInput && jumpBuffer > 0 && canJump;
+      const wantJump = allowInput && jumpQueued > 0 && canJump;
       let jumped = false;
 
+      const onStair = state === "ON_GROUND" && Boolean(pad?.stair);
+      const climbing = onStair || (stairRun && !launched && state !== "ON_GROUND");
+      controller.maxStepHeight = climbing ? STAIR_STEP_HEIGHT : STEP_HEIGHT;
+      controller.maxSlopeCosine = climbing ? STAIR_SLOPE_COSINE : SLOPE_COSINE;
       if (state === "ON_GROUND") {
+        launched = false;
+        airJumpLeft = false;
+        stairRun = onStair;
+        move.copyFrom(wish);
+        if (onStair) move.scaleInPlace(STAIR_RUN);
         const moved = controller.calculateMovement(
           dt,
           forward,
           support.averageSurfaceNormal,
           velocity,
           support.averageSurfaceVelocity,
-          wish,
+          move,
           UP,
         );
         next.copyFrom(moved);
+        // calculateMovement slows the run against the next tread's riser. The controller only steps up
+        // when its forward probe clears keepDistance, so hand it the full run on stairs.
+        if (onStair) {
+          next.x = move.x;
+          next.z = move.z;
+        }
         if (wantJump) {
+          takeQueuedJump();
           const spring = pad?.kind === "spring";
-          airCarry = spring ? SPRING_BOOST : AIR_BOOST;
-          if (wish.lengthSquared() > 0.2) {
-            next.x = wish.x * airCarry;
-            next.z = wish.z * airCarry;
-          }
-          next.y = spring ? SPRING_POP : JUMP_SPEED;
-          state = "START_JUMP";
-          jumpBuffer = 0;
-          coyote = 0;
+          launch(spring ? SPRING_POP : JUMP_SPEED, spring ? SPRING_BOOST : AIR_BOOST);
           jumped = true;
         } else if (justLanded && pad?.kind === "spring" && mute <= 0) {
-          airCarry = SPRING_BOOST;
-          if (wish.lengthSquared() > 0.2) {
-            next.x = wish.x * airCarry;
-            next.z = wish.z * airCarry;
-          }
-          next.y = SPRING_POP;
-          state = "START_JUMP";
+          launch(SPRING_POP, SPRING_BOOST);
         } else if (next.y < 0) {
           next.y = 0;
         }
       } else {
-        if (previous === "ON_GROUND") airCarry = AIR_BOOST;
-        next.y += GRAVITY * dt;
+        if (previous === "ON_GROUND") airCarry = stairRun ? STAIR_RUN : AIR_BOOST;
+        // Riding up a tread edge leaves upward speed behind. Drop it so the run settles on the tread.
+        if (stairRun && !launched) next.y = Math.min(next.y, 0);
+        next.y += gravity * dt;
         const blend = 1 - Math.exp(-5.5 * dt);
         next.x += (wish.x * airCarry - next.x) * blend;
         next.z += (wish.z * airCarry - next.z) * blend;
+        // One extra press after a jump. It pops higher and, if you're moving, carries farther.
+        if (allowInput && jumpQueued > 0 && airJumpLeft && launched) {
+          takeQueuedJump();
+          const carry = Math.max(airCarry, AIR_BOOST) * DOUBLE_CARRY;
+          airCarry = carry;
+          const rising = Math.max(0, next.y);
+          next.y = rising * 0.45 + DOUBLE_JUMP_SPEED;
+          if (wish.lengthSquared() > 0.2) {
+            next.x = wish.x * carry;
+            next.z = wish.z * carry;
+          } else {
+            const horiz = Math.hypot(next.x, next.z);
+            const target = MOVE_SPEED * carry;
+            if (horiz > 0.35 && target > horiz) {
+              const scale = target / horiz;
+              next.x *= scale;
+              next.z *= scale;
+            }
+          }
+          state = "START_JUMP";
+          launched = true;
+          airJumpLeft = false;
+          stairRun = false;
+          coyote = 0;
+          jumped = true;
+          beginTrick();
+        }
       }
 
       if (previous === "IN_AIR" || previous === "START_JUMP") {
@@ -278,8 +405,19 @@ export function createPlayer(scene, spawn, hooks) {
       if (jumped && pad && !justLanded && mute <= 0) hooks.onJump(pad);
 
       const speed = Math.hypot(next.x, next.z);
+      if (trick && !trickFresh) {
+        // Finish the flip quickly once the feet are back on a pad.
+        trickTime += dt * (state === "ON_GROUND" ? 4 : 1);
+        if (trickTime >= TRICK_SECONDS) trickTime = TRICK_SECONDS;
+      }
+      const trickOut = trick;
+      const trickP = trick ? trickTime / TRICK_SECONDS : 0;
+      if (trick && trickTime >= TRICK_SECONDS) {
+        trick = null;
+        trickTime = 0;
+      }
       controller.setVelocity(next);
-      controller.integrate(dt, support, GRAVITY_VECTOR);
+      controller.integrate(dt, support, gravityVector);
       position.copyFrom(controller.getPosition());
 
       if (wish.lengthSquared() > 0.4) {
@@ -299,16 +437,22 @@ export function createPlayer(scene, spawn, hooks) {
       camHold.z += (desiredCam.z - camHold.z) * follow;
       placeCamera(scene, camera, camHold, look, ray, dip);
 
+      // Tread edges and bobbing pads drop the feet for a few frames. Keep running through those.
+      const hopping = state !== "ON_GROUND" && !launched && airTime < STEP_HOP_SECONDS;
+
       return {
         position,
         foot,
         pad: hooks.findPad(foot),
         grounded: state === "ON_GROUND",
-        walking: state === "ON_GROUND" && wish.lengthSquared() > 0.4,
-        airborne: state !== "ON_GROUND",
+        walking: (state === "ON_GROUND" || hopping) && wish.lengthSquared() > 0.4,
+        onStair: stairRun,
+        airborne: state !== "ON_GROUND" && !hopping,
         state,
         justLanded,
         jumped,
+        trick: trickOut,
+        trickP,
         facing,
         speed,
         impact,
@@ -316,6 +460,61 @@ export function createPlayer(scene, spawn, hooks) {
       };
     },
   };
+
+  function queueJump() {
+    jumpQueued = Math.min(2, jumpQueued + 1);
+    jumpBuffer = 0.16;
+  }
+
+  function takeQueuedJump() {
+    jumpQueued = Math.max(0, jumpQueued - 1);
+    if (jumpQueued === 0) jumpBuffer = 0;
+  }
+
+  /**
+   * The run direction while standing on `pad`. Usually its heading toward the next pad.
+   * A long pad's next pad is ~50° off its length, and turning that far at the near end
+   * runs you off the side. So the run follows the center line to the far end first.
+   */
+  function guideFor(pad, at) {
+    const footprint = pad.footprint;
+    if (footprint?.type !== "box" || footprint.hz < footprint.hx * LONG_PAD || !pad.mesh) return pad.heading;
+    const yaw = pad.meshYaw ?? 0;
+    let ax = Math.sin(yaw);
+    let az = Math.cos(yaw);
+    if (ax * Math.sin(pad.heading) + az * Math.cos(pad.heading) < 0) {
+      ax = -ax;
+      az = -az;
+    }
+    const dx = at.x - pad.mesh.position.x;
+    const dz = at.z - pad.mesh.position.z;
+    if (dx * ax + dz * az >= footprint.hz * LONG_PAD_TURN) return pad.heading;
+    const reach = footprint.hz * LONG_PAD_AIM;
+    return Math.atan2(ax * reach - dx, az * reach - dz);
+  }
+
+  function launch(pop, carry) {
+    airCarry = carry;
+    if (wish.lengthSquared() > 0.2) {
+      next.x = wish.x * carry;
+      next.z = wish.z * carry;
+    }
+    next.y = pop;
+    state = "START_JUMP";
+    launched = true;
+    airJumpLeft = true;
+    stairRun = false;
+    coyote = 0;
+  }
+
+  function beginTrick() {
+    let index = Math.floor(Math.random() * TRICKS.length);
+    if (index === lastTrick) index = (index + 1 + Math.floor(Math.random() * (TRICKS.length - 1))) % TRICKS.length;
+    lastTrick = index;
+    trick = TRICKS[index];
+    trickTime = 0;
+    trickFresh = true;
+  }
 
   function placeCamera(scene, camera, hold, focus, cameraRay, dipAmount) {
     const dx = hold.x - focus.x;
@@ -336,7 +535,7 @@ export function createPlayer(scene, spawn, hooks) {
     } else {
       camera.position.set(hold.x, hold.y - dipAmount, hold.z);
     }
-    camera.setTarget(focus);
+    camera.setTarget(raisedAim(focus));
   }
 }
 
