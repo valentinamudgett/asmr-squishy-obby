@@ -116,6 +116,17 @@ const VENT_PATH = [
   [-12.5, -1.5],
   [-15.1, -1.5],
 ];
+/** The second vent's centre line, from the squishy room wall to the killer capybara's room. */
+const VENT2_PATH = [
+  [-3.6, -3.5],
+  [-1.5, -3.5],
+  [-1.5, 0.5],
+  [1.5, 0.5],
+  [1.5, -6.5],
+  [4, -6.5],
+  [4, -3.5],
+  [6, -3.5],
+];
 /** Half the width of a vent: room for the capsule to turn and the camera to stay inside. */
 const DUCT_HALF = 0.9;
 /** Vent covers: where the closed grate sits, which edge it hinges on, and which way it swings. */
@@ -838,12 +849,11 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const x of [-15, -10]) for (const z of [-3, 3]) lamp(x, 25, z, 2, 0.6);
   box(-4.02, 19.7, -4.5, -3.96, 19.8, -2.5, M.metal, { solid: false, camera: false });
 
-  // 6. The second vent, high over the cell, into the killer capybara's room.
-  box(-3.6, 17.4, -4.8, 6.4, 17.6, -2.2, M.metal);
-  box(-3.6, 19.7, -4.8, 6.4, 19.9, -2.2, M.metal);
-  box(-3.6, 17.4, -4.8, 6.4, 19.9, -4.4, M.metal);
-  box(-3.6, 17.4, -2.6, 6.4, 19.9, -2.2, M.metal);
-  for (const x of [-1, 3.5]) lamp(x, 19.7, -3.5, 0.5, 0.3);
+  // 6. The second vent, zig-zagging high over the cell into the killer capybara's room.
+  box(-3.6, 17.4, -7.8, 6.4, 17.6, 1.8, M.metal);
+  box(-3.6, 19.7, -7.8, 6.4, 19.9, 1.8, M.metal);
+  ductWalls(-3.6, 6, -7.8, 1.8, 17.6, 19.7, VENT2_PATH);
+  for (const [x, z] of VENT2_PATH.slice(1, -1)) lamp(x, 19.7, z, 0.5, 0.3);
 
   // 7. The killer capybara's room: its floor, the goo pit, the obby, and the ledge to the arena.
   box(6, 9, -8.4, 6.4, KILLER_FLOOR, 8.4, M.concrete);
