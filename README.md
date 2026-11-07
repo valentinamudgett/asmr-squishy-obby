@@ -16,7 +16,7 @@ The dev server listens on `0.0.0.0` port **41723**.
 ## Play
 
 - Desktop: WASD or the arrow keys to move, Space to jump. Press Space again in the air to jump higher and farther — the avatar does a random front flip, back flip, or spin. Drag to look around, scroll to zoom.
-- The camera follows behind your avatar and swings round to face the way it's running, jumping, or turned. A held direction keeps going straight while the camera catches up. After you drag to look around while standing still, the view stays put until you move again.
+- The camera follows behind your avatar and swings round almost at once to face the way it's running, jumping, or turned. A held direction keeps going straight while the camera catches up. Dragging looks around; after you drag while standing still, the view stays put until you move again, and then it swings straight back behind you.
 - Touch: the stick on the left moves you, Jump is on the right, and tapping Jump again in the air does the second jump. Dragging the course looks around.
 - The course is generated as you go, with a new layout every day (UTC). Everyone gets the same layout that day, whatever level they start from or difficulty they pick, and the moving pads, sweeping bars, spiky gummies, and lava balls run on the wall clock so they line up for everyone.
 - Play online (on by default, toggled on the start menu) puts you in the day's room with everyone else playing. Other players show up as their own avatars with a name tag, running, flipping, and doing their level-up dance, when they are on the part of the course near you. Players sitting in a menu are counted but not shown. The HUD shows how many players are online, you included. You can walk through other players; they don't block or push you.
@@ -32,12 +32,14 @@ The dev server listens on `0.0.0.0` port **41723**.
   - The cell: climb the stool, the desk, and the top bunk to the vent. Every vent has a metal grate. Stand next to it and press E (or tap Open on touch screens) to swing it open.
   - The vent zig-zags left and right over the hallway, then you drop out of a hole in the hallway ceiling.
   - Police capybaras come out of their door and chase you up four flights of stairs. Barred cells with capybara inmates, some bouncing and some pacing, fill the middle of the stairwell. If the police catch you, the camera cuts to the capybara's face for a second and you're back in your cell.
-  - At the top, big squishies stuck to the walls climb once round the room to a second vent, with real gaps and steps like the obby. The police can't catch you on the squishies.
-  - Level 110: the second vent zig-zags left and right too, then opens into the room of a killer capybara (glowing red eyes, fangs, spiked collar). It chases you until you jump onto the obby over the green goo. If it catches you, you get the same close-up and go back to level 110. Falling in the goo also sends you back.
+  - At the top, big squishies stuck to the walls climb round the room to a second vent, with real gaps and steps like the obby. The police can't catch you on the squishies.
+  - The second vent zig-zags left and right too, then comes out on a high ledge in the killer capybara's room. A zipline runs from the ledge down to the level 110 checkpoint: walk under the handle, or press E (tap Grab on touch screens), and you hang on and slide all the way down. You can't steer on the way, and nothing can catch you.
+  - Level 110: a killer capybara (glowing red eyes, fangs, spiked collar) chases you until you jump onto the obby over the green goo. If it catches you, you get the same close-up and go back to the level 110 checkpoint on the floor. Falling in the goo also sends you back.
+  - Level 112: past the obby, a door off the far ledge leads to a room with a glowing vending machine. Press E (tap Buy) for an energy soda: it costs 3 coins, or it's free if you don't have 3. The soda makes you run and move in the air 1.6 times faster for 18 seconds, with a glowing timer in the HUD. Then a chef capybara (tall hat, apron, cleaver, red eyes) comes out of the kitchen door. It's faster than a normal run but slower than you on soda, and it chases you down the kitchen, over or round the counters, to the arena's side door. It comes out anyway after a few seconds if you don't buy, or as soon as you run into the kitchen. If it catches you, you get the close-up, go back to level 112, the soda wears off, and you can buy another.
   - Level 115: the giant capybara warden throws mandarins at you. You get a blaster: face the warden and hold F or click (or hold Shoot on touch screens). You have 10 lives, and 5 hits win. Lose all 10 and the fight starts over. Crates give you cover.
   - Beat the warden and the gate behind it opens. Run through it to come out on the level 120 checkpoint (FREEDOM! sign, 25 bonus coins the first time) and keep climbing the obby.
-  - You're the prisoner the whole way: your outfit switches to prison stripes (and any costume comes off) until you escape. Your saved look doesn't change. The police and the killer are slower on Easy and faster on Hard, and so are the warden's throws.
-  - The HUD shows your escape progress (0/20 to 19/20). Closing the game in the prison resumes at level 100, 110, or 115.
+  - You're the prisoner the whole way: your outfit switches to prison stripes (and any costume comes off) until you escape. Your saved look doesn't change. The police, the killer, and the chef are slower on Easy and faster on Hard, and so are the warden's throws.
+  - The HUD shows your escape progress (0/20 to 19/20). Closing the game in the prison resumes at level 100, 110, 112, or 115.
   - Once you've escaped, the Character studio has a "Play the prison escape again" button. It puts you back in the cell, and when you get out you go back to your own checkpoint. Replays never lower your best level or take away coins or unlocks.
 - Lava or a hazard counts as a fall and puts you back on the last safe platform you stood on. A glowing arrow on its floor points to the next squishy, and a "Keep going!" message pops up.
 - Green dumplings are springs. They launch you a big step up to the next squishy.
@@ -50,7 +52,7 @@ The dev server listens on `0.0.0.0` port **41723**.
   - On Easy there are no sweeping bars, spiky gummies, or lava balls. Medium and Hard have all three.
 - Every gap is checked against the real jump physics, so every pad can be reached.
 - You always start on the highest level you've reached (saved in this browser).
-- The HUD shows your level and coins.
+- The HUD shows your level and coins. Every checkpoint you move on to pays 5 coins, including the prison's 110, 112, and 115, and they pay again when you reach them again (a prison replay, or a climb from an earlier level). Going back to a checkpoint after a fall never pays.
 - The gear opens the character studio.
   - Girl or boy: boys get a short haircut, and dress outfits become a shirt with matching shorts and suspenders.
   - Age: Kid, Teen, or Grown-up. Older characters are taller, with longer legs, torso, and arms and a smaller head. Your character's size doesn't change jumping or collisions.

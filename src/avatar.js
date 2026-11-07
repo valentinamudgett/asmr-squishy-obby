@@ -299,6 +299,7 @@ export function buildAvatar(scene) {
   let runBlend = 0;
   let airBlend = 0;
   let flyBlend = 0;
+  let hangBlend = 0;
   let move = null;
   let lastMove = null;
   let danceTime = 0;
@@ -475,6 +476,15 @@ export function buildAvatar(scene) {
         body.rotation.x += (0.35 - body.rotation.x) * flyBlend;
       }
 
+      // Zipline: both hands up on the handle, legs dangling.
+      hangBlend += ((pose.hanging ? 1 : 0) - hangBlend) * Math.min(1, dt * 12);
+      if (hangBlend > 0.001) {
+        toward(arms[0].pivot, -3.05, 0, -0.14, hangBlend);
+        toward(arms[1].pivot, -3.05, 0, 0.14, hangBlend);
+        toward(legs[0].pivot, 0.25 + Math.sin(pose.time * 7) * 0.12, 0, 0, hangBlend);
+        toward(legs[1].pivot, -0.05 - Math.sin(pose.time * 7) * 0.12, 0, 0, hangBlend);
+      }
+
       if (danceBlend > 0.001 && lastMove) {
         const step = lastMove.pose(danceTime);
         const mix = (node, target) => {
@@ -523,9 +533,9 @@ export function buildAvatar(scene) {
       rig.rotation.set(pitch, spin, 0);
       rig.position.set(0, rigLift + pivot * (1 - cos), -pivot * sin);
 
-      const hold = held.id && !armed ? (1 - flyBlend) * (1 - danceBlend) * (1 - wave) : 0;
+      const hold = held.id && !armed ? (1 - flyBlend) * (1 - hangBlend) * (1 - danceBlend) * (1 - wave) : 0;
       if (hold > 0.001) toward(arms[1].pivot, -1.25, -0.15, 0.55, hold);
-      const aim = armed ? (1 - flyBlend) * (1 - danceBlend) * (1 - wave) : 0;
+      const aim = armed ? (1 - flyBlend) * (1 - hangBlend) * (1 - danceBlend) * (1 - wave) : 0;
       if (aim > 0.001) toward(arms[1].pivot, -1.5, 0, 0.1, aim);
       if (held.id) {
         const pulse = 1 + Math.sin(pose.time * 3.2) * 0.045;

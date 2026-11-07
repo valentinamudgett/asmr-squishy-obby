@@ -49,7 +49,9 @@ export const KILL_Y = -7;
 const PLUNGE_SPEED = 30;
 
 /** How fast the camera swings round behind the way the avatar faces. */
-const FOLLOW_TURN = 3.2;
+const FOLLOW_TURN = 9;
+/** How fast the camera position catches up with where it should sit. */
+const FOLLOW_MOVE = 10;
 /** A held direction keeps its control frame until the input turns this far (radians). */
 const NEW_INPUT_TURN = 0.7;
 const AIR_BOOST = AIR_SPEED / MOVE_SPEED;
@@ -143,6 +145,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
   let launched = true;
   let stairRun = false;
   let airCarry = AIR_BOOST;
+  let speedBoost = 1;
+  let boostLeft = 0;
   let dip = 0;
   let dipVel = 0;
   // Last good support reading and the pad it came from, for frames where the check misses that pad.
@@ -252,7 +256,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     const cos = Math.cos(aim);
     wish.set(sin * z + cos * x, 0, cos * z - sin * x);
     if (wish.lengthSquared() > 1) wish.normalize();
-    wish.scaleInPlace(MOVE_SPEED);
+    wish.scaleInPlace(MOVE_SPEED * speedBoost);
   }
 
   return {
@@ -275,6 +279,14 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     },
     get flying() {
       return flying;
+    },
+    /** Runs and air moves `multiplier` times faster for `seconds`. A multiplier of 1 ends it. */
+    setSpeedBoost(multiplier, seconds = 0) {
+      speedBoost = multiplier > 1 && seconds > 0 ? multiplier : 1;
+      boostLeft = speedBoost > 1 ? seconds : 0;
+    },
+    get boostLeft() {
+      return boostLeft;
     },
     respawn(spot, nextHeading = 0) {
       land();
@@ -354,8 +366,51 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         supportX: 0,
       };
     },
+    /** Hangs the capsule center at `spot` (a zipline): no gravity, no steering, the camera follows. */
+    carry(dt, spot, nextFacing) {
+      land();
+      tickBoost(dt);
+      jumpBuffer = 0;
+      jumpQueued = 0;
+      trick = null;
+      trickTime = 0;
+      state = "IN_AIR";
+      launched = true;
+      airJumpLeft = false;
+      heldAngle = null;
+      ridePad = null;
+      groundPad = null;
+      controller.setVelocity(Vector3.Zero());
+      controller.setPosition(spot);
+      position.copyFrom(spot);
+      facing = lerpAngle(facing, nextFacing, 1 - Math.exp(-10 * dt));
+      if (!dragging) steerPause = Math.max(0, steerPause - dt);
+      if (!dragging && steerPause <= 0) yaw = lerpAngle(yaw, facing, 1 - Math.exp(-FOLLOW_TURN * dt));
+      aim = yaw;
+      followCamera(dt);
+      return {
+        position,
+        foot,
+        pad: null,
+        grounded: false,
+        walking: false,
+        onStair: false,
+        airborne: true,
+        state: "CARRIED",
+        justLanded: false,
+        jumped: false,
+        trick: null,
+        trickP: 0,
+        flying: false,
+        facing,
+        speed: 0,
+        impact: 0,
+        supportX: 0,
+      };
+    },
     update(dt, allowInput) {
       mute = Math.max(0, mute - dt);
+      tickBoost(dt);
       trickFresh = false;
       jumpBuffer = Math.max(0, jumpBuffer - dt);
       if (!allowInput) {
@@ -573,6 +628,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         const targetFacing = Math.atan2(wish.x, wish.z);
         facing = lerpAngle(facing, targetFacing, 1 - Math.exp(-10 * dt));
         lookedAround = false;
+        if (!dragging) steerPause = 0;
       }
       // Keep the camera behind the avatar. After a drag while standing still, hold the view until you move.
       if (!dragging && steerPause <= 0 && !lookedAround) {
@@ -613,6 +669,12 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     },
   };
 
+  function tickBoost(dt) {
+    if (boostLeft <= 0) return;
+    boostLeft = Math.max(0, boostLeft - dt);
+    if (boostLeft === 0) speedBoost = 1;
+  }
+
   function padTop(pad) {
     return pad.mesh.position.y + pad.thickness;
   }
@@ -627,7 +689,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     foot.set(position.x, position.y - FOOT_OFFSET, position.z);
     look.set(position.x, foot.y + 1.05, position.z);
     cameraOffset(desiredCam, look);
-    const follow = 1 - Math.exp(-7 * dt);
+    const follow = 1 - Math.exp(-FOLLOW_MOVE * dt);
     camHold.x += (desiredCam.x - camHold.x) * follow;
     camHold.y += (desiredCam.y - camHold.y) * follow;
     camHold.z += (desiredCam.z - camHold.z) * follow;

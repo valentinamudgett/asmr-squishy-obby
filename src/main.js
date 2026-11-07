@@ -18,11 +18,11 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { createAudio } from "./audio.js";
 import { createLavaPop } from "./boom.js";
 import { createBots } from "./bot.js";
-import { awardLevelCoin, createCoinPop, earnCoins, loadCoins } from "./coins.js";
+import { awardLevelCoin, createCoinPop, earnCoins, LEVEL_COINS, loadCoins, spendCoins } from "./coins.js";
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
-import { BOSS_LEVEL, createEscape, KILLER_LEVEL } from "./escape.js";
+import { BOSS_LEVEL, createEscape, KILLER_LEVEL, SODA_PRICE, SODA_SECONDS, SODA_SPEED, VENDING_LEVEL } from "./escape.js";
 import { drawFace, FACES } from "./faces.js";
 import { BUBBLE_LIFT, createBubble, createNameTag } from "./figure.js";
 import { DANCES } from "./dances.js";
@@ -65,6 +65,10 @@ const bootFill = document.querySelector("#boot-fill");
 const levelEl = document.querySelector("#level");
 const escapeStat = document.querySelector("#escape-stat");
 const escapeCount = document.querySelector("#escape-count");
+const sodaStat = document.querySelector("#soda-stat");
+const sodaTime = document.querySelector("#soda-time");
+const actionPrompt = document.querySelector("#action-prompt");
+const actionButton = document.querySelector("#action-button");
 const coinsEl = document.querySelector("#coins");
 const menuCoinsEl = document.querySelector("#menu-coins");
 const shopCoinsEl = document.querySelector("#shop-coins");
@@ -414,6 +418,7 @@ async function bootGame() {
     const again = escape.replay;
     escape.leave();
     endCloseUp();
+    player.setSpeedBoost(1);
     const exit = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === FREEDOM_LEVEL);
     lastSafePad = checkpointPad;
     sendHome(checkpointPad.level >= FREEDOM_LEVEL || !exit ? checkpointPad : exit);
@@ -460,19 +465,20 @@ async function bootGame() {
     enterEscape(PRISON_LEVEL, true);
   });
   window.addEventListener("keydown", (event) => {
-    if (event.code === "KeyE" && !(event.target instanceof HTMLInputElement) && !ui.settingsOpen && !ui.startOpen) escape.openVent();
+    if (event.code === "KeyE" && !(event.target instanceof HTMLInputElement) && !ui.settingsOpen && !ui.startOpen) escape.act();
   });
-  document.querySelector("#open-vent").addEventListener("pointerdown", (event) => {
+  actionButton.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    escape.openVent();
+    escape.act();
   });
-  let ventShown = false;
+  let actionShown = null;
+  let sodaShown = 0;
   let hintTimer = 9;
   let clock = 0;
   let fightShown = "";
   showLevel(course.start.level);
   if (isPrisonLevel(best)) {
-    const at = best >= BOSS_LEVEL ? BOSS_LEVEL : best >= KILLER_LEVEL ? KILLER_LEVEL : PRISON_LEVEL;
+    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
     enterEscape(at);
     if (at !== PRISON_LEVEL) {
       showToast(`Level ${at}`);
@@ -512,7 +518,9 @@ async function bootGame() {
       }
     }
     const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active && lockIn <= 0 && !closeUp;
-    const frame = plunge ? player.plunge(dt) : player.update(dt, allowInput);
+    // On the prison zipline you hang from the handle: no steering until it lets go.
+    const ride = plunge ? null : escape.ride(dt, ui.settingsOpen || ui.startOpen);
+    const frame = plunge ? player.plunge(dt) : ride ? player.carry(dt, ride.position, ride.heading) : player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
     airTime = frame.grounded ? 0 : airTime + dt;
     // In the prison the course keeps itself around the gate checkpoint.
@@ -549,6 +557,7 @@ async function bootGame() {
       trick: frame.trick,
       trickP: frame.trickP,
       flying: frame.flying,
+      hanging: Boolean(ride),
       // Input, not speed: a moving pad or a landing slide carries the body without any steps.
       moving: frame.walking,
       stride: frame.onStair ? STAIR_RUN : 1,
@@ -659,7 +668,7 @@ async function bootGame() {
         best = level;
         saveBest(best);
       }
-      let earned = awardLevelCoin(coins, level);
+      payCheckpoint(level);
       if (level !== PRISON_LEVEL) {
         avatar.dance(look.dance);
         online.dance(look.dance);
@@ -673,7 +682,6 @@ async function bootGame() {
         const lines = [t("toast.escaped")];
         if (firstTime) {
           earnCoins(coins, ESCAPE_COINS);
-          earned = true;
           lines.push(t("toast.escapeBonus").replace("{n}", String(ESCAPE_COINS)));
         }
         lines.push(t("toast.backToObby"));
@@ -686,10 +694,8 @@ async function bootGame() {
         toastTimer = 1.6;
         nextToast = null;
       }
-      if (earned) {
-        showCoins();
-        coinPop.burst(frame.position);
-      }
+      showCoins();
+      coinPop.burst(frame.position);
     }
 
     if (escape.active !== prisoner) wearPrisoner(escape.active);
@@ -723,23 +729,48 @@ async function bootGame() {
           best = event.level;
           saveBest(best);
         }
-        if (awardLevelCoin(coins, event.level)) {
-          showCoins();
-          coinPop.burst(frame.position);
-        }
+        payCheckpoint(event.level);
+        showCoins();
+        coinPop.burst(frame.position);
         avatar.dance(look.dance);
         online.dance(look.dance);
         showToast(`Level ${event.level}`);
         toastTimer = 1.6;
         nextToast = event.text;
+      } else if (event.type === "soda") {
+        // Short on coins? The machine gives you one anyway.
+        const paid = spendCoins(coins, SODA_PRICE);
+        if (paid) showCoins();
+        player.setSpeedBoost(SODA_SPEED, SODA_SECONDS);
+        const speedy = t("toast.sodaBought").replace("{n}", String(SODA_SECONDS));
+        showToast(paid ? speedy : t("toast.sodaFree"));
+        toastTimer = 2;
+        nextToast = paid ? null : speedy;
+        audio.blip("thump");
+      } else if (event.type === "sodaEnd") {
+        player.setSpeedBoost(1);
+        sodaShown = 0;
+        sodaStat.hidden = true;
       } else if (event.type === "free") {
         leaveEscape();
       }
     }
-    const nearVent = escape.canOpen && !menus;
-    if (nearVent !== ventShown) {
-      ventShown = nearVent;
-      document.body.classList.toggle("near-vent", nearVent);
+    const action = menus ? null : escape.action;
+    if (action !== actionShown) {
+      actionShown = action;
+      document.body.classList.toggle("can-act", action !== null);
+      if (action) [actionPrompt.textContent, actionButton.textContent] = actionText(action);
+    }
+    const sodaLeft = Math.ceil(player.boostLeft);
+    if (sodaLeft !== sodaShown) {
+      if (sodaLeft === 0 && sodaShown > 0 && escape.active) {
+        showToast(t("toast.sodaGone"));
+        toastTimer = 1.6;
+        nextToast = null;
+      }
+      sodaShown = sodaLeft;
+      sodaStat.hidden = sodaLeft === 0;
+      sodaTime.textContent = `${sodaLeft}s`;
     }
     const fight = escape.fight;
     const fightKey = fight ? `${fight.lives}/${fight.health}/${escape.armed}` : "";
@@ -995,6 +1026,18 @@ function showCoins() {
   coinsEl.textContent = text;
   menuCoinsEl.textContent = text;
   shopCoinsEl.textContent = text;
+}
+
+/** Every checkpoint you move on to pays LEVEL_COINS, the first time through or not. */
+function payCheckpoint(level) {
+  if (!awardLevelCoin(coins, level)) earnCoins(coins, LEVEL_COINS);
+}
+
+/** What the prompt and the touch action button say for each of the prison's `action`s. */
+function actionText(action) {
+  if (action === "zip") return [t("prompt.zipline"), t("hud.grab")];
+  if (action === "soda") return [t("prompt.soda").replace("{n}", String(SODA_PRICE)), t("hud.buy")];
+  return [t("prompt.openVent"), t("hud.open")];
 }
 
 /** While you are in Capybara Prison, the HUD counts the levels you've climbed toward freedom. */

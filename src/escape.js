@@ -23,22 +23,33 @@ import { plainMaterial, unlitMaterial } from "./seasons.js";
 
 /** Checkpoints inside the prison. PRISON_LEVEL is the cell; FREEDOM_LEVEL is back out on the course. */
 export const KILLER_LEVEL = 110;
+/** The vending room past the killer capybara's obby, where the chef comes after you. */
+export const VENDING_LEVEL = 112;
 export const BOSS_LEVEL = 115;
+/** The energy soda from the vending machine: its price in coins, the run speed it gives, and for how long. */
+export const SODA_PRICE = 3;
+export const SODA_SPEED = 1.6;
+export const SODA_SECONDS = 18;
 
 /** The prison is built off to the side of the level-100 checkpoint, well clear of the course. */
 const OFFSET = new Vector3(160, -2, 0);
 const LIVES = 10;
 const BOSS_HEALTH = 5;
-/** Per difficulty. The player runs at 4.4 m/s, so police that keep coming are a little slower. */
+/**
+ * Per difficulty. The player runs at 4.4 m/s, so police that keep coming are a little slower. The
+ * chef is faster than a run but slower than a run on soda (7 m/s); `chefWait` is how long it holds
+ * off when you don't buy one.
+ */
 const PACE = {
-  easy: { police: 3.3, policeDelay: 2.6, killer: 4.0, killerDelay: 2.2, fireEvery: 1.7, fireSpeed: 10 },
-  medium: { police: 3.8, policeDelay: 1.9, killer: 4.6, killerDelay: 1.6, fireEvery: 1.25, fireSpeed: 13 },
-  hard: { police: 4.2, policeDelay: 1.3, killer: 5.2, killerDelay: 1.1, fireEvery: 0.9, fireSpeed: 16 },
+  easy: { police: 3.3, policeDelay: 2.6, killer: 4.0, killerDelay: 2.2, chef: 5.4, chefDelay: 1.6, chefWait: 5, fireEvery: 1.7, fireSpeed: 10 },
+  medium: { police: 3.8, policeDelay: 1.9, killer: 4.6, killerDelay: 1.6, chef: 5.9, chefDelay: 1.3, chefWait: 4, fireEvery: 1.25, fireSpeed: 13 },
+  hard: { police: 4.2, policeDelay: 1.3, killer: 5.2, killerDelay: 1.1, chef: 6.4, chefDelay: 1, chefWait: 3, fireEvery: 0.9, fireSpeed: 16 },
 };
 /** Where each checkpoint puts you, in prison space, and which way you face. */
 const SPAWNS = {
   [PRISON_LEVEL]: { x: 0.8, y: 0, z: 1.2, heading: -Math.PI / 2 },
-  [KILLER_LEVEL]: { x: 8.4, y: 17.6, z: -3.5, heading: Math.PI / 2 },
+  [KILLER_LEVEL]: { x: 10.5, y: 17.6, z: 1.5, heading: Math.PI / 2 },
+  [VENDING_LEVEL]: { x: 41.8, y: 21.8, z: 10.6, heading: -Math.PI / 2 },
   [BOSS_LEVEL]: { x: 46.6, y: 21.8, z: 0, heading: Math.PI / 2 },
 };
 const HALL_FLOOR = -3;
@@ -51,7 +62,24 @@ const STAGE_TOP = 22.4;
 const BOSS_X = 72;
 const BOSS_SIZE = 4.2;
 const KILLER_SIZE = 1.6;
+const CHEF_SIZE = 1.8;
 const POLICE_SIZE = 1.3;
+/** Where the second vent comes out, high on the killer capybara's wall. */
+const LEDGE_TOP = 19.4;
+/** The zipline from the ledge down to the level-110 checkpoint: cable ends, in prison space. */
+const ZIP_FROM = { x: 8, y: 22.2, z: -6.8 };
+const ZIP_TO = { x: 10.5, y: 20.05, z: 1.5 };
+const ZIP_SPEED = 5;
+/** From the cable down to your feet while you hang from the handle. */
+const ZIP_HANG = 1.95;
+/** Standing this close under the handle grabs it; this close lets you grab it with E. */
+const ZIP_TOUCH = 0.5;
+const ZIP_REACH = 1.6;
+/** The vending machine's front, in prison space, and how close you must be to buy. */
+const MACHINE = { x: 35.6, z: 10.4 };
+const MACHINE_REACH = 2;
+/** Past this x you're out of the vending room and into the kitchen. */
+const KITCHEN_X = 44;
 const SHOT_SPEED = 32;
 const SHOT_COOLDOWN = 0.28;
 /** Shots within this angle of where you face curve onto the boss. */
@@ -88,6 +116,19 @@ const KILLER_ROUTE = [
   { x: 7.2, y: KILLER_FLOOR, z: 0, w: 7.3 },
   { x: PIT_EDGE - 0.6, y: KILLER_FLOOR, z: 0 },
 ];
+/** The chef's way from the vending room, down the kitchen, and to the arena door. */
+const CHEF_ROUTE = [
+  { x: 35, y: ARENA_FLOOR, z: 12.4, w: 3.2 },
+  { x: KITCHEN_X, y: ARENA_FLOOR, z: 14.4, w: 1.6 },
+  { x: 60.75, y: ARENA_FLOOR, z: 14.4, w: 1.4 },
+  { x: 60.75, y: ARENA_FLOOR, z: 11.4 },
+];
+/** Kitchen counters to jump or weave round: x0, x1, z0, z1. */
+const COUNTERS = [
+  [48.5, 49.7, 12.4, 14.6],
+  [53, 54.2, 14.2, 16.4],
+  [57, 58.2, 12.4, 14.4],
+];
 /**
  * The big squishies stuck to the walls, bottom to top: once round the room and on to the one under
  * the vent. Gaps of 1.3 to 1.5 m and steps of 0.4 to 0.8 m, like the course; a running jump clears
@@ -105,6 +146,8 @@ const WALL_SQUISHIES = [
   { food: "cheese", size: 2.4, x: -12.6, z: -4.75, top: 16.2 },
   { food: "needoh", size: 2.4, color: "#ff9f43", x: -8.9, z: -4.75, top: 16.6 },
   { food: "jelly", size: 2.4, color: "#ff6f9e", x: -5.25, z: -3.5, top: 17 },
+  { food: "blob", size: 2.4, color: "#ffd23f", x: -5.25, z: 0.5, top: 17.8 },
+  { food: "dumpling", radius: 1.15, color: "#c9a0ff", x: -5.25, z: 4.4, top: 18.6 },
 ];
 /** The first vent's centre line, from the cell wall to the hole over the hall. */
 const VENT_PATH = [
@@ -117,23 +160,23 @@ const VENT_PATH = [
   [-12.5, -1.5],
   [-15.1, -1.5],
 ];
-/** The second vent's centre line, from the squishy room wall to the killer capybara's room. */
+/** The second vent's centre line, from the squishy room wall to the ledge in the killer capybara's room. */
 const VENT2_PATH = [
-  [-3.6, -3.5],
-  [-1.5, -3.5],
-  [-1.5, 0.5],
-  [1.5, 0.5],
-  [1.5, -6.5],
-  [4, -6.5],
-  [4, -3.5],
-  [6, -3.5],
+  [-3.6, 4.5],
+  [-1.2, 4.5],
+  [-1.2, -2.5],
+  [1.6, -2.5],
+  [1.6, 4.5],
+  [4.2, 4.5],
+  [4.2, -5.5],
+  [6, -5.5],
 ];
 /** Half the width of a vent: room for the capsule to turn and the camera to stay inside. */
 const DUCT_HALF = 0.9;
 /** Vent covers: where the closed grate sits, which edge it hinges on, and which way it swings. */
 const GRATES = [
   { x: -2.97, y: 1.65, z: -1.5, hinge: -0.6, swing: -1.75 },
-  { x: -4.03, y: 17.6, z: -3.5, hinge: -2.6, swing: 1.75 },
+  { x: -4.03, y: LEDGE_TOP, z: 4.5, hinge: 5.4, swing: 1.75 },
 ];
 /** How close (to the grate's middle) you must be to open it. */
 const GRATE_REACH = 2.1;
@@ -163,10 +206,13 @@ const COVER = [
  * 2. The vent drops you through the hall ceiling. Police capybaras come out of their door and chase
  *    you up four flights of stairs. If they catch you, it's back to the cell.
  * 3. Big squishies stuck to the wall climb to a second vent. The police can't catch you on them.
- * 4. Level 110: a killer capybara chases you across the floor until you're on the obby over the goo.
- * 5. Level 115: the warden, a giant capybara, throws mandarins at you. You get a blaster and 10
+ * 4. The vent comes out on a ledge, and a zipline carries you down to level 110. A killer capybara
+ *    chases you across the floor until you're on the obby over the goo.
+ * 5. Level 112: a vending machine sells an energy soda that makes you run faster for a while. Then a
+ *    chef capybara chases you down the kitchen to the arena door.
+ * 6. Level 115: the warden, a giant capybara, throws mandarins at you. You get a blaster and 10
  *    lives; five hits wins, and losing all your lives starts the fight over.
- * 6. The gate behind the warden opens, and walking through it sends you out to level 120.
+ * 7. The gate behind the warden opens, and walking through it sends you out to level 120.
  */
 export function createEscape(scene, { graphics, audio, avatar }) {
   let pace = PACE.easy;
@@ -187,6 +233,11 @@ export function createEscape(scene, { graphics, audio, avatar }) {
   /** Set while the caught close-up plays: seconds left, where you go back to, and what it says then. */
   let caught = null;
   let replay = false;
+  /** How far along the zipline you are while riding it. */
+  let rideS = 0;
+  /** Whether you've had the soda since the last time you were at level 112, and when the chef comes out. */
+  let soda = false;
+  let chefIn = 0;
   const events = [];
 
   const toast = (text, next = null, time = 2.2) => events.push({ type: "toast", text, next, time });
@@ -200,12 +251,18 @@ export function createEscape(scene, { graphics, audio, avatar }) {
   /** Puts the actors back the way they are when you arrive at checkpoint `at`. */
   function reset(at) {
     level = at;
-    phase = at === PRISON_LEVEL ? "cell" : at === KILLER_LEVEL ? "killer" : "boss";
+    phase = { [PRISON_LEVEL]: "cell", [KILLER_LEVEL]: "killer", [VENDING_LEVEL]: "chef" }[at] ?? "boss";
     safeShown = false;
     obbyShown = false;
     for (const officer of site.police) officer.hide();
     site.killer.hide();
+    site.chef.hide();
     if (phase === "killer") site.killer.wait = pace.killerDelay;
+    rideS = 0;
+    site.zip.place(0);
+    soda = false;
+    chefIn = pace.chefWait;
+    if (at === VENDING_LEVEL) events.push({ type: "sodaEnd" });
     site.clearShots();
     fight = null;
     site.boss.restore();
@@ -274,10 +331,57 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       safeShown = true;
       toast(t("toast.squishySafe"), t("toast.climbSquishies"), 2.6);
     }
-    if (here.x > -4.3 && here.y > 17) {
+    if (here.x > -3.8 && here.y > LEDGE_TOP - 0.4) {
       phase = "duct";
       for (const officer of site.police) officer.hide();
     }
+  }
+
+  /** Through the second vent and out on the ledge: grab the zipline, or drop down, to reach level 110. */
+  function updateDuct(grounded) {
+    if (here.y > LEDGE_TOP - 0.3 && Math.hypot(here.x - ZIP_FROM.x, here.z - ZIP_FROM.z) < ZIP_TOUCH) {
+      grab();
+      return;
+    }
+    if (grounded && here.x > 6.4 && here.y < KILLER_FLOOR + 0.5) reach(KILLER_LEVEL, t("toast.killer"));
+  }
+
+  function nearHandle() {
+    return phase === "duct" && here.y > LEDGE_TOP - 0.3 && Math.hypot(here.x - ZIP_FROM.x, here.z - ZIP_FROM.z) < ZIP_REACH;
+  }
+
+  function grab() {
+    phase = "zip";
+    rideS = 0;
+    audio.blip("thump");
+  }
+
+  function nearMachine() {
+    return phase === "chef" && !soda && here.y > ARENA_FLOOR - 0.3 && Math.hypot(center.x - MACHINE.x, center.z - MACHINE.z) < MACHINE_REACH;
+  }
+
+  /** Level 112: the chef comes out once you've had the soda (or got tired of waiting) and runs you down the kitchen. */
+  function updateChef(dt) {
+    if (here.y < ARENA_FLOOR - 3) {
+      respawn(VENDING_LEVEL, t("toast.goo"), t("toast.keepGoing"));
+      return;
+    }
+    const chef = site.chef;
+    if (!chef.out) {
+      chefIn -= dt;
+      if (here.x > KITCHEN_X) chefIn = Math.min(chefIn, 0.3);
+      if (chefIn <= 0) {
+        chef.release(0);
+        toast(t("toast.chef"), null, 2.2);
+        audio.blip("thump");
+      }
+    }
+    const target = site.chefRoute.project(here.x, here.y, here.z);
+    if (chef.step(dt, target, 0, pace.chef)) {
+      catchBy(chef, VENDING_LEVEL, t("toast.chefCaught"), t("toast.buyAgain"));
+      return;
+    }
+    if (here.x > 44.4 && here.z < 11.8 && here.y > ARENA_FLOOR - 0.5) reach(BOSS_LEVEL, t("toast.bossIntro"));
   }
 
   function updateKiller(dt) {
@@ -300,7 +404,7 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       catchBy(killer, KILLER_LEVEL, t("toast.killerCaught"), t("toast.keepGoing"));
       return;
     }
-    if (here.x > 45.2 && here.y > ARENA_FLOOR - 0.5) reach(BOSS_LEVEL, t("toast.bossIntro"));
+    if (here.z > 8.6 && here.y > ARENA_FLOOR - 0.5) reach(VENDING_LEVEL, t("toast.vending"));
   }
 
   function updateFight(dt) {
@@ -375,7 +479,7 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       pace = PACE[difficulty] ?? PACE.easy;
     },
     /**
-     * Locks you up at checkpoint `at` (100, 110, or 115), building the prison beside `gate`, the
+     * Locks you up at checkpoint `at` (100, 110, 112, or 115), building the prison beside `gate`, the
      * level-100 checkpoint pad (or any pad, for a replay). Returns where to put the player.
      */
     enter(gate, at, { again = false } = {}) {
@@ -424,21 +528,51 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       site.fireShot(center, facing);
       audio.blip("pew");
     },
-    /** True when you're next to a closed vent grate. */
-    get canOpen() {
-      return active && site !== null && caught === null && site.grates.some((grate) => grate.closed && Vector3.Distance(grate.center, center) < GRATE_REACH);
+    /**
+     * What E (or the touch action button) does where you stand: "vent" opens a vent grate, "zip"
+     * grabs the zipline, "soda" buys an energy soda. Null when there's nothing to do.
+     */
+    get action() {
+      if (!active || !site || caught !== null) return null;
+      if (site.grates.some((grate) => grate.closed && Vector3.Distance(grate.center, center) < GRATE_REACH)) return "vent";
+      if (nearHandle()) return "zip";
+      if (nearMachine()) return "soda";
+      return null;
     },
-    /** Swings open the closed vent grate you're next to, if any. */
-    openVent() {
-      if (!this.canOpen) return;
-      const grate = site.grates.find((each) => each.closed && Vector3.Distance(each.center, center) < GRATE_REACH);
-      grate.open();
-      audio.blip("thump");
+    act() {
+      const action = this.action;
+      if (action === "vent") {
+        site.grates.find((each) => each.closed && Vector3.Distance(each.center, center) < GRATE_REACH).open();
+        audio.blip("thump");
+      } else if (action === "zip") {
+        grab();
+      } else if (action === "soda") {
+        // main.js takes the coins and gives you the speed.
+        soda = true;
+        if (!site.chef.out) chefIn = pace.chefDelay;
+        events.push({ type: "soda" });
+      }
+    },
+    /** True while you hang from the zipline. */
+    get riding() {
+      return active && phase === "zip";
+    },
+    /**
+     * Moves you along the zipline. Call before the player update; while riding, put the capsule
+     * centre at the returned position instead. Null when you're not on it (or it just let go).
+     */
+    ride(dt, hold) {
+      if (!active || !site || phase !== "zip") return null;
+      if (!hold) rideS = Math.min(site.zip.length, rideS + ZIP_SPEED * dt);
+      const point = site.zip.place(rideS);
+      if (rideS >= site.zip.length) phase = "duct";
+      return { position: world(point.x, point.y - ZIP_HANG + FOOT_OFFSET, point.z), heading: site.zip.heading };
     },
     /**
      * `hold` freezes the actors (menus, dances, screen changes). Returns this frame's events:
      * `toast`, `respawn` (position, heading), `checkpoint` (level, text), `closeUp` (eye, target:
-     * look at the capybara that caught you), `closeUpEnd`, and `free`.
+     * look at the capybara that caught you), `closeUpEnd`, `soda` (you bought one), `sodaEnd` (it's
+     * taken away), and `free`.
      */
     update(dt, time, { foot, position, pad, grounded, facing: faceAngle, hold }) {
       if (!active || !site) return events.splice(0);
@@ -469,8 +603,9 @@ export function createEscape(scene, { graphics, audio, avatar }) {
         policeIn = pace.policeDelay;
         toast(t("toast.policeSpotted"), null, 2.6);
       } else if (phase === "chase") updateChase(dt);
-      else if (phase === "duct" && here.x > 7.2 && here.y > KILLER_FLOOR - 1) reach(KILLER_LEVEL, t("toast.killer"));
+      else if (phase === "duct") updateDuct(grounded);
       else if (phase === "killer") updateKiller(dt);
+      else if (phase === "chef") updateChef(dt);
       else if (phase === "boss") updateFight(dt);
       else if (phase === "won") {
         site.boss.walk(fight.time, here);
@@ -525,6 +660,10 @@ function buildSite(scene, origin, { graphics, audio }) {
     goo: material("goo", "#4fd640", 0.45),
     crate: material("crate", "#9c6b35"),
     steel: material("steel", "#6d7682"),
+    kitchen: material("kitchen", "#b7c2c4"),
+    vend: material("vend", "#c8203a", 0.1),
+    vendGlow: material("vendGlow", "#bff1ff", 0.85),
+    cans: ["#2f7bff", "#3ddc84", "#ff4fa3", "#ffcf3a"].map((hex, index) => material(`can${index}`, hex, 0.35)),
     arena: material("arena", "#3b2f4a"),
     arenaWall: material("arenaWall", "#6e2a35"),
     door: material("door", "#24356b"),
@@ -853,35 +992,42 @@ function buildSite(scene, origin, { graphics, audio }) {
   box(-18, 13.4, -6.4, -17.6, 25.4, 6.4, M.concrete);
   box(-17.6, SQUISHY_FLOOR, -6.4, -3.6, 25.4, -6, M.concrete);
   box(-17.6, SQUISHY_FLOOR, 6, -3.6, 25.4, 6.4, M.concrete);
-  box(-4, SQUISHY_FLOOR, -6, -3.6, 17.6, 6, M.trim);
-  box(-4, 19.7, -6, -3.6, 25.4, 6, M.trim);
-  box(-4, 17.6, -6, -3.6, 19.7, -4.4, M.trim);
-  box(-4, 17.6, -2.6, -3.6, 19.7, 6, M.trim);
+  const ductTop = LEDGE_TOP + 2.1;
+  box(-4, SQUISHY_FLOOR, -6, -3.6, LEDGE_TOP, 6, M.trim);
+  box(-4, ductTop, -6, -3.6, 25.4, 6, M.trim);
+  box(-4, LEDGE_TOP, -6, -3.6, ductTop, 3.6, M.trim);
+  box(-4, LEDGE_TOP, 5.4, -3.6, ductTop, 6, M.trim);
   box(-17.6, 25, -6.4, -3.6, 25.4, 6.4, M.ceiling);
   for (const x of [-15, -10]) for (const z of [-3, 3]) lamp(x, 25, z, 2, 0.6);
-  box(-4.02, 19.7, -4.5, -3.96, 19.8, -2.5, M.metal, { solid: false, camera: false });
+  box(-4.02, ductTop, 3.5, -3.96, ductTop + 0.1, 5.5, M.metal, { solid: false, camera: false });
 
-  // 6. The second vent, zig-zagging high over the cell into the killer capybara's room.
-  box(-3.6, 17.4, -7.8, 6.4, 17.6, 1.8, M.metal);
-  box(-3.6, 19.7, -7.8, 6.4, 19.9, 1.8, M.metal);
-  ductWalls(-3.6, 6, -7.8, 1.8, 17.6, 19.7, VENT2_PATH);
-  for (const [x, z] of VENT2_PATH.slice(1, -1)) lamp(x, 19.7, z, 0.5, 0.3);
+  // 6. The second vent, zig-zagging high over the cell and out onto the ledge in the killer capybara's room.
+  box(-3.6, LEDGE_TOP - 0.2, -6.8, 6.4, LEDGE_TOP, 5.8, M.metal);
+  box(-3.6, ductTop, -6.8, 6.4, ductTop + 0.2, 5.8, M.metal);
+  ductWalls(-3.6, 6, -6.8, 5.8, LEDGE_TOP, ductTop, VENT2_PATH);
+  for (const [x, z] of VENT2_PATH.slice(1, -1)) lamp(x, ductTop, z, 0.5, 0.3);
 
-  // 7. The killer capybara's room: its floor, the goo pit, the obby, and the ledge to the arena.
-  box(6, 9, -8.4, 6.4, KILLER_FLOOR, 8.4, M.concrete);
-  box(6, 19.7, -8.4, 6.4, 30.4, 8.4, M.concrete);
-  box(6, KILLER_FLOOR, -8.4, 6.4, 19.7, -4.4, M.concrete);
-  box(6, KILLER_FLOOR, -2.6, 6.4, 19.7, 8.4, M.concrete);
+  // 7. The killer capybara's room: the ledge and zipline, its floor, the goo pit, the obby, and the
+  // ledge on the far side with the door to the vending room.
+  box(6, 9, -8.4, 6.4, LEDGE_TOP, 8.4, M.concrete);
+  box(6, ductTop, -8.4, 6.4, 30.4, 8.4, M.concrete);
+  box(6, LEDGE_TOP, -8.4, 6.4, ductTop, -6.4, M.concrete);
+  box(6, LEDGE_TOP, -4.6, 6.4, ductTop, 8.4, M.concrete);
+  box(6.4, LEDGE_TOP - 0.4, -8, 9.4, LEDGE_TOP, -4.2, M.steel, { cast: true });
+  box(6.4, LEDGE_TOP, -4.32, 9.4, LEDGE_TOP + 0.02, -4.2, M.hazard, { solid: false, camera: false });
+  box(9.28, LEDGE_TOP, -8, 9.4, LEDGE_TOP + 0.02, -4.2, M.hazard, { solid: false, camera: false });
+  for (const z of [-7.8, -4.4]) box(9.2, KILLER_FLOOR, z - 0.1, 9.4, LEDGE_TOP - 0.4, z + 0.1, M.trim, { solid: false, camera: false });
+  const zip = buildZipline(scene, root, add, M);
   box(6.4, 9, -8, PIT_EDGE, KILLER_FLOOR, 8, M.floor);
   box(PIT_EDGE - 0.4, KILLER_FLOOR, -8, PIT_EDGE, KILLER_FLOOR + 0.02, 8, M.hazard, { solid: false, camera: false });
   box(PIT_EDGE, 8.6, -8, 40, 9, 8, M.goo);
   box(40, 9, -8, 44, ARENA_FLOOR, 8, M.steel);
   box(6, 9, -8.4, 44.4, 30.4, -8, M.concrete);
-  box(6, 9, 8, 44.4, 30.4, 8.4, M.concrete);
-  box(44, 9, -8, 44.4, ARENA_FLOOR, 8, M.concrete);
-  box(44, 24.6, -8, 44.4, 30.4, 8, M.concrete);
-  box(44, ARENA_FLOOR, -8, 44.4, 24.6, -1.6, M.concrete);
-  box(44, ARENA_FLOOR, 1.6, 44.4, 24.6, 8, M.concrete);
+  box(6, 9, 8, 40.6, 30.4, 8.4, M.concrete);
+  box(43.4, 9, 8, 44.4, 30.4, 8.4, M.concrete);
+  box(40.6, 9, 8, 43.4, ARENA_FLOOR, 8.4, M.concrete);
+  box(40.6, ARENA_FLOOR + 2.8, 8, 43.4, 30.4, 8.4, M.concrete);
+  box(44, 9, -8, 44.4, 30.4, 8, M.concrete);
   box(6, 30, -8.4, 44.4, 30.4, 8.4, M.ceiling);
   box(9.5, KILLER_FLOOR, 7.94, 12.5, KILLER_FLOOR + 3, 8, M.dark, { solid: false });
   sign(t("prison.danger"), 11, KILLER_FLOOR + 3.9, 7.93, 0, 4.4, 0.8, "#ffd23f", "#2b1405");
@@ -890,12 +1036,52 @@ function buildSite(scene, origin, { graphics, audio }) {
     box(x0, top, z0, x1, top + 0.02, z0 + 0.12, M.hazard, { solid: false, camera: false });
   }
   for (const x of [10, 20, 30, 40]) lamp(x, 30, 0, 2.4, 0.8);
-  marker(KILLER_LEVEL, 8.6, KILLER_FLOOR, -1.2);
+  marker(KILLER_LEVEL, SPAWNS[KILLER_LEVEL].x, KILLER_FLOOR, SPAWNS[KILLER_LEVEL].z);
 
-  // 8. The warden's arena: a stage for the giant capybara, crates for cover, and the exit gate.
+  // 8. The vending room through the door off the far ledge, and the kitchen corridor that runs
+  // along the arena's wall to its side door. Floor at ARENA_FLOOR, ceiling 4.2 above.
+  const roomTop = ARENA_FLOOR + 4.2;
+  box(34, ARENA_FLOOR - 0.4, 8.4, 44, ARENA_FLOOR, 16.4, M.tile);
+  box(44, ARENA_FLOOR - 0.4, 12.4, 64.4, ARENA_FLOOR, 16.4, M.tile);
+  box(33.6, ARENA_FLOOR, 8.4, 34, roomTop, 16.4, M.kitchen);
+  box(33.6, ARENA_FLOOR, 16.4, 64.4, roomTop, 16.8, M.kitchen);
+  box(64, ARENA_FLOOR, 12.4, 64.4, roomTop, 16.4, M.kitchen);
+  box(33.6, roomTop, 8.4, 44, roomTop + 0.4, 16.8, M.ceiling);
+  box(44, roomTop, 12.4, 64.4, roomTop + 0.4, 16.8, M.ceiling);
+  // The vending machine against the west wall, its lit front full of cans facing the room.
+  box(34, ARENA_FLOOR, 9.5, 35.1, ARENA_FLOOR + 2.2, 11.3, M.vend, { cast: true });
+  box(35.1, ARENA_FLOOR + 0.85, 9.7, 35.13, ARENA_FLOOR + 2.0, 11.1, M.vendGlow, { solid: false, camera: false });
+  box(35.1, ARENA_FLOOR + 0.25, 9.9, 35.16, ARENA_FLOOR + 0.55, 10.9, M.dark, { solid: false, camera: false });
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      const can = MeshBuilder.CreateCylinder("prisonCan", { height: 0.22, diameter: 0.13, tessellation: 10 }, scene);
+      can.position.set(35.2, ARENA_FLOOR + 1.07 + row * 0.33, 9.95 + col * 0.3);
+      add(can, M.cans[(row + col) % M.cans.length], { camera: false });
+    }
+  }
+  sign(t("prison.soda"), 35.17, ARENA_FLOOR + 2.45, 10.4, -Math.PI / 2, 1.7, 0.4, "#ff2d6f", "#ffffff");
+  // The chef's door in the corner, and the kitchen: counters, stoves, and the arena's side door.
+  box(33.96, ARENA_FLOOR, 13.6, 34.02, ARENA_FLOOR + 2.6, 15.6, M.dark, { solid: false });
+  sign(t("prison.kitchen"), 50, ARENA_FLOOR + 3.2, 16.37, 0, 3, 0.6, "#2f3640", "#ffffff");
+  for (const [x0, x1, z0, z1] of COUNTERS) {
+    box(x0, ARENA_FLOOR, z0, x1, ARENA_FLOOR + 0.75, z1, M.steel, { cast: true });
+    box(x0 + 0.15, ARENA_FLOOR + 0.75, z0 + 0.3, x1 - 0.15, ARENA_FLOOR + 0.78, z0 + 1, M.dark, { solid: false, camera: false });
+  }
+  box(59, ARENA_FLOOR, 12.36, 62.5, ARENA_FLOOR + 0.02, 12.6, M.hazard, { solid: false, camera: false });
+  for (const [x, z] of [
+    [39, 12.4],
+    [48, 14.4],
+    [55, 14.4],
+    [61, 14.4],
+  ]) lamp(x, roomTop, z, 2, 0.6);
+  marker(VENDING_LEVEL, SPAWNS[VENDING_LEVEL].x, ARENA_FLOOR, SPAWNS[VENDING_LEVEL].z);
+
+  // 9. The warden's arena: a stage for the giant capybara, crates for cover, and the exit gate.
   box(44.4, ARENA_FLOOR - 0.4, -12.4, 78.4, ARENA_FLOOR, 12.4, M.arena);
   box(44.4, ARENA_FLOOR, -12.4, 78, 34.4, -12, M.arenaWall);
-  box(44.4, ARENA_FLOOR, 12, 78, 34.4, 12.4, M.arenaWall);
+  box(44.4, ARENA_FLOOR, 12, 59, 34.4, 12.4, M.arenaWall);
+  box(62.5, ARENA_FLOOR, 12, 78, 34.4, 12.4, M.arenaWall);
+  box(59, ARENA_FLOOR + 3, 12, 62.5, 34.4, 12.4, M.arenaWall);
   box(44, ARENA_FLOOR, -12.4, 44.4, 34.4, -8, M.arenaWall);
   box(44, ARENA_FLOOR, 8, 44.4, 34.4, 12.4, M.arenaWall);
   box(44, 30.4, -8, 44.4, 34.4, 8, M.arenaWall);
@@ -947,8 +1133,9 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const grate of grates) grate.close();
   const police = [0, 1].map((index) => createActor(scene, root, "police", POLICE_SIZE, `prisonPolice${index}`));
   const killer = createActor(scene, root, "killer", KILLER_SIZE, "killerCapybara");
+  const chef = createActor(scene, root, "chef", CHEF_SIZE, "chefCapybara");
   const boss = createBoss(scene, root);
-  casters.push(...police.map((officer) => officer.body), killer.body, boss.body);
+  casters.push(...police.map((officer) => officer.body), killer.body, chef.body, boss.body, zip.trolley);
   for (const mesh of casters) graphics.shadow.addShadowCaster(mesh, true);
   const sirens = [new Color3(1, 0.08, 0.06), new Color3(0.1, 0.35, 1)].map((color, index) => {
     const look = new StandardMaterial(`prisonSiren${index}`, scene);
@@ -971,6 +1158,9 @@ function buildSite(scene, origin, { graphics, audio }) {
   killer.route = createRoute(KILLER_ROUTE);
   const door = killer.route.project(11, KILLER_FLOOR, 7.6);
   killer.door = { s: door.s, side: door.side, facing: Math.PI };
+  chef.route = createRoute(CHEF_ROUTE);
+  const chefDoor = chef.route.project(34.6, ARENA_FLOOR, 14.6);
+  chef.door = { s: chefDoor.s, side: chefDoor.side, facing: Math.PI / 2 };
   const shots = createShots(scene, root, boss);
   owned.push(shots);
 
@@ -980,11 +1170,14 @@ function buildSite(scene, origin, { graphics, audio }) {
     standing: null,
     police,
     killer,
+    chef,
     boss,
     gate,
     grates,
+    zip,
     policeRoute: police[0].route,
     killerRoute: killer.route,
+    chefRoute: chef.route,
     throwMandarin: shots.throwMandarin,
     fireShot: shots.fireShot,
     stepShots: shots.step,
@@ -1001,7 +1194,7 @@ function buildSite(scene, origin, { graphics, audio }) {
       const blocks = (mesh) =>
         mesh.metadata?.blocksCamera === true || mesh.name === "prison-prison-bars" || squishies.some((pad) => pad.mesh === mesh);
       if (scene.pickWithRay(new Ray(from, way, length), blocks)?.hit) return false;
-      for (const other of [...police, killer]) {
+      for (const other of [...police, killer, chef]) {
         if (other === actor || !other.body.isEnabled()) continue;
         const middle = other.position.add(new Vector3(0, 0.5 * other.size, 0));
         const along = Math.max(0, Math.min(length, Vector3.Dot(middle.subtract(target), way)));
@@ -1329,6 +1522,60 @@ function buildGate(scene, root, look) {
     dispose() {
       free();
       gate.dispose();
+    },
+  };
+}
+
+/**
+ * The zipline: a cable from ZIP_FROM past ZIP_TO to its post on the floor, and the handle that rides
+ * it. `place(s)` puts the handle `s` along the cable and returns that cable point, in prison space.
+ */
+function buildZipline(scene, root, add, M) {
+  const from = new Vector3(ZIP_FROM.x, ZIP_FROM.y, ZIP_FROM.z);
+  const to = new Vector3(ZIP_TO.x, ZIP_TO.y, ZIP_TO.z);
+  const way = to.subtract(from);
+  const length = way.length();
+  way.normalize();
+  const end = to.add(way.scale(1.2));
+  const cable = MeshBuilder.CreateCylinder("prisonZipCable", { height: Vector3.Distance(from, end) + 0.4, diameter: 0.05, tessellation: 6 }, scene);
+  cable.position.copyFrom(from.add(end).scaleInPlace(0.5));
+  cable.rotationQuaternion = new Quaternion();
+  Quaternion.FromUnitVectorsToRef(Vector3.Up(), way, cable.rotationQuaternion);
+  add(cable, M.bars, { camera: false });
+  // A bracket out of the wall holds the top end, so nothing stands between the camera and you at the start.
+  const back = from.subtract(way.scale(0.2));
+  const bracket = MeshBuilder.CreateBox("prisonZipBracket", { width: back.x - 6.4, height: 0.12, depth: 0.12 }, scene);
+  bracket.position.set((back.x + 6.4) / 2, back.y + 0.06, back.z);
+  add(bracket, M.trim, { camera: false });
+  const post = MeshBuilder.CreateBox("prisonZipPost", { width: 0.14, height: end.y + 0.3 - KILLER_FLOOR, depth: 0.14 }, scene);
+  post.position.set(end.x, (end.y + 0.3 + KILLER_FLOOR) / 2, end.z);
+  add(post, M.trim, { camera: false });
+
+  const parts = [];
+  const piece = (mesh, y) => {
+    mesh.position.y = y;
+    parts.push(mesh);
+    return mesh;
+  };
+  piece(MeshBuilder.CreateBox("prisonZipWheel", { width: 0.16, height: 0.2, depth: 0.4 }, scene), 0.02);
+  piece(MeshBuilder.CreateCylinder("prisonZipRod", { height: 0.42, diameter: 0.035, tessellation: 6 }, scene), -0.25);
+  piece(MeshBuilder.CreateCylinder("prisonZipBar", { height: 0.7, diameter: 0.05, tessellation: 8 }, scene), -0.46).rotation.z = Math.PI / 2;
+  const trolley = Mesh.MergeMeshes(parts, true, true);
+  trolley.name = "prisonZipTrolley";
+  trolley.material = M.hazard;
+  trolley.parent = root;
+  trolley.isPickable = false;
+  const heading = Math.atan2(way.x, way.z);
+  trolley.rotation.y = heading;
+  const point = new Vector3();
+  return {
+    length,
+    heading,
+    trolley,
+    place(s) {
+      point.copyFrom(way).scaleInPlace(Math.max(0, Math.min(length, s))).addInPlace(from);
+      trolley.position.copyFrom(point);
+      return point;
     },
   };
 }

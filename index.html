@@ -22,6 +22,10 @@
           <span data-i18n="hud.escape">Prison escape</span>
           <strong id="escape-count">0/10</strong>
         </p>
+        <p id="soda-stat" hidden>
+          <span data-i18n="hud.soda">Soda</span>
+          <strong id="soda-time">0</strong>
+        </p>
         <p id="coin-stat">
           <span class="coin-name" data-i18n="hud.coins">Coins</span>
           <span class="coin-glyph" aria-hidden="true"></span>
@@ -90,7 +94,7 @@
         <span class="boss-bar" aria-hidden="true"><span id="boss-fill"></span></span>
       </p>
     </section>
-    <p id="vent-prompt" data-i18n="prompt.openVent">Press E to open the vent</p>
+    <p id="action-prompt" data-i18n="prompt.openVent">Press E to open the vent</p>
     <div id="fade" aria-hidden="true"></div>
     <pre id="debug" hidden></pre>
 
@@ -100,7 +104,7 @@
       </div>
       <button id="jump" type="button">Jump</button>
       <button id="shoot" type="button" data-i18n="hud.shoot">Shoot</button>
-      <button id="open-vent" type="button" data-i18n="hud.open">Open</button>
+      <button id="action-button" type="button" data-i18n="hud.open">Open</button>
     </div>
 
     <section id="title-screen" aria-labelledby="title-name">
@@ -330,7 +334,7 @@
           </div>
         </header>
         <p id="shop-status" class="note" aria-live="polite" data-i18n="shop.note">
-          Each new level you reach earns 5 coins. Bought avatars, looks, and songs unlock in Customize avatar.
+          Every checkpoint you reach earns 5 coins. Bought avatars, looks, and songs unlock in Customize avatar.
         </p>
         <div id="shop-list"></div>
       </section>

@@ -10,7 +10,8 @@ export const CAPYBARA_LENGTH = 1.05;
  * inmates a black-and-white striped shirt with a mandarin on their head. The police sit up like a
  * plush toy in a navy uniform, a checkered cap, and a gold star; the top of their cap is at
  * `POLICE_CAP_TOP`. The killer has glowing red eyes, fangs, and a spiked collar; the warden has
- * the same scowl under a maroon cap and coat.
+ * the same scowl under a maroon cap and coat, and the chef wears it with a tall hat, an apron, and a
+ * cleaver.
  * Use `createInstance` for scenery and `clone` for anything that casts a shadow.
  */
 export function buildCapybara(scene, look) {
@@ -60,7 +61,7 @@ export function buildCapybara(scene, look) {
       const badge = MeshBuilder.CreateCylinder("capy-guard-badge", { height: 0.02, diameter: 0.08, tessellation: 10 }, scene);
       badge.rotation.x = Math.PI / 2;
       part(badge, gold, 0, 0.88, 0.62);
-    } else if (look === "killer" || look === "warden") {
+    } else if (look === "killer" || look === "warden" || look === "chef") {
       const glare = shared(scene, "capybaraGlare", () => plainMaterial(scene, "capybaraGlare", "#ff2a1a", 1));
       const tooth = shared(scene, "capybaraTooth", () => plainMaterial(scene, "capybaraTooth", "#fffaf0", 0.2));
       for (const side of [-1, 1]) {
@@ -83,6 +84,19 @@ export function buildCapybara(scene, look) {
           spike.rotation.z = -a;
           part(spike, spikes, Math.sin(a) * 0.25, 0.6 + Math.cos(a) * 0.22, 0.3);
         }
+      } else if (look === "chef") {
+        const white = shared(scene, "capybaraChefWhite", () => plainMaterial(scene, "capybaraChefWhite", "#f6f4ee", 0.08));
+        const steel = shared(scene, "capybaraSteel", () => plainMaterial(scene, "capybaraSteel", "#c9ced6", 0.15));
+        const wood = shared(scene, "capybaraWood", () => plainMaterial(scene, "capybaraWood", "#6b4426"));
+        blob("apron", 1, [0.5, 0.42, 0.34], white, 0, 0.4, 0.22);
+        const hat = MeshBuilder.CreateCylinder("capy-chef-hat", { height: 0.2, diameter: 0.26, tessellation: 18 }, scene);
+        part(hat, white, 0, 0.92, 0.42);
+        blob("hatPuff", 0.36, [1, 0.7, 1], white, 0, 1.06, 0.42);
+        const blade = MeshBuilder.CreateBox("capy-chef-blade", { width: 0.03, height: 0.2, depth: 0.28 }, scene);
+        part(blade, steel, 0.38, 0.62, 0.42);
+        const grip = MeshBuilder.CreateCylinder("capy-chef-grip", { height: 0.2, diameter: 0.05, tessellation: 8 }, scene);
+        grip.rotation.x = Math.PI / 2;
+        part(grip, wood, 0.38, 0.56, 0.2);
       } else {
         const maroon = shared(scene, "capybaraMaroon", () => plainMaterial(scene, "capybaraMaroon", "#6b1424"));
         const gold = shared(scene, "capybaraGold", () => plainMaterial(scene, "capybaraGold", "#ffcf4a", 0.35));
