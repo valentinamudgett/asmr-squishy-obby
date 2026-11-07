@@ -20,19 +20,23 @@ import {
 } from "@babylonjs/core";
 import { buildFood, footprintFor, footprintReach, PAD_TOP, shared } from "./foods.js";
 import { mulberry32 } from "./geometry.js";
-import { createFireball, createLavaLine, createSpikes, createSweeper } from "./hazards.js";
+import { createFireball, createGuard, createLavaLine, createSpikes, createSweeper } from "./hazards.js";
 import { AIR_SPEED, GRAVITY, JUMP_SPEED, SPRING_AIR_SPEED, SPRING_POP } from "./player.js";
+import { isPrisonLevel } from "./prison.js";
 import { createStairFlight, isRainbowSlot } from "./stairs.js";
 
 export const PAD_THICKNESS = PAD_TOP;
 /** Sea level. The start pad's top sits about 2 m above it. */
 export const LAVA_Y = -1.3;
 export const PADS_PER_LEVEL = 8;
-/** One full circle per level, so the climb reads as a loop instead of a straight line. */
-const PADS_PER_LOOP = PADS_PER_LEVEL;
+/**
+ * Pads in one circle of the coil, so the climb reads as a loop instead of a straight line.
+ * More pads per circle means more climb before the course comes back over your head.
+ */
+const PADS_PER_LOOP = 12;
 const TURN = (Math.PI * 2) / PADS_PER_LOOP;
-/** Extra turn per pad. 36° over a loop parks the next coil between the pads below, not on them. */
-const STAGGER = (4.5 * Math.PI) / 180;
+/** Extra turn per pad. 45° over a loop, a pad and a half, parks the next coil between the pads below. */
+const STAGGER = (3.75 * Math.PI) / 180;
 /** Fixed outward shove per pad, so the coil widens instead of copying the loop below. */
 const SPREAD = 0.14;
 /** Added to a normal step up. One loop then clears the food sticking out underneath. */
@@ -42,7 +46,7 @@ const MAX_CLIMB = 0.94;
 /** Air between neighboring meshes on the same loop, before a jump trims it back. */
 const MESH_GAP = 0.55;
 /** How far the lava sits below the lowest nearby pad. Deep enough that the loop below stays above it. */
-const LAVA_DEPTH = 11;
+const LAVA_DEPTH = 14;
 const LAVA_REACH = 14;
 const SQUASH = 0.5;
 const BUILD_AHEAD = 110;
@@ -55,6 +59,8 @@ const LAVA_DISC_WALK = 4.5;
 /** Radians per second before the menu multiplier. Easy 1.2, medium 1.5, hard 1.85. */
 const LAVA_SPIN_BASE = 0.75;
 const LAVA_SPIN_SCALE = { easy: 1.2, medium: 1.5, hard: 1.85 };
+/** Easy keeps the prison guards, walking at this share of their speed. */
+const EASY_GUARD_PACE = 0.6;
 
 /** Horizontal distance a jump covers before dropping back to `dy` above takeoff. */
 function airReach(dy, launch = JUMP_SPEED, speed = AIR_SPEED) {
@@ -68,8 +74,15 @@ export function difficultyFor(level) {
   return Math.min(1, (level - 1) / 10);
 }
 
-export function createCourse(scene, hooks = {}, fromLevel = 1) {
-  const random = mulberry32((Date.now() ^ 0x5eed) >>> 0);
+/**
+ * Everyone given the same `seed` gets the same pads, whatever level they resume from or
+ * difficulty they pick, so online players share one course.
+ */
+export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now() ^ 0x5eed) {
+  const random = mulberry32(seed >>> 0);
+  // Hazards draw from their own stream per pad. The main stream then only places pads,
+  // so a skipped pad and a built one stay in step.
+  const hazardRandom = (index) => mulberry32((seed ^ Math.imul(index + 1, 0x9e3779b1)) >>> 0);
   const pads = [];
   const flights = [];
   const lava = { y: LAVA_Y };
@@ -93,6 +106,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
     const pad = createPad(scene, spec);
     pad.index = index;
     pad.level = Math.floor(index / PADS_PER_LEVEL) + 1;
+    pad.prison = isPrisonLevel(pad.level);
     pad.decor = decorFor(spec);
     // Hazard rolls still see the food this slot would have been, so RNG stays put.
     if (pad.lavaDisc) pad.hazardFootprint = footprintFor(planned);
@@ -106,7 +120,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
     pad.motion = spec.motion ?? null;
     addMarker(scene, pad);
     addBody(scene, pad);
-    addHazards(scene, pad, prev, lava, options, random);
+    addHazards(scene, pad, prev, lava, options, random, hazardRandom(index));
 
     if (isRainbowSlot(index, PADS_PER_LEVEL)) {
       // Built only so plan/locate/hazards consume the same rolls, then swapped for stairs.
@@ -200,6 +214,8 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
   chain = skipped;
   while (pads.length < 4 || pads[pads.length - 1].along < pads[0].along + BUILD_AHEAD) spawn();
   const start = pads[0];
+  // A resumed run starts high up, so the fall floor must already be under it instead of rising from the sea.
+  lava.y = Math.max(LAVA_Y, start.homeY - LAVA_DEPTH);
 
   return {
     get pads() {
@@ -261,7 +277,6 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
             target.x += c * wave;
             target.z -= s * wave;
           } else target.y += wave;
-          // Havok derives the body's velocity from this, so the player gets carried.
           pad.body.setTargetTransform(target, pad.motion.rotation);
         }
         pad.loaded = pad === standing;
@@ -270,14 +285,15 @@ export function createCourse(scene, hooks = {}, fromLevel = 1) {
         for (const hazard of pad.hazards) hazard.update(time, dt);
       }
     },
+    /** The hazard you bumped into, or null. */
     hazardHit(position) {
       for (const pad of pads) {
         for (const hazard of pad.hazards) {
           if (hazard.kind === "lavaLine") continue;
-          if (hazard.hit(position)) return true;
+          if (hazard.hit(position)) return hazard;
         }
       }
-      return false;
+      return null;
     },
     lavaBurn(position) {
       if (!position) return false;
@@ -372,7 +388,6 @@ function plan(index, prev, random) {
       ["dumpling", 1.3],
       ["cheese", 1.1],
       ["jelly", 1.4],
-      ["block", 1.0 + 0.8 * d],
       ["butter", narrow * 0.7],
       ["carrot", narrow * 0.8],
       ["cucumber", narrow * 0.8],
@@ -386,8 +401,6 @@ function plan(index, prev, random) {
     spec.color = pick(JELLY_COLORS, random);
     spec.size = 2.6 - 0.6 * d * random();
   }
-  // Blocks shrink toward small, precise landings as it gets harder.
-  if (food === "block") spec.size = 2.1 - 0.5 * d * random();
 
   const roll = random();
   const slide = level >= 2 ? 0.12 + 0.25 * d : 0;
@@ -400,9 +413,11 @@ function plan(index, prev, random) {
   return paintBlob(spec, index);
 }
 
-/** Some jellies become the pink oval. The jelly rolls already ran, so the course RNG stays put. */
+/** Jellies take turns as the gummy, the pink oval, and the NeeDoh. The jelly rolls already ran, so the course RNG stays put. */
 function paintBlob(spec, index) {
-  if (spec.food === "jelly" && index % 3 !== 0) spec.food = "blob";
+  if (spec.food !== "jelly") return spec;
+  if (index % 3 === 1) spec.food = "blob";
+  if (index % 3 === 2) spec.food = "needoh";
   return spec;
 }
 
@@ -424,7 +439,7 @@ function decorFor(spec) {
     const half = (spec.size ?? 3) / 2;
     return { kind: "box", hx: half, z0: -half, z1: half };
   }
-  if (spec.food === "jelly" || spec.food === "blob") {
+  if (spec.food === "jelly" || spec.food === "blob" || spec.food === "needoh") {
     const half = (spec.size ?? 2.4) / 2;
     return { kind: "box", hx: half, z0: -half, z1: half };
   }
@@ -588,18 +603,21 @@ function nearestAlong(pads, position) {
   return best.along ?? 0;
 }
 
-function addHazards(scene, pad, prev, lava, options, random) {
+function addHazards(scene, pad, prev, lava, options, random, own) {
   pad.hazards = [];
   if (!prev || pad.role !== "pad" || pad.kind === "spring") return;
   const d = difficultyFor(pad.level);
   const print = pad.hazardFootprint ?? pad.footprint;
   const wide = print.type === "circle" || Math.min(print.hx, print.hz) > 1.1;
   const roll = random();
-  if (options.padHazards) {
+  if (pad.prison && wide && roll < 0.22 + 0.3 * d) {
+    // In Capybara Prison, guards pace where the sweeping bars would be, on every difficulty.
+    pad.hazards.push(createGuard(scene, pad, d, own, () => (options.padHazards ? 1 : EASY_GUARD_PACE)));
+  } else if (options.padHazards) {
     if (pad.level >= 3 && wide && roll < 0.22 + 0.3 * d) {
-      pad.hazards.push(createSweeper(scene, pad, d, random));
+      pad.hazards.push(createSweeper(scene, pad, d, own));
     } else if (pad.level >= 5 && roll > 1 - (0.18 + 0.25 * d)) {
-      pad.hazards.push(createSpikes(scene, pad, d, random));
+      pad.hazards.push(createSpikes(scene, pad, d, own));
     }
   }
   // Always roll so a skipped pad and a built pad stay on the same random stream.
@@ -618,13 +636,14 @@ function addHazards(scene, pad, prev, lava, options, random) {
       (prev.homeZ + dirZ * nearReach + pad.homeZ - dirZ * farReach) / 2,
     );
     const peak = Math.max(prev.homeY, pad.homeY) + PAD_TOP + 1.7;
-    pad.hazards.push(createFireball(scene, pad.id, middle, lava, peak, d, random));
+    pad.hazards.push(createFireball(scene, pad.id, middle, lava, peak, d, own));
   }
   if (pad.lavaDisc) {
+    const onTop = (hazard) => hazard.kind === "sweeper" || hazard.kind === "spikes" || hazard.kind === "guard";
     for (const hazard of pad.hazards) {
-      if (hazard.kind === "sweeper" || hazard.kind === "spikes") hazard.dispose();
+      if (onTop(hazard)) hazard.dispose();
     }
-    pad.hazards = pad.hazards.filter((hazard) => hazard.kind !== "sweeper" && hazard.kind !== "spikes");
+    pad.hazards = pad.hazards.filter((hazard) => !onTop(hazard));
     pad.hazards.push(createLavaLine(scene, pad));
   }
 }
@@ -711,7 +730,6 @@ function createLavaDisc(scene, spec) {
     spinner,
     spin: { base: LAVA_SPIN_BASE, angle, rate: LAVA_SPIN_BASE },
     target: { influence: 0 },
-    hard: false,
     colliderDepth: height,
     owned: [],
     hazards: [],
@@ -741,8 +759,7 @@ function createPad(scene, spec) {
   mesh.receiveShadows = true;
   mesh.isPickable = true;
   mesh.metadata = { blocksCamera: true };
-  const hard = Boolean(food.hard);
-  const target = hard ? { influence: 0 } : addSquishMorph(scene, mesh, food);
+  const target = addSquishMorph(scene, mesh, food);
   food.rigid?.(mesh);
   const walkRadius =
     food.footprint.type === "circle" ? food.footprint.r : Math.min(food.footprint.hx, food.footprint.hz);
@@ -753,8 +770,7 @@ function createPad(scene, spec) {
     food: spec.food,
     mesh,
     target,
-    hard,
-    colliderDepth: food.colliderDepth ?? PAD_THICKNESS * 0.82,
+    colliderDepth: PAD_THICKNESS * 0.82,
     owned: [],
     hazards: [],
     thickness: PAD_THICKNESS,
@@ -771,7 +787,6 @@ function createPad(scene, spec) {
       return this.height * SQUASH * this.squish;
     },
     kick(amount) {
-      if (hard) return;
       const spring = spec.kind === "spring";
       const amp = Math.max(0.12, Math.min(spring ? 1 : 0.9, amount));
       this.squishV += amp * (spring ? 11 : 9.5);
@@ -827,7 +842,6 @@ function hullShape(scene, name, points) {
 function addBody(scene, pad) {
   // The collider is a fixed shape. The morph never changes it.
   const top = pad.thickness;
-  // Block towers are solid all the way down, so you can't fall through their sides.
   const height = pad.colliderDepth;
   const print = pad.solid ?? pad.footprint;
   let shape;
@@ -909,7 +923,6 @@ function addMarker(scene, pad) {
 }
 
 function stepSquish(pad, dt) {
-  if (pad.hard) return;
   const rest = pad.loaded ? 0.1 : 0;
   if (Math.abs(pad.squish - rest) < 0.002 && Math.abs(pad.squishV) < 0.01) {
     pad.squish = rest;

@@ -3,7 +3,6 @@ import { mulberry32 } from "./geometry.js";
 import { t } from "./i18n.js";
 
 const PLAID = { type: "plaid", base: "#7a4a2b", band: "#c08e5e", line: "#3c2114", thread: "#ead0a4" };
-const GRAY_PLAID = { type: "plaid", base: "#d7d7dc", band: "#9b9ba3", line: "#5e5e66", thread: "#f4f4f6" };
 const WHITE = "#fbf8f4";
 const INKPRINT = { type: "inkprint", base: "#c9c8c4", ink: "#25211f" };
 const BLACKLETTER = `"UnifrakturMaguntia", "Old English Text MT", Georgia, serif`;
@@ -112,32 +111,6 @@ export const OUTFITS = [
     hipCloth: "#2c2b30",
   },
   {
-    id: "buns",
-    label: t("outfit.buns"),
-    swatch: ["#eceae4", "#d2b48c"],
-    torso: "#eceae4",
-    overlay: "tank",
-    sleeve: "skin",
-    forearm: "skin",
-    skirt: null,
-    thigh: "#d2b48c",
-    shin: "#f7f4ef",
-    shoes: "#ffffff",
-  },
-  {
-    id: "preppy",
-    label: t("outfit.preppy"),
-    swatch: ["#d7d7dc", "#141414"],
-    torso: { type: "crop", top: "#141414", bottom: "#eab892" },
-    overlay: "plaidOpen",
-    sleeve: GRAY_PLAID,
-    forearm: GRAY_PLAID,
-    skirt: null,
-    thigh: "#141414",
-    shin: "#141414",
-    shoes: "#f7f7f7",
-  },
-  {
     id: "pretty",
     label: t("outfit.pretty"),
     swatch: ["#6b4638", "#8ec4e4"],
@@ -152,7 +125,25 @@ export const OUTFITS = [
   },
 ];
 
+const PRISON_STRIPES = { type: "stripes", a: "#f4f1e8", b: "#1d1d22" };
+
+/** Worn only while you're in Capybara Prison. Not in OUTFITS, so it is never picked, sold, or saved. */
+export const PRISONER_OUTFIT = {
+  id: "prisoner",
+  label: "Prisoner stripes",
+  swatch: ["#f4f1e8", "#1d1d22"],
+  torso: PRISON_STRIPES,
+  overlay: "prisonNumber",
+  sleeve: PRISON_STRIPES,
+  forearm: "skin",
+  skirt: null,
+  thigh: PRISON_STRIPES,
+  shin: PRISON_STRIPES,
+  shoes: "#2a2a2e",
+};
+
 export function outfitById(id) {
+  if (id === PRISONER_OUTFIT.id) return PRISONER_OUTFIT;
   return OUTFITS.find((outfit) => outfit.id === id) ?? OUTFITS[0];
 }
 
@@ -232,14 +223,6 @@ export function paintPattern(ctx, size, pattern) {
     return;
   }
   if (pattern.type === "jeans") paintJeans(ctx, size);
-  if (pattern.type === "crop") {
-    ctx.fillStyle = pattern.bottom;
-    ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = pattern.top;
-    ctx.fillRect(0, 0, size, size * 0.42);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
-    ctx.fillRect(0, size * 0.38, size, size * 0.035);
-  }
 }
 
 /** Washed grey cotton printed edge to edge with dense blackletter text; tiles in both directions. */
@@ -555,48 +538,19 @@ function paintRest(ctx, size, overlay) {
     ctx.fillRect(0, 0, size, size * 0.06);
     return;
   }
-  if (overlay === "tank") {
-    ctx.strokeStyle = "rgba(90, 78, 68, 0.45)";
-    ctx.lineWidth = size * 0.035;
-    ctx.beginPath();
-    ctx.arc(size / 2, size * -0.02, size * 0.3, 0.35, Math.PI - 0.35);
+  if (overlay === "prisonNumber") {
+    // A white name tag with an inmate number, sewn over the stripes.
+    ctx.fillStyle = "#fbf8f0";
+    roundRect(ctx, size * 0.24, size * 0.3, size * 0.52, size * 0.26, size * 0.03);
+    ctx.fill();
+    ctx.strokeStyle = "#1d1d22";
+    ctx.lineWidth = size * 0.02;
     ctx.stroke();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
-    ctx.fillRect(0, size * 0.9, size, size * 0.08);
-    return;
-  }
-  if (overlay === "plaidOpen") {
-    const swatch = document.createElement("canvas");
-    swatch.width = 128;
-    swatch.height = 128;
-    paintPattern(swatch.getContext("2d"), 128, GRAY_PLAID);
-    ctx.fillStyle = ctx.createPattern(swatch, "repeat");
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(size * 0.42, 0);
-    ctx.lineTo(size * 0.28, size);
-    ctx.lineTo(0, size);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(size, 0);
-    ctx.lineTo(size * 0.58, 0);
-    ctx.lineTo(size * 0.72, size);
-    ctx.lineTo(size, size);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(size * 0.34, size * 0.02);
-    ctx.lineTo(size * 0.48, size * 0.02);
-    ctx.lineTo(size * 0.42, size * 0.16);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(size * 0.66, size * 0.02);
-    ctx.lineTo(size * 0.52, size * 0.02);
-    ctx.lineTo(size * 0.58, size * 0.16);
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillStyle = "#1d1d22";
+    ctx.font = `800 ${Math.round(size * 0.17)}px Arial Black, Arial, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("100", size / 2, size * 0.44);
     return;
   }
   if (overlay === "eightyNine") {

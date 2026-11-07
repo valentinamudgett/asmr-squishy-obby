@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9f6ff"/>
+      <stop offset="0.45" stop-color="#93d8f6"/>
+      <stop offset="1" stop-color="#3a9dd8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.42" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4fdff"/>
+      <stop offset="1" stop-color="#b8e9fb" stop-opacity="0.5"/>
+    </linearGradient>
+    <clipPath id="eyeL"><path d="M76 184 Q94 170 112 184 Q94 197 76 184 Z"/></clipPath>
+    <clipPath id="eyeR"><path d="M144 184 Q162 170 180 184 Q162 197 144 184 Z"/></clipPath>
+  </defs>
+
+  <ellipse cx="128" cy="224" rx="86" ry="11" fill="#2a6f9e" opacity="0.22"/>
+
+  <rect x="40" y="52" width="176" height="168" rx="40" fill="url(#body)"/>
+  <rect x="40" y="52" width="176" height="168" rx="40" fill="url(#glow)"/>
+  <path d="M60 94 Q58 62 92 60 L164 59 Q198 59 196 92 Q162 102 128 102 Q92 102 60 94 Z" fill="url(#top)" opacity="0.85"/>
+  <path d="M44 166 Q128 194 212 166 L212 180 Q211 217 176 219 L80 219 Q45 217 44 180 Z" fill="#2a86c6" opacity="0.32"/>
+  <ellipse cx="96" cy="206" rx="22" ry="6" fill="#ffffff" opacity="0.3"/>
+  <ellipse cx="170" cy="208" rx="16" ry="5" fill="#ffffff" opacity="0.25"/>
+  <rect x="40" y="52" width="176" height="168" rx="40" fill="none" stroke="#2a7fb9" stroke-width="3" opacity="0.45"/>
+
+  <g transform="rotate(-8 128 130)" font-family="'Arial Black', Impact, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="2">
+    <g fill="#3f9fd6" opacity="0.55">
+      <text x="130" y="128" font-size="34">SKY</text>
+      <text x="130" y="160" font-size="34">OBBY</text>
+    </g>
+    <g fill="#effbff" opacity="0.75">
+      <text x="128" y="126" font-size="34">SKY</text>
+      <text x="128" y="158" font-size="34">OBBY</text>
+    </g>
+  </g>
+
+  <path d="M76 184 Q94 170 112 184 Q94 197 76 184 Z" fill="#f7fdff"/>
+  <g clip-path="url(#eyeL)">
+    <circle cx="89" cy="185" r="8" fill="#17456e"/>
+    <circle cx="86.5" cy="182" r="2.4" fill="#ffffff"/>
+    <path d="M70 160 L118 160 L118 182 Q94 172 70 182 Z" fill="#4aa7dd"/>
+  </g>
+  <path d="M74 183 Q94 172 114 183" fill="none" stroke="#17456e" stroke-width="3" stroke-linecap="round"/>
+
+  <path d="M144 184 Q162 170 180 184 Q162 197 144 184 Z" fill="#f7fdff"/>
+  <g clip-path="url(#eyeR)">
+    <circle cx="157" cy="185" r="8" fill="#17456e"/>
+    <circle cx="154.5" cy="182" r="2.4" fill="#ffffff"/>
+    <path d="M138 160 L186 160 L186 182 Q162 172 138 182 Z" fill="#4aa7dd"/>
+  </g>
+  <path d="M142 183 Q162 172 182 183" fill="none" stroke="#17456e" stroke-width="3" stroke-linecap="round"/>
+
+  <path d="M56 128 Q54 96 74 78" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="57" cy="146" r="4" fill="#ffffff" opacity="0.75"/>
+  <path d="M201 112 Q205 138 199 160" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
+</svg>

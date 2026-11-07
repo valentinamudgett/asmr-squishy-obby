@@ -1,7 +1,9 @@
+import { COSTUMES } from "./costumes.js";
 import { DANCES } from "./dances.js";
 import { FACES } from "./faces.js";
 import { t } from "./i18n.js";
 import { OUTFITS } from "./outfits.js";
+import { SONGS } from "./songs.js";
 
 const STORAGE_KEY = "asmr-squishy-obby:v2";
 const LEGACY_KEY = "asmr-squishy-obby";
@@ -12,9 +14,12 @@ export const HAIR_SWATCHES = [
   "#8a5a3b",
   "#2e2228",
   "#d8553f",
+  "#6e2a2a",
   "#ff9ec7",
   "#9fc8ff",
   "#c7a8ff",
+  "#a8e6cf",
+  "#dfe2ea",
 ];
 
 export const BODIES = [
@@ -35,6 +40,16 @@ export const HAIR_STYLES = [
   { id: "buns", label: t("hair.buns") },
   { id: "headphones", label: t("hair.headphones") },
   { id: "waves", label: t("hair.waves") },
+  { id: "redwaves", label: t("hair.redwaves") },
+];
+
+/** Course squishies the avatar can carry. `none` puts the hand back down. */
+export const HELD_FOODS = [
+  { id: "none", label: t("held.none") },
+  { id: "dumpling", label: t("held.dumpling") },
+  { id: "jelly", label: t("held.jelly") },
+  { id: "cheese", label: t("held.cheese") },
+  { id: "blob", label: t("held.blob") },
 ];
 
 /** The hair style a body starts with until the player picks another. */
@@ -72,7 +87,10 @@ export function defaultLook() {
     outfit: "pinafore",
     skinColor: "#eab892",
     bow: false,
+    held: "none",
+    costume: "none",
     dance: "cheer",
+    song: "jazz",
     quality: "high",
   };
 }
@@ -86,20 +104,32 @@ export function loadLook() {
       if (legacy?.quality === "high" || legacy?.quality === "low") look.quality = legacy.quality;
       return look;
     }
-    const data = JSON.parse(raw);
-    if (BODIES.some((body) => body.id === data.body)) look.body = data.body;
-    look.hair = HAIR_STYLES.some((style) => style.id === data.hair) ? data.hair : defaultHair(look.body);
-    if (AGES.some((age) => age.id === data.age)) look.age = data.age;
-    if (FACES.some((face) => face.id === data.face)) look.face = data.face;
-    if (data.hairColor === "rainbow" || isHex(data.hairColor)) look.hairColor = data.hairColor.toLowerCase();
-    if (OUTFITS.some((outfit) => outfit.id === data.outfit)) look.outfit = data.outfit;
-    if (isHex(data.skinColor)) look.skinColor = data.skinColor.toLowerCase();
-    if (typeof data.bow === "boolean") look.bow = data.bow;
-    if (DANCES.some((dance) => dance.id === data.dance)) look.dance = data.dance;
-    if (data.quality === "high" || data.quality === "low") look.quality = data.quality;
+    return cleanLook(JSON.parse(raw));
   } catch {
     return defaultLook();
   }
+}
+
+/** Keeps only known ids and valid colors from a stored or received look. */
+export function cleanLook(data) {
+  const look = defaultLook();
+  if (!data || typeof data !== "object") return look;
+  if (BODIES.some((body) => body.id === data.body)) look.body = data.body;
+  look.hair = HAIR_STYLES.some((style) => style.id === data.hair) ? data.hair : defaultHair(look.body);
+  if (AGES.some((age) => age.id === data.age)) look.age = data.age;
+  if (FACES.some((face) => face.id === data.face)) look.face = data.face;
+  if (data.hairColor === "rainbow" || isHex(data.hairColor)) look.hairColor = data.hairColor.toLowerCase();
+  if (OUTFITS.some((outfit) => outfit.id === data.outfit)) look.outfit = data.outfit;
+  if (isHex(data.skinColor)) look.skinColor = data.skinColor.toLowerCase();
+  if (typeof data.bow === "boolean") look.bow = data.bow;
+  if (HELD_FOODS.some((food) => food.id === data.held)) look.held = data.held;
+  for (const key of ["necklace", "headband", "bracelet"]) {
+    if (typeof data[key] === "boolean") look[key] = data[key];
+  }
+  if (COSTUMES.some((costume) => costume.id === data.costume)) look.costume = data.costume;
+  if (DANCES.some((dance) => dance.id === data.dance)) look.dance = data.dance;
+  if (SONGS.some((song) => song.id === data.song)) look.song = data.song;
+  if (data.quality === "high" || data.quality === "low") look.quality = data.quality;
   return look;
 }
 
@@ -115,7 +145,10 @@ export function saveLook(look) {
       outfit: look.outfit,
       skinColor: look.skinColor,
       bow: look.bow,
+      held: look.held,
+      costume: look.costume,
       dance: look.dance,
+      song: look.song,
       quality: look.quality,
     }),
   );

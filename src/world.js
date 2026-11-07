@@ -73,6 +73,7 @@ export function createWorld(scene, lavaY) {
   let space = -1;
   let height = -1;
   let lift = 0;
+  let sunk = 0;
   let hemi = null;
 
   return {
@@ -93,25 +94,28 @@ export function createWorld(scene, lavaY) {
     },
     /** Where the sea surface is drawn right now. Touching it is a lava or splash fall. */
     get seaY() {
-      return lavaY + lift;
+      return lavaY + lift - sunk;
     },
     /** Eased height of the focus above sea level. */
     get altitude() {
       return Math.max(0, height);
     },
-    update(time, dt, focus, level = 1) {
+    /** `drop` is how far a long fall has gone. The backdrop sinks with it, so the fall never reaches the sea. */
+    update(time, dt, focus, level = 1, drop = 0) {
       const target = cloudTarget(level);
       if (cover < 0) cover = target;
       else cover += (target - cover) * (1 - Math.exp(-0.85 * dt));
       const high = spaceTarget(level);
       if (space < 0) space = high;
       else space += (high - space) * (1 - Math.exp(-0.6 * dt));
-      const climb = Math.max(0, focus.y - lavaY);
+      sunk = drop;
+      const climb = Math.max(0, focus.y + drop - lavaY);
       if (height < 0) height = climb;
       else height += (climb - height) * (1 - Math.exp(-1.2 * dt));
       // Raise the backdrop by however much the climb is ahead of its apparent height.
       lift = height - VIEW_HEIGHT * (1 - Math.exp(-height / VIEW_HEIGHT));
-      const seaNow = lavaY + lift;
+      const base = lift - sunk;
+      const seaNow = lavaY + base;
       // The ground stays under the clouds and only gives way to the Earth in space.
       const left = 1 - smoothstep(0, 0.35, space);
       const lavaFade = backdrop === "lava" ? left : 0;
@@ -129,14 +133,14 @@ export function createWorld(scene, lavaY) {
       mountains.root.setEnabled(scenery);
       rainbow.setEnabled(scenery);
       if (scenery) {
-        mountains.root.position.set(focus.x * 0.9, lift, focus.z);
-        rainbow.position.set(focus.x * 0.9, lift, focus.z);
+        mountains.root.position.set(focus.x * 0.9, base, focus.z);
+        rainbow.position.set(focus.x * 0.9, base, focus.z);
         fadeMaterial(mountains.material, left);
         fadeMaterial(rainbowMat, left);
       }
       // Centered on the sea, so the horizon band dips with the ocean's edge as you climb.
-      sky.position.set(focus.x, lift, focus.z);
-      cities.root.position.set(focus.x, lift, focus.z);
+      sky.position.set(focus.x, base, focus.z);
+      cities.root.position.set(focus.x, base, focus.z);
       cities.update(time, height - lift);
       cities.setCloud(cover, backdrop === "lava" ? 1 : left, space);
       clouds.update(time, dt, focus, cover, space);

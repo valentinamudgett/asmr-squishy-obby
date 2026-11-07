@@ -2,30 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logos/logo-3-sky.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="ASMR squishy obby. An endless course of soft pads over bubbling lava." />
     <title>ASMR squishy obby</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="view" tabindex="-1"></canvas>
 
     <header id="hud">
-      <div class="brand">
-        <p class="eyebrow">An endless soft course</p>
-        <h1>ASMR squishy obby</h1>
-      </div>
+      <button id="hud-menu" type="button">
+        <span aria-hidden="true">⌂</span>
+        <span class="hud-menu-label" data-i18n="hud.mainMenu">Main menu</span>
+      </button>
       <div class="stats">
         <p><span>Level</span> <strong id="level">1</strong></p>
-        <p><span>Best</span> <strong id="best">1</strong></p>
+        <p id="escape-stat" hidden>
+          <span data-i18n="hud.escape">Prison escape</span>
+          <strong id="escape-count">0/10</strong>
+        </p>
         <p id="coin-stat">
           <span class="coin-name" data-i18n="hud.coins">Coins</span>
           <span class="coin-glyph" aria-hidden="true"></span>
           <strong id="coins">0</strong>
         </p>
-        <p><span>Height</span> <strong id="height">0 m</strong></p>
-        <p><span>Time</span> <strong id="time">0.00</strong></p>
-        <p><span>Falls</span> <strong id="falls">0</strong></p>
+        <p id="online-stat" hidden>
+          <span data-i18n="hud.online">Online</span>
+          <strong id="online-count">1</strong>
+        </p>
       </div>
       <button id="settings-open" type="button" aria-label="Character studio and graphics">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -36,6 +41,42 @@
         </svg>
       </button>
     </header>
+
+    <div id="social-buttons" class="social-buttons">
+      <button id="chat-open" type="button" data-i18n-label="chat.open" aria-label="Chat">
+        <span aria-hidden="true">💬</span>
+      </button>
+      <button id="players-open" type="button" data-i18n-label="players.open" aria-label="Players" aria-controls="players">
+        <span aria-hidden="true">👥</span>
+      </button>
+    </div>
+
+    <section id="chat" class="chat" aria-labelledby="chat-title">
+      <h2 id="chat-title" class="visually-hidden" data-i18n="chat.title">Chat</h2>
+      <ol id="chat-log" class="chat-log" aria-live="polite"></ol>
+      <form id="chat-form" class="chat-form" hidden>
+        <input
+          id="chat-input"
+          type="text"
+          maxlength="120"
+          autocomplete="off"
+          enterkeyhint="send"
+          data-i18n-placeholder="chat.placeholder"
+          data-i18n-label="chat.title"
+          placeholder="Say something nice…"
+        />
+        <button type="submit" data-i18n="chat.send">Send</button>
+      </form>
+    </section>
+
+    <section id="players" class="players-panel" aria-labelledby="players-title" hidden>
+      <header class="players-head">
+        <h2 id="players-title" data-i18n="players.title">Players here</h2>
+        <button id="players-close" type="button" data-i18n="shop.close">Close</button>
+      </header>
+      <p id="players-empty" class="players-empty" data-i18n="players.empty">No one else is here right now.</p>
+      <ul id="players-list" class="players-list"></ul>
+    </section>
 
     <p id="hint">Press a key or tap to wake the crunch.</p>
     <p id="toast" hidden>Checkpoint</p>
@@ -48,13 +89,56 @@
       <button id="jump" type="button">Jump</button>
     </div>
 
+    <section id="title-screen" aria-labelledby="title-name">
+      <div class="title-blobs" aria-hidden="true">
+        <span class="title-blob title-blob-a"></span>
+        <span class="title-blob title-blob-b"></span>
+        <span class="title-blob title-blob-c"></span>
+        <span class="title-blob title-blob-d"></span>
+      </div>
+      <div class="title-card">
+        <img class="title-logo" src="/logos/logo-3-sky.svg" alt="" width="160" height="160" />
+        <p class="start-kicker" data-i18n="start.kicker">A cozy ASMR adventure</p>
+        <h1 id="title-name" data-i18n="start.title">Squishy Sky Obby</h1>
+        <p class="title-subtitle" data-i18n="start.subtitle">Bounce softly. Climb high. Have fun!</p>
+        <button id="title-start" class="play-action title-start" type="button">
+          <span data-i18n="title.start">Start</span>
+          <span aria-hidden="true">→</span>
+        </button>
+        <p class="title-hint" data-i18n="title.hint">Tap Start to begin</p>
+        <section id="friends-box" class="friends-box" aria-labelledby="friends-title">
+          <div class="friends-head">
+            <h3 id="friends-title" data-i18n="friends.title">Your friends</h3>
+            <div class="friends-tools">
+              <button
+                id="start-players"
+                class="pill-button players-button"
+                type="button"
+                aria-controls="players"
+                aria-expanded="false"
+              >
+                <span aria-hidden="true">👥</span>
+                <span data-i18n="players.title">Players here</span>
+                <span id="start-players-count" class="players-count">0</span>
+              </button>
+            </div>
+          </div>
+          <p id="friends-empty" class="friends-empty" data-i18n="friends.empty">
+            No friends yet. Tap Players here to see who is online and add a friend.
+          </p>
+          <ul id="friends-list" class="friends-list"></ul>
+        </section>
+      </div>
+    </section>
+
     <main id="start-menu" aria-labelledby="start-title">
       <div class="start-glow" aria-hidden="true"></div>
       <section class="start-panel">
         <div class="start-heading">
-          <p class="start-kicker" data-i18n="start.kicker">A cozy ASMR adventure</p>
-          <h2 id="start-title" data-i18n="start.title">Squishy Sky Obby</h2>
-          <p class="start-subtitle" data-i18n="start.subtitle">Bounce softly. Climb high. Have fun!</p>
+          <img class="start-logo" src="/logos/logo-3-sky.svg" alt="" width="88" height="88" />
+          <p class="start-kicker" data-i18n="start.title">Squishy Sky Obby</p>
+          <h2 id="start-title" data-i18n="menu.title">Main menu</h2>
+          <p class="start-subtitle" data-i18n="menu.subtitle">Set up your bounce, then jump in!</p>
         </div>
 
         <label class="name-field" for="player-name">
@@ -68,6 +152,72 @@
             placeholder="Your name"
           />
         </label>
+
+        <fieldset class="background-picker theme-picker">
+          <legend data-i18n="start.themeLabel">Choose your game</legend>
+          <div class="background-options theme-options">
+            <button type="button" data-theme="normal" aria-pressed="true">
+              <span class="background-preview theme-preview-normal" aria-hidden="true">
+                <span class="preview-pad preview-pad-a"></span>
+                <span class="preview-pad preview-pad-b"></span>
+                <span class="preview-pad preview-pad-c"></span>
+              </span>
+              <strong data-i18n="theme.normal">Normal</strong>
+              <small data-i18n="theme.normalHint">Sunny &amp; squishy</small>
+            </button>
+            <button type="button" data-theme="valentines" aria-pressed="false" hidden>
+              <span class="background-preview theme-preview-valentines" aria-hidden="true">
+                <span class="preview-pad preview-pad-a"></span>
+                <span class="preview-pad preview-pad-b"></span>
+                <span class="preview-pad preview-pad-c"></span>
+                <span class="preview-heart preview-heart-a"></span>
+                <span class="preview-heart preview-heart-b"></span>
+                <span class="preview-heart preview-heart-c"></span>
+              </span>
+              <strong data-i18n="theme.valentines">Valentine's</strong>
+              <small data-i18n="theme.valentinesHint">Sweet &amp; lovey</small>
+            </button>
+            <button type="button" data-theme="halloween" aria-pressed="false" hidden>
+              <span class="background-preview theme-preview-halloween" aria-hidden="true">
+                <span class="preview-moon"></span>
+                <span class="preview-pad preview-pad-a"></span>
+                <span class="preview-pad preview-pad-b"></span>
+                <span class="preview-pad preview-pad-c"></span>
+                <span class="preview-bat preview-bat-a"></span>
+                <span class="preview-bat preview-bat-b"></span>
+              </span>
+              <strong data-i18n="theme.halloween">Halloween</strong>
+              <small data-i18n="theme.halloweenHint">Spooky &amp; glowy</small>
+            </button>
+            <button type="button" data-theme="thanksgiving" aria-pressed="false" hidden>
+              <span class="background-preview theme-preview-thanksgiving" aria-hidden="true">
+                <span class="preview-moon"></span>
+                <span class="preview-pad preview-pad-a"></span>
+                <span class="preview-pad preview-pad-b"></span>
+                <span class="preview-pad preview-pad-c"></span>
+                <span class="preview-leaf preview-leaf-a"></span>
+                <span class="preview-leaf preview-leaf-b"></span>
+                <span class="preview-leaf preview-leaf-c"></span>
+              </span>
+              <strong data-i18n="theme.thanksgiving">Thanksgiving</strong>
+              <small data-i18n="theme.thanksgivingHint">Cozy &amp; golden</small>
+            </button>
+            <button type="button" data-theme="christmas" aria-pressed="false" hidden>
+              <span class="background-preview theme-preview-christmas" aria-hidden="true">
+                <span class="preview-tree"></span>
+                <span class="preview-pad preview-pad-a"></span>
+                <span class="preview-pad preview-pad-b"></span>
+                <span class="preview-pad preview-pad-c"></span>
+                <span class="preview-flake preview-flake-a"></span>
+                <span class="preview-flake preview-flake-b"></span>
+                <span class="preview-flake preview-flake-c"></span>
+                <span class="preview-flake preview-flake-d"></span>
+              </span>
+              <strong data-i18n="theme.christmas">Christmas</strong>
+              <small data-i18n="theme.christmasHint">Snowy &amp; merry</small>
+            </button>
+          </div>
+        </fieldset>
 
         <fieldset class="difficulty-picker">
           <legend data-i18n="start.difficultyLabel">Choose your difficulty</legend>
@@ -122,6 +272,14 @@
           </div>
         </fieldset>
 
+        <button id="online-toggle" class="online-toggle" type="button" aria-pressed="true">
+          <span class="online-icon" aria-hidden="true">🌍</span>
+          <span class="online-copy">
+            <strong data-i18n="online.title">Play online</strong>
+            <small id="online-status" data-i18n="online.hint">See players from around the world</small>
+          </span>
+          <span id="online-state" class="online-state" data-i18n="online.on">On</span>
+        </button>
         <div class="start-actions">
           <button id="start-avatar" class="secondary-action" type="button">
             <span aria-hidden="true">🎀</span>
@@ -138,9 +296,9 @@
         <span class="reward-icon" aria-hidden="true">🏆</span>
         <span class="reward-copy">
           <span id="rewards-title" data-i18n="start.rewards">Your rewards</span>
-          <strong><span data-i18n="start.bestLevel">Best level</span> <span id="menu-best">1</span></strong>
+          <strong data-i18n="shop.kicker">Spend your coins</strong>
         </span>
-        <span class="reward-badge"><span aria-hidden="true">⭐</span> <span id="menu-stars">0</span></span>
+        <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="menu-coins">0</span></span>
       </button>
     </main>
 
@@ -149,16 +307,16 @@
       <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="shop-title">
         <header class="sheet-head">
           <div>
-            <p class="eyebrow" data-i18n="shop.kicker">Spend your stars</p>
+            <p class="eyebrow" data-i18n="shop.kicker">Spend your coins</p>
             <h2 id="shop-title" data-i18n="shop.title">Rewards shop</h2>
           </div>
           <div class="shop-tools">
-            <span class="reward-badge"><span aria-hidden="true">⭐</span> <span id="shop-stars">0</span></span>
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="shop-coins">0</span></span>
             <button id="shop-close" type="button" data-i18n="shop.close">Close</button>
           </div>
         </header>
         <p id="shop-status" class="note" aria-live="polite" data-i18n="shop.note">
-          Each new best level earns 3 stars. Bought looks unlock in Customize avatar.
+          Each new level you reach earns 5 coins. Bought avatars, looks, and songs unlock in Customize avatar.
         </p>
         <div id="shop-list"></div>
       </section>
@@ -173,10 +331,6 @@
             <h2 id="settings-title">Character studio</h2>
           </div>
           <div class="sheet-tools">
-            <button id="settings-menu" type="button">
-              <span aria-hidden="true">⌂</span>
-              <span data-i18n="studio.mainMenu">Main menu</span>
-            </button>
             <button id="settings-close" type="button">Close</button>
           </div>
         </header>
@@ -196,8 +350,12 @@
         </div>
         <p class="label" id="hair-style-label" data-i18n="studio.hairStyle">Hair style</p>
         <div id="hair-styles" class="segment" role="group" aria-labelledby="hair-style-label"></div>
+        <p class="note" data-i18n="studio.hairNote">Buy more hair styles and colors in Rewards.</p>
         <p class="label" id="outfit-label">Outfit</p>
         <div id="outfits" class="tiles" role="group" aria-labelledby="outfit-label"></div>
+        <p class="label" id="costume-label" data-i18n="studio.costume">Holiday costume</p>
+        <div id="costumes" class="segment" role="group" aria-labelledby="costume-label"></div>
+        <p class="note" data-i18n="studio.costumeNote">Fall leaves and Elf are free. Buy more costumes in Rewards. Angels can fly: press jump again in the air.</p>
         <p class="label" id="skin-label">Skin tone</p>
         <div id="skin-swatches" class="row" role="group" aria-labelledby="skin-label"></div>
         <p class="label" data-i18n="studio.accessory">Accessories</p>
@@ -207,9 +365,15 @@
           <button id="headband" type="button" class="toggle" aria-pressed="false">Headband off</button>
           <button id="bracelet" type="button" class="toggle" aria-pressed="false">Bracelet off</button>
         </div>
+        <p class="label" id="held-label" data-i18n="studio.held">Hold a squishy</p>
+        <div id="held" class="segment" role="group" aria-labelledby="held-label"></div>
+        <p class="note" data-i18n="studio.heldNote">Your avatar holds this while they run.</p>
         <p class="label" id="dance-label" data-i18n="studio.dance">Level-up dance</p>
         <div id="dances" class="segment" role="group" aria-labelledby="dance-label"></div>
         <p class="note" data-i18n="studio.danceNote">Your avatar does this dance when you reach a new level.</p>
+        <p class="label" id="song-label" data-i18n="studio.song">Course music</p>
+        <div id="songs" class="segment" role="group" aria-labelledby="song-label"></div>
+        <p class="note" data-i18n="studio.songNote">Plays while you bounce. Buy more songs in Rewards.</p>
         <p class="label" id="quality-label">Graphics</p>
         <div id="quality" class="segment" role="group" aria-labelledby="quality-label">
           <button type="button" data-quality="high" aria-pressed="true">High</button>
@@ -221,6 +385,7 @@
 
     <div id="boot">
       <div class="boot-card">
+        <img class="boot-logo" src="/logos/logo-3-sky.svg" alt="" width="120" height="120" />
         <p id="boot-status" class="boot-title" data-i18n="boot.title">Loading...</p>
         <div
           id="boot-bar"

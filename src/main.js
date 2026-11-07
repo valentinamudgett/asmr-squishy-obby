@@ -16,12 +16,20 @@ import HavokPhysics from "@babylonjs/havok";
 import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { createAudio } from "./audio.js";
 import { createLavaPop } from "./boom.js";
-import { awardLevelCoin, createCoinPop, loadCoins } from "./coins.js";
+import { createBots } from "./bot.js";
+import { createChaser } from "./chaser.js";
+import { awardLevelCoin, createCoinPop, earnCoins, loadCoins } from "./coins.js";
 import { buildAvatar, createPreview } from "./avatar.js";
+import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
 import { drawFace, FACES } from "./faces.js";
+import { BUBBLE_LIFT, createBubble, createNameTag } from "./figure.js";
 import { DANCES } from "./dances.js";
 import { createGuideArrow } from "./guide.js";
+import { createHalloween } from "./halloween.js";
+import { createThanksgiving } from "./thanksgiving.js";
+import { createChristmas } from "./christmas.js";
+import { createValentines } from "./valentines.js";
 import { applyTranslations, t } from "./i18n.js";
 import {
   AGES,
@@ -29,15 +37,20 @@ import {
   defaultHair,
   HAIR_STYLES,
   HAIR_SWATCHES,
+  HELD_FOODS,
   loadLook,
   PRESETS,
   saveLook,
   SKIN_SWATCHES,
 } from "./look.js";
-import { OUTFITS } from "./outfits.js";
+import { courseClock, courseDay, courseSeed, createOnline } from "./online.js";
+import { OUTFITS, PRISONER_OUTFIT } from "./outfits.js";
+import { SONGS } from "./songs.js";
 import { smoothstep } from "./geometry.js";
 import { createPlayer, FOOT_OFFSET, STAIR_RUN } from "./player.js";
-import { isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, starsLeft, tryBuy } from "./rewards.js";
+import { createPrison, FREEDOM_LEVEL, isPrisonLevel, PRISON_LEVEL } from "./prison.js";
+import { hairColorKey, isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, tryBuy } from "./rewards.js";
+import { bindSocial } from "./social.js";
 import { createWorld } from "./world.js";
 import "./style.css";
 
@@ -46,14 +59,13 @@ const boot = document.querySelector("#boot");
 const bootStatus = document.querySelector("#boot-status");
 const bootBar = document.querySelector("#boot-bar");
 const bootFill = document.querySelector("#boot-fill");
-const timeEl = document.querySelector("#time");
-const fallsEl = document.querySelector("#falls");
 const levelEl = document.querySelector("#level");
-const heightEl = document.querySelector("#height");
-const bestEl = document.querySelector("#best");
+const escapeStat = document.querySelector("#escape-stat");
+const escapeCount = document.querySelector("#escape-count");
 const coinsEl = document.querySelector("#coins");
+const menuCoinsEl = document.querySelector("#menu-coins");
+const shopCoinsEl = document.querySelector("#shop-coins");
 const coins = loadCoins();
-coinsEl.textContent = String(coins.coins);
 const hintEl = document.querySelector("#hint");
 const toastEl = document.querySelector("#toast");
 const debugEl = document.querySelector("#debug");
@@ -63,9 +75,25 @@ const showDebug = new URLSearchParams(location.search).has("debug");
 const BEST_KEY = "asmr-squishy-obby:best";
 const PLAYER_KEY = "asmr-squishy-obby:player";
 const NY_AIM_RAISE = 0.5;
+/** How long a fall off the course lasts, from leaving the ground, before you are put back on your last safe pad. */
+const FALL_SECONDS = 2.5;
+const MIN_PLUNGE_SECONDS = 0.5;
+/** Paid once, the first time you break out of Capybara Prison. */
+const ESCAPE_COINS = 25;
+/** Seconds after the cell door opens (or you start playing in the prison) before the police capybara comes. */
+const CHASE_DELAY = 1.8;
+/**
+ * Each holiday game style shows only in its own month, by the player's own clock: Valentine's Day
+ * in February, Halloween in October, Thanksgiving in November, Christmas in December.
+ * `?debug&month=2` previews another month.
+ */
+const DEBUG_MONTH = showDebug ? Number.parseInt(new URLSearchParams(location.search).get("month"), 10) : NaN;
+const MONTH = DEBUG_MONTH >= 1 && DEBUG_MONTH <= 12 ? DEBUG_MONTH - 1 : new Date().getMonth();
+const SEASONAL_THEMES = { valentines: MONTH === 1, halloween: MONTH === 9, thanksgiving: MONTH === 10, christmas: MONTH === 11 };
 
 const look = loadLook();
-const wallet = loadWallet(look);
+const wallet = loadWallet(look, coins, loadBest());
+showCoins();
 let publishLook = () => {};
 const ui = {
   settingsOpen: false,
@@ -74,6 +102,8 @@ const ui = {
 
 applyTranslations();
 document.body.classList.add("start-open");
+// Before boot, so the title screen already wears the saved game style.
+wearTheme(loadPlayerPreferences().theme);
 const bootProgress = createBootProgress();
 bootGame().catch((error) => {
   console.error(error);
@@ -174,21 +204,29 @@ async function bootGame() {
   const audio = await createAudio();
   bootProgress.set(0.7);
   let graphics = null;
+  // The holiday game styles by theme name, filled in once graphics exist.
+  const seasons = {};
+  let prison = null;
   let best = loadBest();
+  const day = courseDay();
   const course = createCourse(scene, {
     onAdd(pad) {
       audio.attachPad(pad).catch((error) => console.warn("Pad sound failed", error));
       graphics?.addPad(pad);
+      for (const season of Object.values(seasons)) season.addPad(pad);
+      prison?.addPad(pad);
     },
     onRemove(pad) {
       audio.detachPad(pad);
       graphics?.removePad(pad);
+      for (const season of Object.values(seasons)) season.removePad(pad);
+      prison?.removePad(pad);
       if (pad.flight) graphics?.removeStair(pad.flight);
     },
     onStair(flight) {
       graphics?.addStair(flight);
     },
-  });
+  }, best, courseSeed(day));
 
   const avatar = buildAvatar(scene);
   avatar.apply(look);
@@ -207,60 +245,144 @@ async function bootGame() {
     onJump: (pad) => {
       pad.kick(pad.kind === "spring" ? 0.38 : 0.22);
     },
+    onFly: (on) => {
+      if (!on) return;
+      showToast(t("toast.angelFlight"));
+      toastTimer = 1.6;
+      nextToast = null;
+    },
   }, course.start.heading ?? 0);
+  player.setAngelFlight(look.costume === "angel");
   audio.attachListener(player.camera);
   graphics = createGraphics(scene, player.camera, world);
   for (const mesh of avatar.parts) graphics.shadow.addShadowCaster(mesh, true);
   for (const pad of course.pads) graphics.addPad(pad);
   for (const flight of course.flights) graphics.addStair(flight);
   graphics.apply(look.quality);
+  const seasonContext = { world, graphics, pads: () => course.pads };
+  seasons.halloween = createHalloween(scene, seasonContext);
+  seasons.thanksgiving = createThanksgiving(scene, seasonContext);
+  seasons.christmas = createChristmas(scene, seasonContext);
+  seasons.valentines = createValentines(scene, seasonContext);
+  prison = createPrison(scene, { graphics });
+  for (const pad of course.pads) prison.addPad(pad);
+  const chaser = createChaser(scene, { graphics, course });
+  // In the prison you wear stripes. Only the avatar wears them: the saved look and the one other players see stay yours.
+  let prisoner = false;
+  const wearPrisoner = (on) => {
+    prisoner = on;
+    avatar.apply(on ? { ...look, outfit: PRISONER_OUTFIT.id, costume: "none" } : look);
+  };
+
+  // Filled in once the HUD is bound; the room only calls back after boot has finished.
+  let social = null;
+  let hereIndex = course.start.index;
+  const notify = (text) => {
+    showToast(text);
+    toastTimer = 2.6;
+    nextToast = null;
+  };
+  const bots = createBots(scene, {
+    graphics,
+    course,
+    onChat: (line) => social?.addLine(line),
+    onRoster: () => social?.refresh(),
+  });
+  const online = createOnline(scene, {
+    day,
+    graphics,
+    isNear: (index) => {
+      const pads = course.pads;
+      return pads.length > 0 && index >= pads[0].index - 2 && index <= pads[pads.length - 1].index + 2;
+    },
+    onCount: (count, connected) => {
+      bots.setEnabled(connected);
+      showOnline(connected ? count + bots.count : count, connected);
+      social?.refresh();
+    },
+    onRoster: () => social?.refresh(),
+    onChat: (line) => social?.addLine(line),
+    onFriended: (name) => notify(t("friends.addedYou").replace("{name}", name)),
+  });
+  const selfBubble = createBubble(scene, graphics);
+  const selfTag = createNameTag(scene, graphics);
 
   const preview = createPreview(document.querySelector("#preview"));
   preview.avatar.apply(look);
   bootProgress.set(0.92);
   const syncMenuMusic = () => audio.setMenuMusic(ui.startOpen || ui.settingsOpen);
-  bindSettings(preview, graphics, avatar, syncMenuMusic);
+  bindSettings(
+    preview,
+    graphics,
+    avatar,
+    syncMenuMusic,
+    (song) => audio.setCourseSong(song),
+    () => {
+      online.setProfile(window.__obbyPreferences?.name ?? "", look);
+      player.setAngelFlight(look.costume === "angel");
+      if (prisoner) wearPrisoner(true);
+    },
+  );
+  wearPrisoner(isPrisonLevel(course.start.level));
   let aimRaise = 0;
   bindStartMenu(
-    best,
-    (difficulty) => course.setDifficulty(difficulty),
+    (difficulty) => {
+      course.setDifficulty(difficulty);
+      chaser.setDifficulty(difficulty);
+    },
     (background) => {
       world.setBackdrop(background);
+      for (const season of Object.values(seasons)) season.setBackdrop(background);
       // The night skyline stands on the horizon, so tip the view up enough to see it.
       aimRaise = background === "newyork" ? NY_AIM_RAISE : 0;
     },
     syncMenuMusic,
+    online,
+    (theme, background) => {
+      const wasSeasonal = Object.values(seasons).some((season) => season.enabled);
+      // Off before on, so the next style starts from the game's own colors.
+      for (const [name, season] of Object.entries(seasons)) if (name !== theme) season.setEnabled(false);
+      // Puts back the backdrop's own sea and sky colors after a holiday tint.
+      if (wasSeasonal) world.setBackdrop(background);
+      seasons[theme]?.setEnabled(true);
+    },
   );
+  bindTitleScreen();
   syncMenuMusic();
-  bindShop(best, () => publishLook());
+  bindShop(() => publishLook());
   bindTouch(player);
+  social = bindSocial({ online, bots, ui, notify, onSay: (text) => selfBubble.say(text) });
 
-  let started = false;
-  let startMs = 0;
-  let elapsed = 0;
-  let falls = 0;
   let fallLock = 0;
   let toastTimer = 0;
   let nextToast = null;
   let lastSafePad = course.start;
+  // Set while a long fall off the course plays out: seconds left and the height it started from.
+  let plunge = null;
+  let airTime = 0;
   const guide = createGuideArrow(scene);
   const pop = createLavaPop(scene, avatar);
   const coinPop = createCoinPop(scene, player.camera);
   let meltHome = null;
+  const pointAhead = (from) => {
+    const next = from.flight?.steps[0] ?? course.pads.find((pad) => pad.index > from.index);
+    if (next) guide.show(from, next);
+  };
   const sendHome = (home) => {
     course.restoreStairs();
     const spot = course.standOn(home, FOOT_OFFSET);
     avatar.stopDance();
     player.respawn(spot, home.heading ?? 0);
     pop.place({ x: spot.x, y: spot.y - FOOT_OFFSET, z: spot.z });
-    const next = home.flight?.steps[0] ?? course.pads.find((pad) => pad.index > home.index);
-    if (next) guide.show(home, next);
+    pointAhead(home);
+    chaser.fallBack(home.index);
   };
+  let chaseIn = CHASE_DELAY;
   let hintTimer = 9;
   let clock = 0;
   levelEl.textContent = String(course.start.level);
-  bestEl.textContent = String(best);
-  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop };
+  showEscape(course.start.level);
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, chaser };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -285,15 +407,21 @@ async function bootGame() {
     clock += dt;
     fallLock = Math.max(0, fallLock - dt);
     if (pop.active) player.easeFall(pop.phase === "boom" ? 0 : 0.5);
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active;
-    const frame = player.update(dt, allowInput);
+    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active && !prison.locked;
+    const frame = plunge ? player.plunge(dt) : player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
-    course.update(clock, dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
+    airTime = frame.grounded ? 0 : airTime + dt;
+    // Moving pads and hazards run on the wall clock, so online players see them in step.
+    course.update(courseClock(day), dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
     const here = frame.pad ?? lastSafePad;
-    const cover = world.update(clock, dt, frame.position, here.index / PADS_PER_LEVEL + 1);
+    hereIndex = Number.isFinite(here.index) ? here.index : lastSafePad.index;
+    const drop = plunge ? plunge.fromY - frame.position.y : 0;
+    const cover = world.update(clock, dt, frame.position, here.index / PADS_PER_LEVEL + 1, drop);
     // High up the skyline is below you, so stop tipping the view toward the horizon.
     player.setAimRaise(aimRaise * (1 - smoothstep(8, 120, world.altitude)));
     graphics.update(clock, cover);
+    for (const season of Object.values(seasons)) season.update(clock, dt, frame.position, player.camera, cover, world.space);
+    prison.update(clock, dt);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
       x: frame.foot.x,
@@ -305,11 +433,35 @@ async function bootGame() {
       airborne: frame.airborne,
       trick: frame.trick,
       trickP: frame.trickP,
+      flying: frame.flying,
       // Input, not speed: a moving pad or a landing slide carries the body without any steps.
       moving: frame.walking,
       stride: frame.onStair ? STAIR_RUN : 1,
+      running: frame.onStair,
       time: clock,
     });
+    online.sendPose(dt, {
+      x: frame.foot.x,
+      y: frame.foot.y,
+      z: frame.foot.z,
+      sink: standing ? standing.sink : 0,
+      facing: frame.facing,
+      airborne: frame.airborne,
+      moving: frame.walking,
+      running: frame.onStair,
+      flying: frame.flying,
+      trick: frame.trick,
+      trickP: frame.trickP,
+      index: hereIndex,
+      away: ui.startOpen,
+    });
+    online.update(dt, player.camera, clock);
+    bots.update(dt, player.camera, clock, hereIndex);
+    const headTop = frame.foot.y - (standing ? standing.sink : 0) + avatar.height;
+    selfTag.setName(online.name);
+    selfTag.setShown(avatar.root.isEnabled());
+    selfTag.update(frame.foot.x, headTop, frame.foot.z);
+    selfBubble.update(dt, frame.foot.x, headTop + BUBBLE_LIFT, frame.foot.z);
 
     const lavaCue = pop.tick(dt, frame.foot, world.seaY);
     if (lavaCue === "boom") audio.boom();
@@ -323,18 +475,7 @@ async function bootGame() {
     graphics.sun.position.set(frame.position.x + 8, frame.position.y + 18, frame.position.z - 6);
     graphics.sun.setDirectionToTarget(frame.position);
 
-    const startDx = frame.foot.x - course.start.mesh.position.x;
-    const startDz = frame.foot.z - course.start.mesh.position.z;
-    const startReach = course.start.solid?.r ?? course.start.walkRadius;
-    const leftStart = Math.hypot(startDx, startDz) > startReach * 0.98;
-    if (!started && (leftStart || frame.jumped)) {
-      started = true;
-      startMs = performance.now();
-    }
-    if (started) elapsed = (performance.now() - startMs) / 1000;
-
     if (frame.grounded && frame.pad && frame.pad.index < checkpointPad.index && !pop.active && fallLock <= 0) {
-      falls += 1;
       fallLock = 0.6;
       lastSafePad = checkpointPad;
       sendHome(checkpointPad);
@@ -346,22 +487,33 @@ async function bootGame() {
     }
     if (frame.grounded && frame.pad && guide.pad && frame.pad !== guide.pad) guide.hide();
 
-    if (!pop.active && fallLock <= 0) {
-      const burned = frame.foot.y < world.seaY + 0.15 || course.lavaBurn(frame.position);
-      // Up high the sea is far below, so dropping past the course floor counts as the fall.
-      const dropped = !burned && course.lava.y > world.seaY + 0.5 && frame.foot.y < course.lava.y;
-      const bonked = !burned && !dropped && course.hazardHit(frame.position);
-      if (dropped) {
-        falls += 1;
+    if (plunge) {
+      plunge.left -= dt;
+      if (plunge.left <= 0) {
+        plunge = null;
         fallLock = 0.6;
         sendHome(lastSafePad.removed ? checkpointPad : lastSafePad);
         showToast(t("toast.backToLevel"));
         toastTimer = 1.4;
         nextToast = t("toast.keepGoing");
+      }
+    } else if (!pop.active && fallLock <= 0) {
+      const burned = frame.foot.y < world.seaY + 0.15 || course.lavaBurn(frame.position);
+      // Up high the sea is far below, so dropping past the course floor counts as the fall.
+      const dropped = !burned && course.lava.y > world.seaY + 0.5 && frame.foot.y < course.lava.y;
+      const bonked = !burned && !dropped && course.hazardHit(frame.position);
+      if (dropped) {
+        plunge = { left: Math.max(MIN_PLUNGE_SECONDS, FALL_SECONDS - airTime), fromY: frame.position.y };
+        guide.hide();
+        avatar.stopDance();
+        audio.scream();
+        audio.setWalking(false);
+        showToast(t("toast.falling"));
+        toastTimer = 2.2;
+        nextToast = null;
       } else if (burned || bonked) {
         const home = lastSafePad.removed ? checkpointPad : lastSafePad;
         if (burned && pop.begin()) {
-          falls += 1;
           meltHome = home;
           avatar.stopDance();
           audio.scream();
@@ -370,11 +522,10 @@ async function bootGame() {
           toastTimer = 1.6;
           nextToast = t("toast.keepGoing");
         } else if (!burned) {
-          falls += 1;
           fallLock = 0.6;
           // The pad may be moving, so ask for its current top.
           sendHome(home);
-          showToast(t("toast.ouch"));
+          showToast(bonked.kind === "guard" ? t("toast.caught") : t("toast.ouch"));
           toastTimer = 0.9;
           nextToast = t("toast.keepGoing");
         }
@@ -384,20 +535,78 @@ async function bootGame() {
 
     if (frame.grounded && frame.pad?.role === "checkpoint" && frame.pad.index > checkpointPad.index) {
       checkpointPad = frame.pad;
-      levelEl.textContent = String(frame.pad.level);
-      if (frame.pad.level > best) {
-        best = frame.pad.level;
-        bestEl.textContent = String(best);
+      const level = frame.pad.level;
+      const firstTime = level > best;
+      levelEl.textContent = String(level);
+      showEscape(level);
+      if (firstTime) {
+        best = level;
         saveBest(best);
       }
       avatar.dance(look.dance);
-      showToast(`Level ${frame.pad.level}`);
-      toastTimer = 1.6;
-      nextToast = null;
-      if (awardLevelCoin(coins, frame.pad.level)) {
-        coinsEl.textContent = String(coins.coins);
+      online.dance(look.dance);
+      let earned = awardLevelCoin(coins, level);
+      if (level === PRISON_LEVEL) {
+        prison.lockUp(frame.pad);
+        showToast(t("toast.lockedUp"));
+        toastTimer = 3;
+        nextToast = t("toast.breakOut");
+      } else if (level === FREEDOM_LEVEL) {
+        const lines = [t("toast.escaped")];
+        if (firstTime) {
+          earnCoins(coins, ESCAPE_COINS);
+          earned = true;
+          lines.push(t("toast.escapeBonus").replace("{n}", String(ESCAPE_COINS)));
+        }
+        if (chaser.active) {
+          chaser.giveUp();
+          lines.unshift(t("toast.gotAway"));
+        }
+        lines.push(t("toast.backToObby"));
+        pointAhead(frame.pad);
+        showToast(lines[0]);
+        toastTimer = 2.4;
+        nextToast = lines.slice(1).join(" ") || null;
+      } else {
+        showToast(`Level ${level}`);
+        toastTimer = 1.6;
+        nextToast = null;
+      }
+      if (earned) {
+        showCoins();
         coinPop.burst(frame.position);
       }
+    }
+
+    const inPrison = isPrisonLevel(checkpointPad.level);
+    if (inPrison !== prisoner) wearPrisoner(inPrison);
+    const menus = ui.startOpen || ui.settingsOpen;
+    if (!inPrison || prison.locked || chaser.active) chaseIn = CHASE_DELAY;
+    else if (!menus) {
+      chaseIn -= dt;
+      if (chaseIn <= 0) {
+        chaser.start(hereIndex);
+        showToast(t("toast.chase"));
+        toastTimer = 2.4;
+        nextToast = null;
+      }
+    }
+    if (!inPrison && chaser.active) chaser.giveUp();
+    // Frozen (menus, dances, the cell, falls) it waits where it is; just after a respawn it can't catch you.
+    const frozen = menus || avatar.dancing || pop.active || Boolean(plunge) || prison.locked;
+    const caught = chaser.update(dt, clock, {
+      index: hereIndex,
+      foot: frame.foot,
+      hold: frozen,
+      canCatch: !frozen && fallLock <= 0,
+    });
+    if (caught) {
+      fallLock = 0.6;
+      lastSafePad = checkpointPad;
+      sendHome(checkpointPad);
+      showToast(t("toast.policeCaught"));
+      toastTimer = 1.8;
+      nextToast = t("toast.keepGoing");
     }
 
     if (hintTimer > 0) {
@@ -417,9 +626,6 @@ async function bootGame() {
       }
     }
 
-    heightEl.textContent = `${Math.max(0, Math.round(frame.foot.y - LAVA_Y))} m`;
-    timeEl.textContent = formatTime(started ? elapsed : 0);
-    fallsEl.textContent = String(falls);
     if (showDebug) {
       debugEl.hidden = false;
       debugEl.textContent = [
@@ -452,18 +658,22 @@ async function bootGame() {
   }
 }
 
-function bindStartMenu(best, onDifficulty, onBackground, syncMenuMusic) {
+function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onTheme) {
   const menu = document.querySelector("#start-menu");
   const playButton = document.querySelector("#start-play");
   const avatarButton = document.querySelector("#start-avatar");
+  const onlineButton = document.querySelector("#online-toggle");
   const nameInput = document.querySelector("#player-name");
+  const themeButtons = [...menu.querySelectorAll("[data-theme]")];
   const difficultyButtons = [...menu.querySelectorAll("[data-difficulty]")];
   const backgroundButtons = [...menu.querySelectorAll("[data-background]")];
   const preferences = loadPlayerPreferences();
 
   nameInput.value = preferences.name;
-  document.querySelector("#menu-best").textContent = String(best);
-  document.querySelector("#menu-stars").textContent = String(starsLeft(best, wallet));
+
+  for (const button of themeButtons) button.hidden = !themeOpen(button.dataset.theme);
+  // Outside the holiday months Normal is the only game, so there is nothing to choose.
+  menu.querySelector(".theme-picker").hidden = themeButtons.every((button) => button.hidden || button.dataset.theme === "normal");
 
   const selectDifficulty = (difficulty) => {
     preferences.difficulty = difficulty;
@@ -492,10 +702,36 @@ function bindStartMenu(best, onDifficulty, onBackground, syncMenuMusic) {
   });
   selectBackground(preferences.background);
 
+  const selectTheme = (theme) => {
+    preferences.theme = theme;
+    wearTheme(theme);
+    onTheme(theme, preferences.background);
+    themeButtons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.theme === theme));
+    });
+    savePlayerPreferences(preferences);
+  };
+  themeButtons.forEach((button) => {
+    button.addEventListener("click", () => selectTheme(button.dataset.theme));
+  });
+  selectTheme(preferences.theme);
+
+  const selectOnline = (on) => {
+    preferences.online = on;
+    onlineButton.setAttribute("aria-pressed", String(on));
+    document.querySelector("#online-state").textContent = t(on ? "online.on" : "online.off");
+    online.setProfile(preferences.name, look);
+    online.setEnabled(on);
+    savePlayerPreferences(preferences);
+  };
+  onlineButton.addEventListener("click", () => selectOnline(!preferences.online));
+  selectOnline(preferences.online);
+
   nameInput.addEventListener("input", () => {
     preferences.name = nameInput.value.trimStart();
     savePlayerPreferences(preferences);
   });
+  nameInput.addEventListener("change", () => online.setProfile(nameInput.value.trim(), look));
 
   avatarButton.addEventListener("click", () => {
     document.querySelector("#settings-open").click();
@@ -505,6 +741,7 @@ function bindStartMenu(best, onDifficulty, onBackground, syncMenuMusic) {
     preferences.name = nameInput.value.trim() || "Player";
     nameInput.value = preferences.name;
     savePlayerPreferences(preferences);
+    online.setProfile(preferences.name, look);
     ui.startOpen = false;
     menu.hidden = true;
     document.querySelector("#shop").hidden = true;
@@ -516,6 +753,61 @@ function bindStartMenu(best, onDifficulty, onBackground, syncMenuMusic) {
   window.__obbyPreferences = preferences;
 }
 
+/**
+ * The title screen sits over the main menu until the first tap or key press. Your friends box
+ * starts on it and moves into the main menu once you go in.
+ */
+function bindTitleScreen() {
+  const screen = document.querySelector("#title-screen");
+  const startButton = document.querySelector("#title-start");
+  const menu = document.querySelector("#start-menu");
+  const friendsBox = document.querySelector("#friends-box");
+  const players = document.querySelector("#players");
+  menu.inert = true;
+  document.body.classList.add("title-open");
+
+  const enter = () => {
+    if (screen.hidden || screen.classList.contains("is-leaving")) return;
+    window.removeEventListener("keydown", onKey);
+    screen.classList.add("is-leaving");
+    setTimeout(() => {
+      menu.querySelector(".start-actions").before(friendsBox);
+      screen.hidden = true;
+      document.body.classList.remove("title-open");
+      menu.inert = false;
+      screen.classList.remove("is-leaving");
+      const nameInput = document.querySelector("#player-name");
+      (nameInput.value ? document.querySelector("#start-play") : nameInput).focus();
+    }, 350);
+  };
+  const onKey = (event) => {
+    if (event.repeat || ["Tab", "Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
+    if (!players.hidden || (event.target instanceof Element && event.target.closest("#friends-box"))) return;
+    event.preventDefault();
+    enter();
+  };
+
+  screen.addEventListener("click", (event) => {
+    if (event.target.closest("#friends-box")) return;
+    if (!players.hidden && !event.target.closest("#title-start")) {
+      document.querySelector("#players-close").click();
+      return;
+    }
+    enter();
+  });
+  window.addEventListener("keydown", onKey);
+  startButton.focus();
+}
+
+function themeOpen(theme) {
+  return theme === "normal" || SEASONAL_THEMES[theme] === true;
+}
+
+/** Menu and loading screens take the game style's colors from a class on the body. */
+function wearTheme(theme) {
+  for (const name of Object.keys(SEASONAL_THEMES)) document.body.classList.toggle(`theme-${name}`, theme === name);
+}
+
 function loadPlayerPreferences() {
   try {
     const stored = JSON.parse(localStorage.getItem(PLAYER_KEY) ?? "{}");
@@ -523,10 +815,25 @@ function loadPlayerPreferences() {
       name: typeof stored.name === "string" ? stored.name.slice(0, 18) : "",
       difficulty: ["easy", "medium", "hard"].includes(stored.difficulty) ? stored.difficulty : "easy",
       background: stored.background === "lava" || stored.background === "newyork" ? stored.background : "hollywood",
+      online: stored.online !== false,
+      theme: themeOpen(stored.theme) ? stored.theme : "normal",
     };
   } catch {
-    return { name: "", difficulty: "easy", background: "hollywood" };
+    return { name: "", difficulty: "easy", background: "hollywood", online: true, theme: "normal" };
   }
+}
+
+/** `count` includes you. Zero means online play is switched off. */
+function showOnline(count, connected) {
+  const stat = document.querySelector("#online-stat");
+  const status = document.querySelector("#online-status");
+  stat.hidden = !connected;
+  document.querySelector("#online-count").textContent = String(count);
+  const others = count - 1;
+  if (!connected) status.textContent = t("online.solo");
+  else if (others <= 0) status.textContent = t("online.waiting");
+  else if (others === 1) status.textContent = t("online.one");
+  else status.textContent = t("online.many").replace("{n}", String(others));
 }
 
 function savePlayerPreferences(preferences) {
@@ -541,6 +848,31 @@ function savePlayerPreferences(preferences) {
 function isSafe(pad) {
   if (pad.stair) return false;
   return pad.kind !== "spring" && !pad.hazards.some((hazard) => hazard.kind !== "fireball");
+}
+
+/** The HUD, the start menu, and the shop all show the same coin count. */
+function showCoins() {
+  const text = String(coins.coins);
+  coinsEl.textContent = text;
+  menuCoinsEl.textContent = text;
+  shopCoinsEl.textContent = text;
+}
+
+/** While you are in Capybara Prison, the HUD counts the levels you've climbed toward freedom. */
+function showEscape(level) {
+  escapeStat.hidden = !isPrisonLevel(level);
+  escapeCount.textContent = `${level - PRISON_LEVEL}/${FREEDOM_LEVEL - PRISON_LEVEL}`;
+}
+
+function coinCount(n) {
+  return (n === 1 ? t("coin.one") : t("coin.many")).replace("{n}", String(n));
+}
+
+function coinGlyph() {
+  const glyph = document.createElement("span");
+  glyph.className = "coin-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  return glyph;
 }
 
 function loadBest() {
@@ -559,10 +891,10 @@ function saveBest(level) {
   }
 }
 
-function bindSettings(preview, graphics, avatar, syncMenuMusic) {
+function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) {
   const openButton = document.querySelector("#settings-open");
   const closeButton = document.querySelector("#settings-close");
-  const menuButton = document.querySelector("#settings-menu");
+  const menuButton = document.querySelector("#hud-menu");
   const backdrop = document.querySelector("#settings-backdrop");
   const hairInput = document.querySelector("#hair-color");
   const hairBox = document.querySelector("#hair-swatches");
@@ -572,9 +904,12 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   const ageBox = document.querySelector("#ages");
   const hairStyleBox = document.querySelector("#hair-styles");
   const danceBox = document.querySelector("#dances");
+  const songBox = document.querySelector("#songs");
   const faceBox = document.querySelector("#faces");
   const outfitBox = document.querySelector("#outfits");
+  const costumeBox = document.querySelector("#costumes");
   const bowButton = document.querySelector("#bow");
+  const heldBox = document.querySelector("#held");
   const qualityBox = document.querySelector("#quality");
 
   const makeButton = (className, onClick) => {
@@ -591,13 +926,17 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   const canUse = (kind, id) => isOwned(wallet, itemKey(kind, id));
   const lockTitle = (kind, id) => {
     const key = itemKey(kind, id);
-    return canUse(kind, id) ? "" : `${t("shop.locked")} · ${priceOf(key)} ⭐`;
+    return canUse(kind, id) ? "" : `${t("shop.locked")} · ${coinCount(priceOf(key))}`;
+  };
+  const colorLocked = (color) => {
+    const key = hairColorKey(color);
+    return key !== null && !isOwned(wallet, key);
   };
 
   for (const preset of PRESETS) {
     const button = makeButton("chip", () => {
       if (canUse("face", preset.face)) look.face = preset.face;
-      if (preset.hairColor !== "rainbow" || canUse("extra", "rainbow")) look.hairColor = preset.hairColor;
+      if (!colorLocked(preset.hairColor)) look.hairColor = preset.hairColor;
       if (canUse("outfit", preset.outfit)) look.outfit = preset.outfit;
       look.skinColor = preset.skinColor;
       look.bow = preset.bow ? canUse("extra", "bow") || look.bow : false;
@@ -628,7 +967,16 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   });
   choiceRow(ageBox, AGES, "age");
   choiceRow(hairStyleBox, HAIR_STYLES, "hair", null, "hair");
+  choiceRow(heldBox, HELD_FOODS, "held");
   choiceRow(danceBox, DANCES, "dance", (id) => preview.avatar.dance(id, true), "dance");
+  choiceRow(songBox, SONGS, "song", null, "song");
+  choiceRow(
+    costumeBox,
+    COSTUMES.map((costume) => ({ id: costume.id, label: `${costume.icon} ${costume.label}` })),
+    "costume",
+    null,
+    "costume",
+  );
 
   for (const face of FACES) {
     const button = makeButton("tile", () => {
@@ -646,7 +994,7 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
 
   for (const color of [...HAIR_SWATCHES, "rainbow"]) {
     const button = makeButton(color === "rainbow" ? "swatch rainbow" : "swatch", () => {
-      if (color === "rainbow" && !canUse("extra", "rainbow")) return;
+      if (colorLocked(color)) return;
       look.hairColor = color;
     });
     if (color !== "rainbow") button.style.background = color;
@@ -655,6 +1003,7 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
     hairBox.append(button);
   }
   hairInput.addEventListener("input", () => {
+    if (!canUse("haircolor", "custom")) return;
     look.hairColor = hairInput.value.toLowerCase();
     publish();
   });
@@ -731,11 +1080,15 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
     preview.avatar.apply(look);
     avatar.apply(look);
     graphics.apply(look.quality);
+    onSong(look.song);
+    onLook();
     if (look.hairColor !== "rainbow") hairInput.value = look.hairColor;
+    hairInput.disabled = !canUse("haircolor", "custom");
+    hairInput.title = lockTitle("haircolor", "custom");
     hairBox.querySelectorAll(".swatch").forEach((button) => {
-      const locked = button.dataset.color === "rainbow" && !canUse("extra", "rainbow");
+      const locked = colorLocked(button.dataset.color);
       button.disabled = locked;
-      button.title = locked ? lockTitle("extra", "rainbow") : "";
+      button.title = locked ? `${t("shop.locked")} · ${coinCount(priceOf(hairColorKey(button.dataset.color)))}` : "";
       button.setAttribute("aria-pressed", String(button.dataset.color === look.hairColor));
     });
     skinBox.querySelectorAll(".swatch").forEach((button) => {
@@ -761,7 +1114,10 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
       [bodyBox, look.body, null],
       [ageBox, look.age, null],
       [hairStyleBox, look.hair, "hair"],
+      [heldBox, look.held, null],
       [danceBox, look.dance, "dance"],
+      [songBox, look.song, "song"],
+      [costumeBox, look.costume, "costume"],
     ]) {
       box.querySelectorAll("button").forEach((button) => {
         const locked = kind ? !canUse(kind, button.dataset.value) : false;
@@ -774,7 +1130,7 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
     bowButton.disabled = !bowOwned;
     bowButton.title = bowOwned ? "" : lockTitle("extra", "bow");
     bowButton.setAttribute("aria-pressed", String(look.bow));
-    bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${priceOf("extra:bow")} ⭐`;
+    bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${coinCount(priceOf("extra:bow"))}`;
     document.querySelectorAll("#quality button").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.quality === look.quality));
     });
@@ -787,12 +1143,10 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic) {
   publishLook = publish;
 }
 
-function bindShop(best, onOwned) {
+function bindShop(onOwned) {
   const openButton = document.querySelector("#rewards-open");
   const shop = document.querySelector("#shop");
   const list = document.querySelector("#shop-list");
-  const starsEl = document.querySelector("#shop-stars");
-  const menuStars = document.querySelector("#menu-stars");
   const closeButton = document.querySelector("#shop-close");
   const backdrop = document.querySelector("#shop-backdrop");
   const status = document.querySelector("#shop-status");
@@ -815,36 +1169,45 @@ function bindShop(best, onOwned) {
       button.dataset.item = item.key;
       button.dataset.label = item.label;
       button.addEventListener("click", () => {
-        const result = tryBuy(wallet, item.key, best);
+        const result = tryBuy(wallet, item.key, coins);
         if (!result.ok) {
           paint(t("shop.broke"));
           return;
         }
         equipReward(result.item);
         paint(t("shop.unlocked"));
-        onOwned();
+        onOwned(result.item);
       });
       card.append(shopMark(item), name, button);
       grid.append(card);
     }
-    list.append(heading, grid);
+    list.append(heading);
+    if (group.noteKey) {
+      const note = document.createElement("p");
+      note.className = "note";
+      note.textContent = t(group.noteKey);
+      list.append(note);
+    }
+    list.append(grid);
   }
 
   const paint = (message) => {
-    const left = starsLeft(best, wallet);
-    menuStars.textContent = String(left);
-    starsEl.textContent = String(left);
+    showCoins();
     status.textContent = message ?? t("shop.note");
     list.querySelectorAll("[data-item]").forEach((button) => {
       const key = button.dataset.item;
       const owned = isOwned(wallet, key);
       const cost = priceOf(key);
-      const short = !owned && left < cost;
+      const short = !owned && coins.coins < cost;
       button.disabled = owned;
       button.classList.toggle("is-short", short);
-      button.textContent = owned ? t("shop.owned") : `${t("shop.buy")} · ${cost} ⭐`;
+      if (owned) button.textContent = t("shop.owned");
+      else button.replaceChildren(`${t("shop.buy")} · ${cost}`, coinGlyph());
       const label = button.dataset.label;
-      button.setAttribute("aria-label", owned ? `${label}, ${t("shop.owned")}` : `${label}, ${t("shop.buy")} ${cost}`);
+      button.setAttribute(
+        "aria-label",
+        owned ? `${label}, ${t("shop.owned")}` : `${label}, ${t("shop.buy")} ${coinCount(cost)}`,
+      );
       button.closest(".shop-item")?.classList.toggle("is-owned", owned);
     });
   };
@@ -873,8 +1236,11 @@ function bindShop(best, onOwned) {
     else if (item.kind === "face") look.face = item.id;
     else if (item.kind === "dance") look.dance = item.id;
     else if (item.kind === "hair") look.hair = item.id;
+    else if (item.kind === "song") look.song = item.id;
+    else if (item.kind === "costume") look.costume = item.id;
     else if (item.key === "extra:bow") look.bow = true;
     else if (item.key === "extra:rainbow") look.hairColor = "rainbow";
+    else if (item.color) look.hairColor = item.color;
   }
 
   function shopMark(item) {
@@ -907,8 +1273,17 @@ function bindShop(best, onOwned) {
       mark.className = "swatch rainbow shop-swatch";
       return mark;
     }
+    if (item.color) {
+      mark.className = "swatch shop-swatch";
+      mark.style.background = item.color;
+      return mark;
+    }
     mark.className = "shop-emoji";
-    mark.textContent = item.key === "extra:bow" ? "🎀" : item.kind === "dance" ? "♪" : "✨";
+    if (item.key === "extra:bow") mark.textContent = "🎀";
+    else if (item.kind === "dance") mark.textContent = "♪";
+    else if (item.kind === "song") mark.textContent = "🎵";
+    else if (item.kind === "costume") mark.textContent = costumeById(item.id).icon;
+    else mark.textContent = item.icon ?? "✨";
     return mark;
   }
 }
@@ -1095,14 +1470,6 @@ function fit(engine) {
   const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
   engine.setHardwareScalingLevel(1 / ratio);
   engine.resize();
-}
-
-function formatTime(seconds) {
-  const safe = Math.max(0, seconds);
-  const minutes = Math.floor(safe / 60);
-  const rest = safe - minutes * 60;
-  const hundredths = rest.toFixed(2).padStart(5, "0");
-  return minutes > 0 ? `${minutes}:${hundredths}` : hundredths;
 }
 
 function hintCopy() {

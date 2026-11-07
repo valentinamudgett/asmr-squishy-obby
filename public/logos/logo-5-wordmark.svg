@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 256">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9f6ff"/>
+      <stop offset="0.45" stop-color="#93d8f6"/>
+      <stop offset="1" stop-color="#3a9dd8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.42" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a5fc8"/>
+      <stop offset="1" stop-color="#5f3f7b"/>
+    </linearGradient>
+  </defs>
+
+  <ellipse cx="128" cy="222" rx="80" ry="10" fill="#2a6f9e" opacity="0.2"/>
+
+  <g transform="translate(128 132) scale(0.92) translate(-128 -136) rotate(-6 128 136)">
+    <rect x="40" y="52" width="176" height="168" rx="40" fill="url(#body)"/>
+    <rect x="40" y="52" width="176" height="168" rx="40" fill="url(#glow)"/>
+    <path d="M60 94 Q58 62 92 60 L164 59 Q198 59 196 92 Q162 102 128 102 Q92 102 60 94 Z" fill="#f4fdff" opacity="0.75"/>
+    <path d="M44 166 Q128 194 212 166 L212 180 Q211 217 176 219 L80 219 Q45 217 44 180 Z" fill="#2a86c6" opacity="0.32"/>
+    <rect x="40" y="52" width="176" height="168" rx="40" fill="none" stroke="#2a7fb9" stroke-width="3" opacity="0.45"/>
+
+    <circle cx="96" cy="150" r="10" fill="#17456e"/>
+    <circle cx="93" cy="146" r="3.5" fill="#ffffff"/>
+    <path d="M146 152 Q160 140 174 152" fill="none" stroke="#17456e" stroke-width="6" stroke-linecap="round"/>
+    <ellipse cx="80" cy="176" rx="12" ry="7" fill="#ff8fbf" opacity="0.7"/>
+    <ellipse cx="178" cy="176" rx="12" ry="7" fill="#ff8fbf" opacity="0.7"/>
+    <path d="M114 172 Q128 188 142 172" fill="#17456e"/>
+
+    <path d="M56 128 Q54 96 74 78" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+    <circle cx="57" cy="146" r="4" fill="#ffffff" opacity="0.75"/>
+  </g>
+
+  <g font-family="'Trebuchet MS', 'Segoe UI', sans-serif" font-weight="900" letter-spacing="-3">
+    <text x="252" y="128" font-size="92" fill="#ffffff" stroke="#ffffff" stroke-width="14" stroke-linejoin="round">Squishy</text>
+    <text x="252" y="128" font-size="92" fill="url(#ink)">Squishy</text>
+    <text x="256" y="204" font-size="62" fill="#ffffff" stroke="#ffffff" stroke-width="12" stroke-linejoin="round">Sky Obby</text>
+    <text x="256" y="204" font-size="62" fill="#3a9dd8">Sky Obby</text>
+  </g>
+
+  <path d="M590 40 L594 52 L606 56 L594 60 L590 72 L586 60 L574 56 L586 52 Z" fill="#ffd166"/>
+  <path d="M560 168 L562.5 175.5 L570 178 L562.5 180.5 L560 188 L557.5 180.5 L550 178 L557.5 175.5 Z" fill="#ff8fbf"/>
+</svg>

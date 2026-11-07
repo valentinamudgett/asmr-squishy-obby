@@ -21,6 +21,15 @@ export function smoothstep(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 
+/** Swell height of the city ocean at a point on it, so anything afloat rides the same waves. */
+export function oceanSwell(x, z, time) {
+  return (
+    Math.sin(x * 0.018 + time * 0.65) * 0.22 +
+    Math.sin(z * 0.014 - time * 0.48) * 0.16 +
+    Math.sin((x + z) * 0.007 + time * 0.32) * 0.12
+  );
+}
+
 export function paint(mesh, color) {
   const count = mesh.getTotalVertices();
   const colors = new Float32Array(count * 4);
@@ -192,7 +201,7 @@ const FACE_BLUSH = new Color3(1, 0.56, 0.66);
  * Kawaii dumpling face built as geometry that sits on the surface of `body`.
  * The pieces are merged into the squishy later, so they share its squish morph.
  */
-export function buildFace(scene, body, { origin, direction, scale }) {
+export function buildFace(scene, body, { origin, direction, scale, wink = false }) {
   body.computeWorldMatrix(true);
   body.refreshBoundingInfo();
   const center = hitSurface(body, origin, direction);
@@ -206,25 +215,41 @@ export function buildFace(scene, body, { origin, direction, scale }) {
   const parts = [];
 
   for (const side of [-1, 1]) {
-    const spot = at(side * 0.25, 0.07);
-    if (!spot) continue;
-    const local = frameFor(spot.normal);
-    const eye = MeshBuilder.CreateSphere(`${body.name}-eye`, { diameter: 1, segments: 14 }, scene);
-    eye.scaling.set(0.15 * s, 0.19 * s, 0.07 * s);
-    eye.position.copyFrom(spot.point);
-    orient(eye, local);
-    parts.push(paint(eye, FACE_INK));
+    if (wink && side === -1) {
+      const arc = [];
+      for (let k = 0; k <= 8; k += 1) {
+        const angle = Math.PI * (0.15 + (k / 8) * 0.7);
+        arc.push([side * 0.25 + Math.cos(angle) * 0.08, 0.03 + Math.sin(angle) * 0.05]);
+      }
+      const lid = surfacePath(at, center.normal, arc, 0.012 * s);
+      if (!lid) continue;
+      const tube = MeshBuilder.CreateTube(
+        `${body.name}-wink`,
+        { path: lid, radius: 0.016 * s, tessellation: 8, cap: Mesh.CAP_ALL },
+        scene,
+      );
+      parts.push(paint(tube, FACE_INK));
+    } else {
+      const spot = at(side * 0.25, 0.07);
+      if (!spot) continue;
+      const local = frameFor(spot.normal);
+      const eye = MeshBuilder.CreateSphere(`${body.name}-eye`, { diameter: 1, segments: 14 }, scene);
+      eye.scaling.set(0.15 * s, 0.19 * s, 0.07 * s);
+      eye.position.copyFrom(spot.point);
+      orient(eye, local);
+      parts.push(paint(eye, FACE_INK));
 
-    const shine = MeshBuilder.CreateSphere(`${body.name}-shine`, { diameter: 1, segments: 8 }, scene);
-    shine.scaling.set(0.055 * s, 0.06 * s, 0.03 * s);
-    shine.position.copyFrom(
-      spot.point
-        .add(local.x.scale(-0.028 * s))
-        .add(local.y.scale(0.042 * s))
-        .add(local.z.scale(0.03 * s)),
-    );
-    orient(shine, local);
-    parts.push(paint(shine, FACE_SHINE));
+      const shine = MeshBuilder.CreateSphere(`${body.name}-shine`, { diameter: 1, segments: 8 }, scene);
+      shine.scaling.set(0.055 * s, 0.06 * s, 0.03 * s);
+      shine.position.copyFrom(
+        spot.point
+          .add(local.x.scale(-0.028 * s))
+          .add(local.y.scale(0.042 * s))
+          .add(local.z.scale(0.03 * s)),
+      );
+      orient(shine, local);
+      parts.push(paint(shine, FACE_SHINE));
+    }
 
     for (let k = -1; k <= 1; k += 1) {
       const u = side * 0.43 + k * 0.05;

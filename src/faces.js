@@ -8,6 +8,7 @@ export const FACES = [
   { id: "surprised", label: "Surprised" },
   { id: "sleepy", label: "Sleepy" },
   { id: "quiet", label: t("face.quiet") },
+  { id: "glam", label: t("face.glam") },
 ];
 
 const INK = "#1d1418";
@@ -75,6 +76,178 @@ function happyEye(ctx, x, y, w, lashes) {
   ctx.moveTo(x + side * w * 0.035, y - w * 0.014);
   ctx.lineTo(x + side * w * 0.055, y - w * 0.04);
   ctx.stroke();
+}
+
+function bezierPoint(p0, p1, p2, p3, k) {
+  const m = 1 - k;
+  return [
+    m * m * m * p0[0] + 3 * m * m * k * p1[0] + 3 * m * k * k * p2[0] + k * k * k * p3[0],
+    m * m * m * p0[1] + 3 * m * m * k * p1[1] + 3 * m * k * k * p2[1] + k * k * k * p3[1],
+  ];
+}
+
+/**
+ * The glam face, laid out from a reference photo: positions are fractions of that photo, with the
+ * eyes measured as `u` out from the middle. Soft edges come from a canvas blur where supported.
+ */
+function drawGlam(ctx, w, h) {
+  const X = (x) => (0.5 + (x - 0.49) * 0.9) * w;
+  const Y = (y) => (0.16 + y * 0.74) * h;
+  const S = (size) => size * 0.9 * w;
+  const soft = (amount) => {
+    if ("filter" in ctx) ctx.filter = amount ? `blur(${amount * w}px)` : "none";
+  };
+  const glow = (x, y, rx, ry, rgb, alpha) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1, ry / rx);
+    const fade = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    fade.addColorStop(0, `rgba(${rgb}, ${alpha})`);
+    fade.addColorStop(1, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = fade;
+    ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    ctx.restore();
+  };
+
+  for (const side of [-1, 1]) {
+    const at = (u, y) => [X(0.49 + side * u), Y(y)];
+    glow(...at(0.3, 0.56), S(0.13), S(0.08), "235, 120, 110", 0.26);
+    glow(...at(0.25, 0.33), S(0.21), S(0.11), "104, 56, 38", 0.42);
+    glow(...at(0.33, 0.3), S(0.1), S(0.05), "60, 30, 20", 0.35);
+
+    // A long, soft, low arch: thick at the inner end, thinning out to the tail.
+    soft(0.004);
+    ctx.fillStyle = "rgba(42, 23, 15, 0.88)";
+    ctx.beginPath();
+    ctx.moveTo(...at(0.06, 0.2));
+    ctx.lineTo(...at(0.065, 0.163));
+    ctx.quadraticCurveTo(...at(0.14, 0.13), ...at(0.22, 0.12));
+    ctx.quadraticCurveTo(...at(0.36, 0.125), ...at(0.46, 0.21));
+    ctx.quadraticCurveTo(...at(0.34, 0.155), ...at(0.22, 0.157));
+    ctx.quadraticCurveTo(...at(0.14, 0.167), ...at(0.06, 0.2));
+    ctx.fill();
+    soft(0);
+
+    // Sleepy almond eyes: the heavy upper lid hides the top of a big dark iris.
+    const inner = at(0.11, 0.405);
+    const outer = at(0.4, 0.31);
+    const lid = [inner, at(0.15, 0.32), at(0.3, 0.27), outer];
+    const lower = [outer, at(0.34, 0.41), at(0.2, 0.45), inner];
+    const opening = () => {
+      ctx.beginPath();
+      ctx.moveTo(...inner);
+      ctx.bezierCurveTo(...lid[1], ...lid[2], ...outer);
+      ctx.bezierCurveTo(...lower[1], ...lower[2], ...inner);
+    };
+    opening();
+    ctx.fillStyle = "#e4d6ce";
+    ctx.fill();
+    ctx.save();
+    opening();
+    ctx.clip();
+    const [ix, iy] = at(0.235, 0.365);
+    const iris = ctx.createRadialGradient(ix, iy, 0, ix, iy, S(0.068));
+    iris.addColorStop(0, "#4a2c1c");
+    iris.addColorStop(0.7, "#24140c");
+    iris.addColorStop(1, "#0e0806");
+    ctx.fillStyle = iris;
+    ctx.beginPath();
+    ctx.arc(ix, iy, S(0.068), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#060302";
+    ctx.beginPath();
+    ctx.arc(ix, iy, S(0.026), 0, Math.PI * 2);
+    ctx.fill();
+    const lidShade = ctx.createLinearGradient(0, Y(0.26), 0, Y(0.37));
+    lidShade.addColorStop(0, "rgba(30, 14, 8, 0.65)");
+    lidShade.addColorStop(1, "rgba(30, 14, 8, 0)");
+    ctx.fillStyle = lidShade;
+    ctx.fillRect(Math.min(inner[0], outer[0]), Y(0.24), Math.abs(outer[0] - inner[0]), Y(0.46) - Y(0.24));
+    glow(...at(0.215, 0.345), S(0.018), S(0.018), "255, 255, 255", 1);
+    glow(...at(0.27, 0.4), S(0.008), S(0.008), "255, 255, 255", 0.8);
+    ctx.restore();
+
+    soft(0.002);
+    ctx.strokeStyle = INK;
+    ctx.fillStyle = INK;
+    ctx.lineWidth = S(0.022);
+    ctx.beginPath();
+    ctx.moveTo(...inner);
+    ctx.bezierCurveTo(...lid[1], ...lid[2], ...outer);
+    ctx.stroke();
+    // The thick outer lashes that flick up past the corner of the eye.
+    ctx.beginPath();
+    ctx.moveTo(...bezierPoint(...lid, 0.5));
+    ctx.quadraticCurveTo(...at(0.38, 0.255), ...at(0.46, 0.25));
+    ctx.quadraticCurveTo(...at(0.43, 0.3), ...outer);
+    for (let along = 0.95; along >= 0.5; along -= 0.05) ctx.lineTo(...bezierPoint(...lid, along));
+    ctx.fill();
+    // Spiky lashes, each a thin tapered sliver, growing longer and leaning out toward the corner.
+    const lash = (x, y, length, lean, base) => {
+      ctx.beginPath();
+      ctx.moveTo(x - base, y + base * 0.5);
+      ctx.quadraticCurveTo(x + side * length * lean * 0.2, y - length * 0.7, x + side * length * lean, y - length);
+      ctx.lineTo(x + base, y + base * 0.5);
+      ctx.fill();
+    };
+    for (let along = 0.15; along <= 1.001; along += 0.07) {
+      const [x, y] = bezierPoint(...lid, along);
+      lash(x, y, S(0.028 + along * along * 0.045), 0.2 + along * 0.7, S(0.008));
+    }
+    for (const [u, y, length] of [
+      [0.42, 0.29, 0.05],
+      [0.45, 0.27, 0.042],
+    ]) {
+      lash(...at(u, y), S(length), 0.9, S(0.008));
+    }
+    ctx.strokeStyle = "rgba(30, 15, 10, 0.55)";
+    ctx.lineWidth = S(0.008);
+    ctx.beginPath();
+    ctx.moveTo(...outer);
+    ctx.bezierCurveTo(...at(0.36, 0.4), ...at(0.28, 0.44), ...bezierPoint(...lower, 0.55));
+    ctx.stroke();
+    soft(0);
+  }
+
+  glow(X(0.49), Y(0.575), S(0.05), S(0.02), "140, 70, 50", 0.2);
+  for (const side of [-1, 1]) glow(X(0.49 + side * 0.022), Y(0.58), S(0.012), S(0.008), "110, 50, 40", 0.3);
+
+  // Big, puffy, nude-pink lips with soft edges and a glossy lower lip.
+  const left = [X(0.345), Y(0.712)];
+  const right = [X(0.635), Y(0.712)];
+  const seam = () => ctx.quadraticCurveTo(X(0.49), Y(0.722), ...right);
+  soft(0.003);
+  const upper = ctx.createLinearGradient(0, Y(0.62), 0, Y(0.715));
+  upper.addColorStop(0, "#c47b7d");
+  upper.addColorStop(1, "#ae6169");
+  ctx.fillStyle = upper;
+  ctx.beginPath();
+  ctx.moveTo(...left);
+  ctx.bezierCurveTo(X(0.37), Y(0.655), X(0.43), Y(0.612), X(0.49), Y(0.642));
+  ctx.bezierCurveTo(X(0.55), Y(0.612), X(0.61), Y(0.655), ...right);
+  ctx.quadraticCurveTo(X(0.49), Y(0.722), ...left);
+  ctx.fill();
+  const lower = ctx.createRadialGradient(X(0.49), Y(0.765), 0, X(0.49), Y(0.765), S(0.16));
+  lower.addColorStop(0, "#ecb3aa");
+  lower.addColorStop(0.6, "#d08a86");
+  lower.addColorStop(1, "#bd6f72");
+  ctx.fillStyle = lower;
+  ctx.beginPath();
+  ctx.moveTo(...left);
+  seam();
+  ctx.bezierCurveTo(X(0.62), Y(0.8), X(0.56), Y(0.848), X(0.49), Y(0.848));
+  ctx.bezierCurveTo(X(0.42), Y(0.848), X(0.36), Y(0.8), ...left);
+  ctx.fill();
+  ctx.strokeStyle = "#7e3a42";
+  ctx.lineWidth = S(0.01);
+  ctx.beginPath();
+  ctx.moveTo(...left);
+  seam();
+  ctx.stroke();
+  soft(0);
+  for (const corner of [left, right]) glow(...corner, S(0.025), S(0.02), "120, 50, 50", 0.3);
+  glow(X(0.49), Y(0.77), S(0.06), S(0.018), "255, 255, 255", 0.55);
+  glow(X(0.44), Y(0.655), S(0.025), S(0.01), "255, 255, 255", 0.35);
 }
 
 const DRAWERS = {
@@ -216,4 +389,5 @@ const DRAWERS = {
     ctx.lineTo(w * 0.53, h * 0.64);
     ctx.stroke();
   },
+  glam: drawGlam,
 };

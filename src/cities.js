@@ -11,7 +11,8 @@ import {
   VertexBuffer,
   VertexData,
 } from "@babylonjs/core";
-import { mulberry32, paint, smoothstep } from "./geometry.js";
+import { createBoats } from "./boats.js";
+import { mulberry32, oceanSwell, paint, smoothstep } from "./geometry.js";
 
 const VISTAS = 8;
 const RING = 340;
@@ -102,6 +103,7 @@ export function createCities(scene, lavaY, sky, ridge) {
   ];
   const beach = buildBeach(scene, root, lavaY);
   const ocean = buildOcean(scene, root, lavaY);
+  const boats = createBoats(scene, root, lavaY);
   const photo = buildNewYork(scene, root);
   const look = skyLook(sky);
 
@@ -138,8 +140,9 @@ export function createCities(scene, lavaY, sky, ridge) {
   function fadeGround() {
     if (mode === "lava") return;
     const on = ground > 0.03;
+    if (boats.root.isEnabled(false) !== on) boats.root.setEnabled(on);
     if (mode === "newyork") {
-      fadeMaterials([photo, ocean.mesh], ground);
+      fadeMaterials([photo, ocean.mesh, ...boats.meshes], ground);
       if (photo.isEnabled() !== on) photo.setEnabled(on);
       if (ocean.mesh.isEnabled() !== on) ocean.mesh.setEnabled(on);
       if (beach.isEnabled()) beach.setEnabled(false);
@@ -147,7 +150,7 @@ export function createCities(scene, lavaY, sky, ridge) {
     }
     if (photo.isEnabled()) photo.setEnabled(false);
     fadeMaterials(cities[0].meshes, ground);
-    fadeMaterials([beach, ocean.mesh], ground);
+    fadeMaterials([beach, ocean.mesh, ...boats.meshes], ground);
     if (ocean.mesh.isEnabled() !== on) ocean.mesh.setEnabled(on);
     if (beach.isEnabled() !== on) beach.setEnabled(on);
   }
@@ -218,10 +221,11 @@ export function createCities(scene, lavaY, sky, ridge) {
 
   return {
     root,
-    glow: [beach, ocean.mesh, photo, palm, sign, ...kit.hidden(), ...buckets.flat()],
+    glow: [beach, ocean.mesh, ...boats.meshes, photo, palm, sign, ...kit.hidden(), ...buckets.flat()],
     setBackdrop(next) {
       mode = next === "lava" || next === "newyork" ? next : "hollywood";
       ocean.setNight(mode === "newyork");
+      boats.setNight(mode === "newyork");
       if (mode === "lava") showLava();
       else if (mode === "newyork") showNewYork();
       else showHollywood();
@@ -245,6 +249,7 @@ export function createCities(scene, lavaY, sky, ridge) {
         else showHollywood();
       }
       if (ocean.mesh.isEnabled()) ocean.update(time, seen);
+      if (boats.root.isEnabled(false)) boats.update(time);
       if (mode === "newyork") aimPhoto();
     },
   };
@@ -264,8 +269,8 @@ function fadeMaterials(meshes, alpha) {
       };
     }
     material.alpha = material.metadata.baseAlpha * alpha;
-    const solid = alpha > 0.985 && material.metadata.baseMode === Material.MATERIAL_OPAQUE;
-    material.transparencyMode = solid ? Material.MATERIAL_OPAQUE : Material.MATERIAL_ALPHABLEND;
+    // Blended meshes skip the depth buffer, so a fully shown sea would be drawn over the skyline.
+    material.transparencyMode = alpha > 0.985 ? material.metadata.baseMode : Material.MATERIAL_ALPHABLEND;
   }
 }
 
@@ -789,12 +794,7 @@ function buildOcean(scene, parent, y) {
       const haze = smoothstep(15, 150, seen);
       Color3.LerpToRef(colors.emissive, colors.far, haze * 0.8, material.emissiveColor);
       for (let i = 0; i < base.length; i += 3) {
-        const x = base[i];
-        const z = base[i + 2];
-        positions[i + 1] =
-          Math.sin(x * 0.018 + time * 0.65) * 0.22 +
-          Math.sin(z * 0.014 - time * 0.48) * 0.16 +
-          Math.sin((x + z) * 0.007 + time * 0.32) * 0.12;
+        positions[i + 1] = oceanSwell(base[i], base[i + 2], time);
       }
       VertexData.ComputeNormals(positions, indices, normals);
       mesh.updateVerticesData(VertexBuffer.PositionKind, positions);

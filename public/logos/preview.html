@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Logo options</title>
+    <style>
+      body { margin: 0; padding: 24px; font-family: "Trebuchet MS", "Segoe UI", sans-serif; background: #fff4fa; color: #5f3f7b; }
+      h1 { margin: 0 0 16px; }
+      .grid { max-width: 960px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+      figure { margin: 0; padding: 16px; border-radius: 20px; background: white; box-shadow: 0 6px 20px rgba(166, 99, 149, 0.15); text-align: center; }
+      figure.wide { grid-column: 1 / -1; }
+      figure img { width: 200px; height: 200px; }
+      figure.wide img { width: 520px; height: auto; max-width: 100%; }
+      .dark { display: inline-block; margin-top: 8px; padding: 8px; border-radius: 14px; background: #1b1028; }
+      .dark img { width: 64px; height: 64px; }
+      figure.wide .dark { display: block; width: fit-content; margin: 8px auto 0; }
+      figure.wide .dark img { width: 260px; height: auto; }
+      figcaption { margin-top: 8px; font-weight: 800; }
+    </style>
+  </head>
+  <body>
+    <h1>Logo options</h1>
+    <div class="grid">
+      <figure><img src="logo-1-classic.svg" alt="" /><div class="dark"><img src="logo-1-classic.svg" alt="" /></div><figcaption>1. Classic</figcaption></figure>
+      <figure><img src="logo-2-squish.svg" alt="" /><div class="dark"><img src="logo-2-squish.svg" alt="" /></div><figcaption>2. Squish</figcaption></figure>
+      <figure><img src="logo-3-sky.svg" alt="" /><div class="dark"><img src="logo-3-sky.svg" alt="" /></div><figcaption>3. Sky badge</figcaption></figure>
+      <figure><img src="logo-4-trio.svg" alt="" /><div class="dark"><img src="logo-4-trio.svg" alt="" /></div><figcaption>4. Trio</figcaption></figure>
+      <figure class="wide"><img src="logo-5-wordmark.svg" alt="" /><div class="dark"><img src="logo-5-wordmark.svg" alt="" /></div><figcaption>5. Wordmark</figcaption></figure>
+    </div>
+  </body>
+</html>

@@ -1,8 +1,10 @@
 import { Matrix, Vector3 } from "@babylonjs/core";
 
 const COINS_KEY = "asmr-squishy-obby:coins";
-/** How long the stacked pop stays up, including the gem's short delay. */
-const POP_LIFE = 2.05;
+/** Coins paid the first time each level is reached. */
+export const LEVEL_COINS = 5;
+/** How long the pop stays up. */
+const POP_LIFE = 1.9;
 /** Lift above the capsule center so the pop sits just over the avatar's head. */
 const HEAD_LIFT = 0.62;
 
@@ -14,7 +16,7 @@ let viewW = 0;
 let viewH = 0;
 
 /**
- * Coins are separate from stars. One coin the first time a level checkpoint is reached.
+ * Coins are the shop currency. LEVEL_COINS coins the first time a level checkpoint is reached.
  * Level 1 never pays: the run starts there. `claimed` is the level numbers already paid.
  */
 export function loadCoins() {
@@ -29,16 +31,42 @@ export function loadCoins() {
   }
 }
 
-/** Awards 1 coin for a new level. Returns false when that level already paid or is level 1. */
+/** Awards LEVEL_COINS coins for a new level. Returns false when that level already paid or is level 1. */
 export function awardLevelCoin(state, level) {
   const n = Math.floor(Number(level));
   if (!Number.isInteger(n) || n < 2) return false;
   if (state.claimed.includes(n)) return false;
   state.claimed.push(n);
   state.claimed.sort((a, b) => a - b);
-  state.coins = Math.max(0, Math.floor(Number(state.coins)) || 0) + 1;
+  state.coins = Math.max(0, Math.floor(Number(state.coins)) || 0) + LEVEL_COINS;
   saveCoins(state);
   return true;
+}
+
+/** Pays a bonus on top of the level coins. */
+export function earnCoins(state, amount) {
+  state.coins = Math.max(0, Math.floor(Number(state.coins)) || 0) + amount;
+  saveCoins(state);
+}
+
+/** Takes `amount` coins. Returns false and leaves the count alone when there are not enough. */
+export function spendCoins(state, amount) {
+  if (state.coins < amount) return false;
+  state.coins -= amount;
+  saveCoins(state);
+  return true;
+}
+
+export function refundCoins(state, amount) {
+  state.coins += amount;
+  saveCoins(state);
+}
+
+/** Raises the count to at least `amount`. */
+export function topUpCoins(state, amount) {
+  if (state.coins >= amount) return;
+  state.coins = amount;
+  saveCoins(state);
 }
 
 function cleanClaimed(value) {
@@ -61,8 +89,8 @@ function saveCoins(state) {
 }
 
 /**
- * Screen-space pop that follows the avatar: a gold star-coin with green pluses,
- * and a pink blob with light-blue sparkles under it. Both pop, float, and fade.
+ * Screen-space pop that follows the avatar: a gold star-coin with green pluses
+ * that pops, floats, and fades.
  */
 export function createCoinPop(scene, camera) {
   ensureStyle();
@@ -130,10 +158,6 @@ function plus(x, y) {
   return `<g fill="#3dce4a" transform="translate(${x} ${y})"><rect x="-6.5" y="-17" width="13" height="34" rx="4.5"/><rect x="-17" y="-6.5" width="34" height="13" rx="4.5"/></g>`;
 }
 
-function spark(x, y, deg) {
-  return `<g fill="#8eebff" transform="translate(${x} ${y}) rotate(${deg})"><rect x="-15" y="-5" width="30" height="10" rx="5"/></g>`;
-}
-
 function star(cx, cy, outer, inner) {
   let d = "";
   for (let i = 0; i < 10; i += 1) {
@@ -147,18 +171,13 @@ function star(cx, cy, outer, inner) {
 }
 
 function popMarkup() {
-  return `<svg viewBox="0 0 180 312" aria-hidden="true">
+  return `<svg viewBox="0 0 180 172" aria-hidden="true">
     <defs>
       <radialGradient id="earnCoinFill" cx="36%" cy="30%" r="72%">
         <stop offset="0%" stop-color="#fff8c8"/>
         <stop offset="24%" stop-color="#ffe45a"/>
         <stop offset="60%" stop-color="#ffc20a"/>
         <stop offset="100%" stop-color="#e89008"/>
-      </radialGradient>
-      <radialGradient id="earnGemFill" cx="32%" cy="22%" r="80%">
-        <stop offset="0%" stop-color="#ffd4ee"/>
-        <stop offset="28%" stop-color="#ff6eb5"/>
-        <stop offset="100%" stop-color="#ff2f8c"/>
       </radialGradient>
     </defs>
     <g class="earn-coin">
@@ -169,15 +188,6 @@ function popMarkup() {
       <circle cx="90" cy="86" r="36" fill="url(#earnCoinFill)" stroke="#d4840c" stroke-width="3.5"/>
       <ellipse cx="76" cy="72" rx="12" ry="7" fill="#ffffff" opacity="0.55"/>
       <path d="${star(90, 88, 16, 6.6)}" fill="#fff6b0" stroke="#f0c018" stroke-width="1.25"/>
-    </g>
-    <g class="earn-gem">
-      ${spark(28, 236, -36)}
-      ${spark(152, 236, 36)}
-      ${spark(46, 286, 32)}
-      ${spark(134, 280, -28)}
-      <path d="M90 198C122 198 128 220 128 246C128 286 112 302 90 302C68 302 52 286 52 246C52 220 58 198 90 198Z" fill="url(#earnGemFill)" stroke="#ff2a78" stroke-width="2"/>
-      <rect x="78" y="214" width="24" height="68" rx="12" fill="#ff4d9e"/>
-      <ellipse cx="74" cy="222" rx="10" ry="7" fill="#ffffff" opacity="0.92"/>
     </g>
   </svg>`;
 }
@@ -193,23 +203,20 @@ function ensureStyle() {
   left: 0;
   top: 0;
   width: 158px;
-  height: 274px;
+  height: 151px;
   margin: 0;
   pointer-events: none;
   transform: translate(-50%, -100%);
 }
 .earn-pop[hidden] { display: none !important; }
 .earn-pop svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.earn-coin, .earn-gem {
+.earn-coin {
   transform-box: fill-box;
   transform-origin: center;
   opacity: 0;
 }
 .earn-pop.is-on .earn-coin {
   animation: earn-rise 1.85s cubic-bezier(.2, .85, .2, 1) forwards;
-}
-.earn-pop.is-on .earn-gem {
-  animation: earn-rise 1.85s cubic-bezier(.2, .85, .2, 1) 0.12s forwards;
 }
 @keyframes earn-rise {
   0% { opacity: 0; transform: translateY(26px) scale(0.15); }

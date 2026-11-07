@@ -6,7 +6,6 @@ import {
   PBRMaterial,
   StandardMaterial,
   Vector3,
-  Vector4,
   VertexBuffer,
 } from "@babylonjs/core";
 import {
@@ -40,7 +39,7 @@ export function footprintFor(spec) {
     const walk = (spec.size ?? 3) / 2 - 0.15;
     return { type: "box", hx: walk, hz: walk };
   }
-  if (spec.food === "jelly" || spec.food === "blob") {
+  if (spec.food === "jelly" || spec.food === "blob" || spec.food === "needoh") {
     const walk = (spec.size ?? 2.4) / 2 - 0.2;
     return { type: "box", hx: walk, hz: walk };
   }
@@ -175,8 +174,7 @@ export function colliderFromMesh(mesh, kind) {
  * Returns the merged squishy mesh, rigid extras, the collider footprint, and squish tuning.
  */
 export function buildFood(scene, spec) {
-  if (spec.food === "block") return toyBlocks(scene, spec);
-  const builders = { dumpling, cheese, butter, carrot, cucumber, jelly, blob };
+  const builders = { dumpling, cheese, butter, carrot, cucumber, jelly, blob, needoh };
   const food = builders[spec.food](scene, spec);
   const round = spec.food === "dumpling" || spec.food === "blob";
   const collider = colliderFromMesh(food.body, round ? "circle" : "box");
@@ -226,6 +224,7 @@ function squishyMaterial(scene, name, surface = {}) {
   material.clearCoat.isEnabled = true;
   material.clearCoat.intensity = surface.coat ?? 0.3;
   material.clearCoat.roughness = 0.4;
+  if (surface.glow) material.emissiveColor = hexToColor3(surface.glow);
   return material;
 }
 
@@ -584,6 +583,48 @@ function jelly(scene, spec) {
   };
 }
 
+/** A puffy see-through blue gel cube with a wink, like the NeeDoh on the logo. */
+function needoh(scene, spec) {
+  const size = spec.size ?? 2.4;
+  const height = 1.75;
+  const top = PAD_TOP;
+  const bottom = top - height;
+  const body = roundedBox(scene, `${spec.id}-needoh`, {
+    width: size,
+    height,
+    depth: size,
+    radius: 0.55,
+    segments: 24,
+  });
+  body.position.y = (top + bottom) / 2;
+  body.bakeCurrentTransformIntoVertices();
+  const deep = hexToColor3("#3aa6ec");
+  const gel = hexToColor3("#9fe2fd");
+  const glow = hexToColor3("#effbff");
+  const half = size / 2;
+  setColors(body, (x, y, z) => {
+    const up = smoothstep(bottom, top, y);
+    const inner = 1 - Math.min(1, Math.max(Math.abs(x), Math.abs(z)) / half);
+    return mix(mix(deep, gel, up), glow, Math.min(1, inner * 1.4) * up * 0.7);
+  });
+
+  const face = buildFace(scene, body, {
+    origin: new Vector3(0, (top + bottom) / 2 + 0.05, -10),
+    direction: new Vector3(0, 0, 1),
+    scale: 1.25,
+    wink: true,
+  });
+  return {
+    body,
+    face,
+    top,
+    bottom,
+    footprint: footprintFor(spec),
+    deform: { bx: 0.34, bz: 0.34, from: 0 },
+    surface: { roughness: 0.12, coat: 1, glow: "#03141f" },
+  };
+}
+
 /**
  * Plump hot-pink oval. The crown is flat so it lands like the other pads;
  * the sides stay round so it still reads as the circled blob.
@@ -631,93 +672,6 @@ function blob(scene, spec) {
     footprint: footprintFor(spec),
     deform: { bx: 0.26, bz: 0.26, from: 0 },
     surface: { roughness: 0.32, coat: 0.65 },
-  };
-}
-
-const BLOCK_COLORS = ["#e94b5a", "#3f86e0", "#45b86a", "#f6c12f", "#ff8a3d", "#9a63d8", "#ff7fb0", "#2cb9b0"];
-const BLOCK_TILES = 16;
-
-function blockAtlas(scene) {
-  return shared(scene, "toyBlocks", () => {
-    const size = 1024;
-    const tile = size / 4;
-    const texture = new DynamicTexture("toyBlockAtlas", { width: size, height: size }, scene, true);
-    const ctx = texture.getContext();
-    for (let index = 0; index < BLOCK_TILES; index += 1) {
-      const x = (index % 4) * tile;
-      const y = Math.floor(index / 4) * tile;
-      ctx.fillStyle = "#e8c48c";
-      ctx.fillRect(x, y, tile, tile);
-      ctx.strokeStyle = "rgba(150, 100, 50, 0.18)";
-      ctx.lineWidth = 3;
-      for (let g = 0; g < 7; g += 1) {
-        ctx.beginPath();
-        ctx.moveTo(x, y + 18 + g * 36);
-        ctx.bezierCurveTo(x + tile * 0.3, y + 10 + g * 36, x + tile * 0.7, y + 28 + g * 36, x + tile, y + 16 + g * 36);
-        ctx.stroke();
-      }
-      const inset = tile * 0.13;
-      ctx.fillStyle = BLOCK_COLORS[index % BLOCK_COLORS.length];
-      ctx.beginPath();
-      ctx.roundRect(x + inset, y + inset, tile - inset * 2, tile - inset * 2, tile * 0.08);
-      ctx.fill();
-      ctx.font = `900 ${Math.round(tile * 0.56)}px Arial Black, Arial, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.lineWidth = tile * 0.035;
-      ctx.strokeStyle = "rgba(40, 20, 10, 0.35)";
-      ctx.strokeText(String.fromCharCode(65 + index), x + tile / 2, y + tile * 0.54);
-      ctx.fillStyle = "#fff8ec";
-      ctx.fillText(String.fromCharCode(65 + index), x + tile / 2, y + tile * 0.54);
-    }
-    texture.update();
-    const material = new StandardMaterial("toyBlockMat", scene);
-    material.diffuseTexture = texture;
-    material.specularColor = new Color3(0.12, 0.1, 0.08);
-    material.specularPower = 18;
-    return material;
-  });
-}
-
-/** A short stack of wooden ABC blocks. The top block is solid ground: it doesn't squish. */
-function toyBlocks(scene, spec) {
-  const size = spec.size ?? 1.9;
-  const random = mulberry32(spec.seed ?? 77);
-  const material = blockAtlas(scene);
-  const tileUV = (index) => {
-    const col = index % 4;
-    const row = Math.floor(index / 4);
-    return new Vector4(col / 4, 1 - (row + 1) / 4, (col + 1) / 4, 1 - row / 4);
-  };
-  const blocks = [];
-  let y = PAD_TOP;
-  // Two blocks stay in the air under this pad. A taller tower reaches the loop below.
-  for (let level = 0; level < 2; level += 1) {
-    const edge = level === 0 ? size : size * (0.88 + random() * 0.2);
-    const faceUV = Array.from({ length: 6 }, () => tileUV(Math.floor(random() * BLOCK_TILES)));
-    const block = MeshBuilder.CreateBox(`${spec.id}-block${level}`, { size: edge, faceUV, wrap: true }, scene);
-    block.position.set(
-      level === 0 ? 0 : (random() - 0.5) * 0.18,
-      y - edge / 2,
-      level === 0 ? 0 : (random() - 0.5) * 0.18,
-    );
-    block.rotation.y = level === 0 ? 0 : (random() - 0.5) * 0.5;
-    block.material = material;
-    blocks.push(block);
-    y -= edge;
-  }
-  const mesh = Mesh.MergeMeshes(blocks, true, true);
-  mesh.name = spec.id;
-  const collider = colliderFromMesh(mesh, "box");
-  return {
-    mesh,
-    hard: true,
-    top: PAD_TOP,
-    bottom: PAD_TOP - size,
-    colliderDepth: PAD_TOP - y,
-    footprint: footprintFor(spec),
-    solid: collider.solid,
-    hull: collider.points,
   };
 }
 

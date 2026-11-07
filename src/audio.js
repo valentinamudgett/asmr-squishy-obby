@@ -1,9 +1,10 @@
-import { CreateAudioEngineAsync, CreateSoundAsync, CreateSoundBufferAsync, CreateStreamingSoundAsync, SoundState } from "@babylonjs/core";
+import { CreateAudioEngineAsync, CreateSoundAsync, CreateSoundBufferAsync } from "@babylonjs/core";
 import boomUrl from "../sounds/boom.mp3?url";
 import butterUrl from "../sounds/butter.mp3?url";
 import crunchUrl from "../sounds/crunch.mp3?url";
 import menuMusicUrl from "../sounds/menu-music.mp3?url";
 import walkingUrl from "../sounds/walking.mp3?url";
+import { songById } from "./songs.js";
 
 const COOLDOWN_MS = 55;
 const CRUNCH_OFFSET = 0.05;
@@ -13,6 +14,9 @@ export const LAVA_SCREAM_SECONDS = 0.58;
 /** Pink puff length. sounds/boom.mp3 keeps playing after the puff ends. */
 export const LAVA_BOOM_SECONDS = 0.4;
 const LAVA_PEAK = 0.74;
+const MENU_VOLUME = 0.5;
+/** Kept under the crunches so the pads stay the loudest thing on the course. */
+const SONG_VOLUME = 0.32;
 const GAG_LOCK_MS = (LAVA_SCREAM_SECONDS + LAVA_BOOM_SECONDS + 0.35) * 1000;
 
 export async function createAudio() {
@@ -40,13 +44,20 @@ export async function createAudio() {
     audioEngine,
   );
   const boomSeconds = boomSound.buffer.duration;
-  const music = await audioEngine.createBusAsync("music");
-  const menuMusic = await CreateStreamingSoundAsync(
-    "menu-music",
-    menuMusicUrl,
-    { loop: true, outBus: music, volume: 0.5, maxInstances: 1, preloadCount: 1 },
-    audioEngine,
-  );
+  const menuMusic = createTrack(menuMusicUrl, MENU_VOLUME);
+  // Course songs start buffering the first time they are picked and stay cached after that.
+  const songTracks = new Map();
+  let songId = null;
+  let courseMusic = null;
+
+  function songTrack(id) {
+    let track = songTracks.get(id);
+    if (!track) {
+      track = createTrack(songById(id).url, SONG_VOLUME);
+      songTracks.set(id, track);
+    }
+    return track;
+  }
 
   let unlocked = false;
   let unlockPromise = null;
@@ -79,18 +90,20 @@ export async function createAudio() {
     return true;
   }
 
-  function menuPlaying() {
-    return menuMusic.state === SoundState.Started || menuMusic.state === SoundState.Starting;
-  }
-
+  /** Menu track while a menu is up, the picked song on the course. Each resumes where it paused. */
   function applyMenuMusic() {
     if (!unlocked) return;
-    if (menuWanted) {
-      if (menuMusic.state === SoundState.Paused) menuMusic.resume();
-      else if (!menuPlaying()) menuMusic.play();
-    } else if (menuPlaying()) {
-      menuMusic.pause();
-    }
+    menuMusic.set(menuWanted);
+    courseMusic?.set(!menuWanted);
+  }
+
+  function setCourseSong(id) {
+    const next = songById(id).id;
+    if (next === songId) return;
+    songId = next;
+    courseMusic?.stop();
+    courseMusic = songTrack(next);
+    applyMenuMusic();
   }
 
   function unlock() {
@@ -110,13 +123,25 @@ export async function createAudio() {
       return unlocked;
     },
     unlock,
-    /** Loop the start-menu track while a menu is up. Pauses on the course so it can resume. */
+    /** Loop the start-menu track while a menu is up, and the picked song on the course. */
     setMenuMusic(on) {
       menuWanted = on;
       applyMenuMusic();
     },
+    /** Switches the course song. The new one starts from the top. */
+    setCourseSong,
     get menuMusicPlaying() {
-      return menuPlaying();
+      return menuMusic.playing;
+    },
+    get courseSong() {
+      return songId;
+    },
+    get courseMusicPlaying() {
+      return courseMusic?.playing ?? false;
+    },
+    /** Every music file that is sounding right now. More than one means tracks are overlapping. */
+    get musicPlaying() {
+      return [["menu", menuMusic], ...songTracks].filter(([, track]) => track.playing).map(([id]) => id);
     },
     async attachPad(pad) {
       const butter = pad.food === "butter";
@@ -138,8 +163,6 @@ export async function createAudio() {
         audioEngine,
       );
       pad.landSound.spatial.attach(pad.mesh);
-      // Wooden blocks get a quicker, higher knock instead of the soft crunch.
-      if (pad.hard) pad.landSound.playbackRate = 1.7;
       pad.lastCrunch = 0;
       if (pad.removed) pad.landSound.dispose();
     },
@@ -153,7 +176,7 @@ export async function createAudio() {
       if (now - pad.lastCrunch < COOLDOWN_MS) return;
       pad.lastCrunch = now;
       const strength = Math.max(0, Math.min(1, impact / 11));
-      const volume = (0.55 + strength * 0.45) * (pad.hard ? 0.6 : 1);
+      const volume = 0.55 + strength * 0.45;
       pad.landSound.play({ startOffset: pad.landOffset, volume });
     },
     setWalking(active) {
@@ -192,6 +215,38 @@ export async function createAudio() {
     screamSeconds: screamBuffer.duration,
     boomSeconds,
     boomFile: BOOM_FILE,
+  };
+}
+
+/**
+ * A looping music file on a plain <audio> element. Babylon streaming sounds are not used here:
+ * one paused before it finished starting gets replayed on the next click or key press, which
+ * layered two songs. `paused` on the element flips the moment play() or pause() is called,
+ * so it is always the state that was last asked for.
+ */
+function createTrack(url, volume) {
+  const element = new Audio(url);
+  element.loop = true;
+  element.preload = "auto";
+  element.volume = volume;
+  return {
+    get playing() {
+      return !element.paused;
+    },
+    set(on) {
+      if (on && element.paused) {
+        // An AbortError here only means a later pause() won, which is what was wanted.
+        element.play().catch((error) => {
+          if (error.name !== "AbortError") console.warn("Music failed to play", error);
+        });
+      } else if (!on && !element.paused) {
+        element.pause();
+      }
+    },
+    stop() {
+      element.pause();
+      element.currentTime = 0;
+    },
   };
 }
 
