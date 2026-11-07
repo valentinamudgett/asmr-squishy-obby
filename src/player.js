@@ -19,6 +19,8 @@ const SLOPE_COSINE = 0.32;
 // Stair risers meet the capsule at a contact normal only ~0.37 up.
 const STAIR_SLOPE_COSINE = 0.2;
 const STEP_HOP_SECONDS = 0.2;
+/** Still rising faster than this (m/s) after a jump means the feet have not come back down yet. */
+const TAKEOFF_RISE = 1;
 /** How far the feet may drift from where they rested on the pad and still count as standing. */
 const HOLD_GROUND_GAP = 0.05;
 export const JUMP_SPEED = 7.6;
@@ -378,6 +380,11 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       foot.set(position.x, position.y - FOOT_OFFSET, position.z);
       let support = controller.checkSupport(dt, DOWN);
       let grounded = support.supportedState === CharacterSupportedState.SUPPORTED;
+      // On the way up a jump grazes the pad's rim or the next stair tread, and the check reads that as
+      // standing. Landing there would end the jump and take away the double jump.
+      if (grounded && launched && controller.getVelocity().y - support.averageSurfaceVelocity.y > TAKEOFF_RISE) {
+        grounded = false;
+      }
       if (grounded) {
         groundPad = hooks.findPad(foot);
         if (groundPad?.motion) support.averageSurfaceVelocity.setAll(0);

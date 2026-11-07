@@ -20,9 +20,9 @@ import {
 } from "@babylonjs/core";
 import { buildFood, footprintFor, footprintReach, PAD_TOP, shared } from "./foods.js";
 import { mulberry32 } from "./geometry.js";
-import { createFireball, createGuard, createLavaLine, createSpikes, createSweeper } from "./hazards.js";
+import { createFireball, createLavaLine, createSpikes, createSweeper } from "./hazards.js";
 import { AIR_SPEED, GRAVITY, JUMP_SPEED, SPRING_AIR_SPEED, SPRING_POP } from "./player.js";
-import { isPrisonLevel } from "./prison.js";
+import { FREEDOM_LEVEL, isPrisonLevel, PRISON_LEVEL } from "./prison.js";
 import { createStairFlight, isRainbowSlot } from "./stairs.js";
 
 export const PAD_THICKNESS = PAD_TOP;
@@ -59,8 +59,22 @@ const LAVA_DISC_WALK = 4.5;
 /** Radians per second before the menu multiplier. Easy 1.2, medium 1.5, hard 1.85. */
 const LAVA_SPIN_BASE = 0.75;
 const LAVA_SPIN_SCALE = { easy: 1.2, medium: 1.5, hard: 1.85 };
-/** Easy keeps the prison guards, walking at this share of their speed. */
-const EASY_GUARD_PACE = 0.6;
+/**
+ * Hazards per menu difficulty; easy has none. `chance` scales the hazard rolls and `pace` turns the
+ * level ramp into hazard speed. Medium never puts two hard things back to back, and hard puts a
+ * sweeping bar on every squishy between checkpoints.
+ */
+const HAZARD_TUNING = {
+  medium: { chance: 0.7, pace: (d) => 0.7 * d, spaced: true, everyPad: false },
+  hard: { chance: 1.15, pace: (d) => 0.4 + d, spaced: false, everyPad: true },
+};
+/** Pads between the level-100 and level-120 checkpoints are never built: that climb is the prison escape. */
+const PRISON_INDEX = (PRISON_LEVEL - 1) * PADS_PER_LEVEL;
+const FREEDOM_INDEX = (FREEDOM_LEVEL - 1) * PADS_PER_LEVEL;
+
+function inPrisonGap(index) {
+  return index > PRISON_INDEX && index < FREEDOM_INDEX;
+}
 
 /** Horizontal distance a jump covers before dropping back to `dy` above takeoff. */
 function airReach(dy, launch = JUMP_SPEED, speed = AIR_SPEED) {
@@ -86,9 +100,9 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
   const pads = [];
   const flights = [];
   const lava = { y: LAVA_Y };
-  // Picked on the start menu. Easy leaves out sweeping bars, spikes, and lava balls.
+  // Picked on the start menu. Easy (null hazards) leaves out sweeping bars, spikes, and lava balls.
   // lavaSpin is only the lava disc. Sweeper bars keep their own speeds.
-  const options = { padHazards: true, fireballs: true, lavaSpin: LAVA_SPIN_SCALE.easy };
+  const options = { hazards: null, lavaSpin: LAVA_SPIN_SCALE.easy };
   let nextIndex = 0;
   // The last pad skipped so a resumed run can place its checkpoint without building level 1.
   let skipped = null;
@@ -98,6 +112,10 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
   const stairGhosts = [];
 
   function spawn() {
+    if (inPrisonGap(nextIndex)) {
+      chain = skipPad(chain);
+      return null;
+    }
     const index = nextIndex;
     nextIndex += 1;
     const prev = chain;
@@ -120,7 +138,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
     pad.motion = spec.motion ?? null;
     addMarker(scene, pad);
     addBody(scene, pad);
-    addHazards(scene, pad, prev, lava, options, random, hazardRandom(index));
+    rollHazards(pad, prev, random);
 
     if (isRainbowSlot(index, PADS_PER_LEVEL)) {
       // Built only so plan/locate/hazards consume the same rolls, then swapped for stairs.
@@ -134,10 +152,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
 
     if (stairGhosts.length) {
       if (stairAnchor?.mesh) {
-        for (const hazard of pad.hazards) {
-          if (hazard.kind === "fireball") hazard.dispose();
-        }
-        pad.hazards = pad.hazards.filter((hazard) => hazard.kind !== "fireball");
+        pad.afterStairs = true;
         const flight = createStairFlight(scene, stairAnchor, stairGhosts, pad);
         stairAnchor.flight = flight;
         flights.push(flight);
@@ -147,6 +162,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
       stairAnchor = null;
     }
 
+    buildHazards(scene, pad, lava, options.hazards, Boolean(prev?.busy), hazardRandom(index));
     pads.push(pad);
     chain = pad;
     hooks.onAdd?.(pad);
@@ -183,19 +199,6 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
     return ghost;
   }
 
-  function discardPad(pad) {
-    pad.removed = true;
-    for (const hazard of pad.hazards) hazard.dispose();
-    pad.body.shape?.dispose();
-    pad.body.dispose();
-    const manager = pad.mesh.morphTargetManager;
-    pad.mesh.morphTargetManager = null;
-    manager?.dispose?.();
-    if (pad.mesh.material instanceof MultiMaterial) pad.mesh.material.dispose();
-    pad.mesh.dispose();
-    for (const item of pad.owned) item.dispose();
-  }
-
   function remove(pad) {
     pad.removed = true;
     hooks.onRemove?.(pad);
@@ -230,17 +233,18 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
       for (const flight of flights) flight.restore();
     },
     setDifficulty(difficulty) {
-      const hazards = difficulty !== "easy";
-      options.padHazards = hazards;
-      options.fireballs = hazards;
       options.lavaSpin = LAVA_SPIN_SCALE[difficulty] ?? LAVA_SPIN_SCALE.easy;
-      if (hazards) return;
-      const gone = (hazard) => hazard.kind === "sweeper" || hazard.kind === "spikes" || hazard.kind === "fireball";
+      const hazards = HAZARD_TUNING[difficulty] ?? null;
+      if (hazards === options.hazards) return;
+      options.hazards = hazards;
+      // Pads already built swap their hazards too, so the whole course matches the new pick.
+      let last = null;
       for (const pad of pads) {
-        for (const hazard of pad.hazards) {
-          if (gone(hazard)) hazard.dispose();
-        }
-        pad.hazards = pad.hazards.filter((hazard) => !gone(hazard));
+        for (const hazard of pad.hazards) hazard.dispose();
+        const prevBusy = last?.index === pad.index - 1 && last.busy;
+        buildHazards(scene, pad, lava, hazards, prevBusy, hazardRandom(pad.index));
+        hooks.onHazards?.(pad);
+        last = pad;
       }
     },
     update(time, dt, { standing, position, keepFrom }) {
@@ -330,6 +334,32 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
       );
     },
   };
+}
+
+export function discardPad(pad) {
+  pad.removed = true;
+  for (const hazard of pad.hazards) hazard.dispose();
+  pad.body.shape?.dispose();
+  pad.body.dispose();
+  const manager = pad.mesh.morphTargetManager;
+  pad.mesh.morphTargetManager = null;
+  manager?.dispose?.();
+  if (pad.mesh.material instanceof MultiMaterial) pad.mesh.material.dispose();
+  pad.mesh.dispose();
+  for (const item of pad.owned) item.dispose();
+}
+
+/**
+ * A squishy on its own, off the course, like the big ones stuck to the prison wall. It squishes
+ * and crunches like a course pad; call `stepSquish` on it every frame and `discardPad` when done.
+ */
+export function createSquishy(scene, spec, x, y, z, yaw = 0) {
+  const pad = createPad(scene, spec);
+  pad.mesh.position.set(x, y, z);
+  pad.mesh.rotationQuaternion = Quaternion.RotationYawPitchRoll(yaw, 0, 0);
+  pad.meshYaw = yaw;
+  addBody(scene, pad);
+  return pad;
 }
 
 /** Pad before the checkpoint on levels 1, 3, 5… Springs cannot roll here, and it is not a stair slot. */
@@ -603,49 +633,61 @@ function nearestAlong(pads, position) {
   return best.along ?? 0;
 }
 
-function addHazards(scene, pad, prev, lava, options, random, own) {
-  pad.hazards = [];
+/**
+ * Draws this pad's hazard rolls from the course random whatever the difficulty, so a skipped pad
+ * and a built pad stay on the same stream. `buildHazards` turns them into hazards later.
+ */
+function rollHazards(pad, prev, random) {
+  pad.hazardRoll = null;
   if (!prev || pad.role !== "pad" || pad.kind === "spring") return;
-  const d = difficultyFor(pad.level);
-  const print = pad.hazardFootprint ?? pad.footprint;
-  const wide = print.type === "circle" || Math.min(print.hx, print.hz) > 1.1;
   const roll = random();
-  if (pad.prison && wide && roll < 0.22 + 0.3 * d) {
-    // In Capybara Prison, guards pace where the sweeping bars would be, on every difficulty.
-    pad.hazards.push(createGuard(scene, pad, d, own, () => (options.padHazards ? 1 : EASY_GUARD_PACE)));
-  } else if (options.padHazards) {
-    if (pad.level >= 3 && wide && roll < 0.22 + 0.3 * d) {
-      pad.hazards.push(createSweeper(scene, pad, d, own));
-    } else if (pad.level >= 5 && roll > 1 - (0.18 + 0.25 * d)) {
-      pad.hazards.push(createSpikes(scene, pad, d, own));
-    }
-  }
-  // Always roll so a skipped pad and a built pad stay on the same random stream.
   const fireRoll = pad.level >= 4 && prev.kind !== "spring" ? random() : 1;
-  if (options.fireballs && fireRoll < 0.2 + 0.3 * d) {
-    const dx = pad.homeX - prev.homeX;
-    const dz = pad.homeZ - prev.homeZ;
-    const dist = Math.hypot(dx, dz) || 1;
-    const dirX = dx / dist;
-    const dirZ = dz / dist;
-    const nearReach = reachAlong(prev.solid ?? prev.footprint, dirX, dirZ, prev.meshYaw ?? 0);
-    const farReach = reachAlong(pad.solid ?? pad.footprint, -dirX, -dirZ, pad.meshYaw ?? 0);
-    const middle = new Vector3(
-      (prev.homeX + dirX * nearReach + pad.homeX - dirX * farReach) / 2,
-      0,
-      (prev.homeZ + dirZ * nearReach + pad.homeZ - dirZ * farReach) / 2,
-    );
-    const peak = Math.max(prev.homeY, pad.homeY) + PAD_TOP + 1.7;
-    pad.hazards.push(createFireball(scene, pad.id, middle, lava, peak, d, own));
-  }
-  if (pad.lavaDisc) {
-    const onTop = (hazard) => hazard.kind === "sweeper" || hazard.kind === "spikes" || hazard.kind === "guard";
-    for (const hazard of pad.hazards) {
-      if (onTop(hazard)) hazard.dispose();
+  const dx = pad.homeX - prev.homeX;
+  const dz = pad.homeZ - prev.homeZ;
+  const dist = Math.hypot(dx, dz) || 1;
+  const dirX = dx / dist;
+  const dirZ = dz / dist;
+  const nearReach = reachAlong(prev.solid ?? prev.footprint, dirX, dirZ, prev.meshYaw ?? 0);
+  const farReach = reachAlong(pad.solid ?? pad.footprint, -dirX, -dirZ, pad.meshYaw ?? 0);
+  const gap = new Vector3(
+    (prev.homeX + dirX * nearReach + pad.homeX - dirX * farReach) / 2,
+    0,
+    (prev.homeZ + dirZ * nearReach + pad.homeZ - dirZ * farReach) / 2,
+  );
+  const peak = Math.max(prev.homeY, pad.homeY) + PAD_TOP + 1.7;
+  pad.hazardRoll = { roll, fireRoll, gap, peak };
+}
+
+/** `tuning` is null on easy. `prevBusy` is whether the pad just before already has a hazard. */
+function buildHazards(scene, pad, lava, tuning, prevBusy, own) {
+  pad.hazards = [];
+  // On medium the pad after a hazard, and the one before a lava disc, are always calm.
+  const calm = !tuning || (tuning.spaced && (prevBusy || lavaDiscSlot(pad.index + 1)));
+  if (!calm && pad.role === "pad") {
+    const d = difficultyFor(pad.level);
+    const pace = tuning.pace(d);
+    const rolls = pad.hazardRoll;
+    const print = pad.hazardFootprint ?? pad.footprint;
+    const wide = print.type === "circle" || Math.min(print.hx, print.hz) > 1.1;
+    const onTop = !pad.lavaDisc;
+    const sweeper =
+      onTop && (tuning.everyPad || (rolls && pad.level >= 3 && wide && rolls.roll < (0.22 + 0.3 * d) * tuning.chance));
+    const spikes =
+      onTop &&
+      rolls &&
+      pad.level >= 5 &&
+      rolls.roll > 1 - (0.18 + 0.25 * d) * tuning.chance &&
+      (tuning.everyPad || !sweeper);
+    if (sweeper) pad.hazards.push(createSweeper(scene, pad, pace, own));
+    if (spikes) pad.hazards.push(createSpikes(scene, pad, pace, own));
+    // Medium keeps it to one hard thing per pad, and the lava disc already is one.
+    const crowded = tuning.spaced && (pad.hazards.length > 0 || pad.lavaDisc);
+    if (rolls && !pad.afterStairs && !crowded && rolls.fireRoll < (0.2 + 0.3 * d) * tuning.chance) {
+      pad.hazards.push(createFireball(scene, pad.id, rolls.gap, lava, rolls.peak, pace, own));
     }
-    pad.hazards = pad.hazards.filter((hazard) => !onTop(hazard));
-    pad.hazards.push(createLavaLine(scene, pad));
   }
+  if (pad.lavaDisc) pad.hazards.push(createLavaLine(scene, pad));
+  pad.busy = pad.hazards.length > 0;
 }
 
 function pick(list, random) {
@@ -922,7 +964,7 @@ function addMarker(scene, pad) {
   pad.owned.push(flagMat, label);
 }
 
-function stepSquish(pad, dt) {
+export function stepSquish(pad, dt) {
   const rest = pad.loaded ? 0.1 : 0;
   if (Math.abs(pad.squish - rest) < 0.002 && Math.abs(pad.squishV) < 0.01) {
     pad.squish = rest;

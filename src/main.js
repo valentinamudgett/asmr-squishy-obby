@@ -4,6 +4,7 @@ import {
   DefaultRenderingPipeline,
   DirectionalLight,
   Engine,
+  FreeCamera,
   HavokPlugin,
   HemisphericLight,
   ImageProcessingConfiguration,
@@ -17,11 +18,11 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { createAudio } from "./audio.js";
 import { createLavaPop } from "./boom.js";
 import { createBots } from "./bot.js";
-import { createChaser } from "./chaser.js";
 import { awardLevelCoin, createCoinPop, earnCoins, loadCoins } from "./coins.js";
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
+import { BOSS_LEVEL, createEscape, KILLER_LEVEL } from "./escape.js";
 import { drawFace, FACES } from "./faces.js";
 import { BUBBLE_LIFT, createBubble, createNameTag } from "./figure.js";
 import { DANCES } from "./dances.js";
@@ -52,6 +53,8 @@ import { createPrison, FREEDOM_LEVEL, isPrisonLevel, PRISON_LEVEL } from "./pris
 import { hairColorKey, isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, tryBuy } from "./rewards.js";
 import { bindSocial } from "./social.js";
 import { createWorld } from "./world.js";
+import "@fontsource/dancing-script/600.css";
+import "@fontsource/dancing-script/700.css";
 import "./style.css";
 
 const canvas = document.querySelector("#view");
@@ -68,6 +71,10 @@ const shopCoinsEl = document.querySelector("#shop-coins");
 const coins = loadCoins();
 const hintEl = document.querySelector("#hint");
 const toastEl = document.querySelector("#toast");
+const fadeEl = document.querySelector("#fade");
+const bossHud = document.querySelector("#boss-hud");
+const livesEl = document.querySelector("#lives");
+const bossFill = document.querySelector("#boss-fill");
 const debugEl = document.querySelector("#debug");
 const settingsEl = document.querySelector("#settings");
 const qualityNote = document.querySelector("#quality-note");
@@ -80,8 +87,8 @@ const FALL_SECONDS = 2.5;
 const MIN_PLUNGE_SECONDS = 0.5;
 /** Paid once, the first time you break out of Capybara Prison. */
 const ESCAPE_COINS = 25;
-/** Seconds after the cell door opens (or you start playing in the prison) before the police capybara comes. */
-const CHASE_DELAY = 1.8;
+/** How long the screen goes dark between touching the level-100 checkpoint and waking up in the cell. */
+const LOCK_SECONDS = 0.55;
 /**
  * Each holiday game style shows only in its own month, by the player's own clock: Valentine's Day
  * in February, Halloween in October, Thanksgiving in November, Christmas in December.
@@ -226,7 +233,10 @@ async function bootGame() {
     onStair(flight) {
       graphics?.addStair(flight);
     },
-  }, best, courseSeed(day));
+    onHazards(pad) {
+      graphics?.addHazards(pad);
+    },
+  }, isPrisonLevel(best) ? PRISON_LEVEL : best, courseSeed(day));
 
   const avatar = buildAvatar(scene);
   avatar.apply(look);
@@ -234,8 +244,9 @@ async function bootGame() {
 
   const spawn = course.standOn(course.start, FOOT_OFFSET);
   let checkpointPad = course.start;
+  let escape = null;
   const player = createPlayer(scene, spawn, {
-    findPad: (foot) => course.findPad(foot),
+    findPad: (foot) => course.findPad(foot) ?? escape?.findPad(foot) ?? null,
     onLand: (pad, impact) => {
       const amount = pad.kind === "spring" ? 0.95 : Math.min(0.9, 0.4 + impact / 14);
       pad.kick(amount);
@@ -264,9 +275,9 @@ async function bootGame() {
   seasons.thanksgiving = createThanksgiving(scene, seasonContext);
   seasons.christmas = createChristmas(scene, seasonContext);
   seasons.valentines = createValentines(scene, seasonContext);
-  prison = createPrison(scene, { graphics });
+  prison = createPrison(scene);
   for (const pad of course.pads) prison.addPad(pad);
-  const chaser = createChaser(scene, { graphics, course });
+  escape = createEscape(scene, { graphics, audio, avatar });
   // In the prison you wear stripes. Only the avatar wears them: the saved look and the one other players see stay yours.
   let prisoner = false;
   const wearPrisoner = (on) => {
@@ -323,12 +334,11 @@ async function bootGame() {
       if (prisoner) wearPrisoner(true);
     },
   );
-  wearPrisoner(isPrisonLevel(course.start.level));
   let aimRaise = 0;
   bindStartMenu(
     (difficulty) => {
       course.setDifficulty(difficulty);
-      chaser.setDifficulty(difficulty);
+      escape.setDifficulty(difficulty);
     },
     (background) => {
       world.setBackdrop(background);
@@ -351,6 +361,7 @@ async function bootGame() {
   syncMenuMusic();
   bindShop(() => publishLook());
   bindTouch(player);
+  const shooting = bindShoot();
   social = bindSocial({ online, bots, ui, notify, onSay: (text) => selfBubble.say(text) });
 
   let fallLock = 0;
@@ -375,14 +386,87 @@ async function bootGame() {
     player.respawn(spot, home.heading ?? 0);
     pop.place({ x: spot.x, y: spot.y - FOOT_OFFSET, z: spot.z });
     pointAhead(home);
-    chaser.fallBack(home.index);
   };
-  let chaseIn = CHASE_DELAY;
+  /** Counts down the dark screen before the cell. */
+  let lockIn = 0;
+  const showLevel = (level) => {
+    levelEl.textContent = String(level);
+    showEscape(level);
+  };
+  /** Puts you in Capybara Prison at checkpoint `at` (100, 110, or 115). `again` is a replay from the Character studio. */
+  const enterEscape = (at, again = false) => {
+    const gate = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === PRISON_LEVEL) ?? checkpointPad;
+    const spot = escape.enter(gate, at, { again });
+    guide.hide();
+    avatar.stopDance();
+    endCloseUp();
+    plunge = null;
+    meltHome = null;
+    lastSafePad = checkpointPad;
+    player.respawn(spot.position, spot.heading);
+    showLevel(at);
+  };
+  /**
+   * Out through the prison gate onto the level-120 checkpoint, which then lets you out as usual.
+   * After a replay you're already past it, so you go back to your own checkpoint instead.
+   */
+  const leaveEscape = () => {
+    const again = escape.replay;
+    escape.leave();
+    endCloseUp();
+    const exit = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === FREEDOM_LEVEL);
+    lastSafePad = checkpointPad;
+    sendHome(checkpointPad.level >= FREEDOM_LEVEL || !exit ? checkpointPad : exit);
+    showLevel(checkpointPad.level);
+    if (again) {
+      showToast(t("toast.escaped"));
+      toastTimer = 2.4;
+      nextToast = t("toast.backToObby");
+    }
+  };
+  // The caught close-up looks through its own camera for a second.
+  const closeUpCamera = new FreeCamera("closeUpCamera", new Vector3(), scene);
+  closeUpCamera.minZ = 0.05;
+  closeUpCamera.fov = 0.7;
+  let closeUp = false;
+  function endCloseUp() {
+    if (!closeUp) return;
+    closeUp = false;
+    scene.activeCamera = player.camera;
+  }
+  const replayButton = document.querySelector("#replay-prison");
+  const showReplay = () => {
+    replayButton.hidden = best < FREEDOM_LEVEL || escape.active;
+  };
+  document.querySelector("#settings-open").addEventListener("click", showReplay);
+  replayButton.addEventListener("click", () => {
+    document.querySelector("#settings-close").click();
+    if (ui.startOpen) document.querySelector("#start-play").click();
+    lockIn = 0;
+    fadeEl.classList.remove("is-on");
+    enterEscape(PRISON_LEVEL, true);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyE" && !(event.target instanceof HTMLInputElement) && !ui.settingsOpen && !ui.startOpen) escape.openVent();
+  });
+  document.querySelector("#open-vent").addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    escape.openVent();
+  });
+  let ventShown = false;
   let hintTimer = 9;
   let clock = 0;
-  levelEl.textContent = String(course.start.level);
-  showEscape(course.start.level);
-  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, chaser };
+  let fightShown = "";
+  showLevel(course.start.level);
+  if (isPrisonLevel(best)) {
+    const at = best >= BOSS_LEVEL ? BOSS_LEVEL : best >= KILLER_LEVEL ? KILLER_LEVEL : PRISON_LEVEL;
+    enterEscape(at);
+    if (at !== PRISON_LEVEL) {
+      showToast(`Level ${at}`);
+      toastTimer = 2.4;
+    }
+  }
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, escape, enterEscape };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -407,21 +491,39 @@ async function bootGame() {
     clock += dt;
     fallLock = Math.max(0, fallLock - dt);
     if (pop.active) player.easeFall(pop.phase === "boom" ? 0 : 0.5);
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active && !prison.locked;
+    if (lockIn > 0) {
+      lockIn -= dt;
+      if (lockIn <= 0) {
+        enterEscape(PRISON_LEVEL);
+        fadeEl.classList.remove("is-on");
+      }
+    }
+    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active && lockIn <= 0 && !closeUp;
     const frame = plunge ? player.plunge(dt) : player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
     airTime = frame.grounded ? 0 : airTime + dt;
+    // In the prison the course keeps itself around the gate checkpoint.
+    const inEscape = escape.active;
     // Moving pads and hazards run on the wall clock, so online players see them in step.
-    course.update(courseClock(day), dt, { standing, position: frame.position, keepFrom: checkpointPad.index });
+    course.update(courseClock(day), dt, {
+      standing: inEscape ? null : standing,
+      position: inEscape ? checkpointPad.mesh.position : frame.position,
+      keepFrom: checkpointPad.index,
+    });
     const here = frame.pad ?? lastSafePad;
-    hereIndex = Number.isFinite(here.index) ? here.index : lastSafePad.index;
+    hereIndex = !inEscape && Number.isFinite(here.index) ? here.index : lastSafePad.index;
     const drop = plunge ? plunge.fromY - frame.position.y : 0;
-    const cover = world.update(clock, dt, frame.position, here.index / PADS_PER_LEVEL + 1, drop);
+    const cover = world.update(clock, dt, frame.position, hereIndex / PADS_PER_LEVEL + 1, drop);
     // High up the skyline is below you, so stop tipping the view toward the horizon.
     player.setAimRaise(aimRaise * (1 - smoothstep(8, 120, world.altitude)));
     graphics.update(clock, cover);
+    if (inEscape) {
+      // Indoors: the walls are close and pale, so ease off the sun and the bloom.
+      graphics.sun.intensity *= 0.62;
+      graphics.pipeline.bloomWeight *= 0.45;
+    }
     for (const season of Object.values(seasons)) season.update(clock, dt, frame.position, player.camera, cover, world.space);
-    prison.update(clock, dt);
+    prison.update(clock);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
       x: frame.foot.x,
@@ -475,15 +577,17 @@ async function bootGame() {
     graphics.sun.position.set(frame.position.x + 8, frame.position.y + 18, frame.position.z - 6);
     graphics.sun.setDirectionToTarget(frame.position);
 
-    if (frame.grounded && frame.pad && frame.pad.index < checkpointPad.index && !pop.active && fallLock <= 0) {
+    // The prison's own floors aren't pads; escape.js looks after falls and catches in there.
+    const coursePad = inEscape ? null : frame.pad;
+    if (frame.grounded && coursePad && coursePad.index < checkpointPad.index && !pop.active && fallLock <= 0) {
       fallLock = 0.6;
       lastSafePad = checkpointPad;
       sendHome(checkpointPad);
       showToast(t("toast.backToLevel"));
       toastTimer = 1.4;
       nextToast = t("toast.keepGoing");
-    } else if (frame.grounded && frame.pad && isSafe(frame.pad)) {
-      lastSafePad = frame.pad;
+    } else if (frame.grounded && coursePad && isSafe(coursePad)) {
+      lastSafePad = coursePad;
     }
     if (frame.grounded && frame.pad && guide.pad && frame.pad !== guide.pad) guide.hide();
 
@@ -497,7 +601,7 @@ async function bootGame() {
         toastTimer = 1.4;
         nextToast = t("toast.keepGoing");
       }
-    } else if (!pop.active && fallLock <= 0) {
+    } else if (!inEscape && !pop.active && fallLock <= 0) {
       const burned = frame.foot.y < world.seaY + 0.15 || course.lavaBurn(frame.position);
       // Up high the sea is far below, so dropping past the course floor counts as the fall.
       const dropped = !burned && course.lava.y > world.seaY + 0.5 && frame.foot.y < course.lava.y;
@@ -525,7 +629,7 @@ async function bootGame() {
           fallLock = 0.6;
           // The pad may be moving, so ask for its current top.
           sendHome(home);
-          showToast(bonked.kind === "guard" ? t("toast.caught") : t("toast.ouch"));
+          showToast(t("toast.ouch"));
           toastTimer = 0.9;
           nextToast = t("toast.keepGoing");
         }
@@ -533,24 +637,25 @@ async function bootGame() {
     }
     guide.update(dt, clock);
 
-    if (frame.grounded && frame.pad?.role === "checkpoint" && frame.pad.index > checkpointPad.index) {
-      checkpointPad = frame.pad;
-      const level = frame.pad.level;
+    if (frame.grounded && coursePad?.role === "checkpoint" && coursePad.index > checkpointPad.index) {
+      checkpointPad = coursePad;
+      const level = coursePad.level;
       const firstTime = level > best;
-      levelEl.textContent = String(level);
-      showEscape(level);
+      showLevel(level);
       if (firstTime) {
         best = level;
         saveBest(best);
       }
-      avatar.dance(look.dance);
-      online.dance(look.dance);
       let earned = awardLevelCoin(coins, level);
+      if (level !== PRISON_LEVEL) {
+        avatar.dance(look.dance);
+        online.dance(look.dance);
+      }
       if (level === PRISON_LEVEL) {
-        prison.lockUp(frame.pad);
-        showToast(t("toast.lockedUp"));
-        toastTimer = 3;
-        nextToast = t("toast.breakOut");
+        // The screen goes dark and you wake up in the cell (see enterEscape).
+        lockIn = LOCK_SECONDS;
+        fadeEl.classList.add("is-on");
+        audio.setWalking(false);
       } else if (level === FREEDOM_LEVEL) {
         const lines = [t("toast.escaped")];
         if (firstTime) {
@@ -558,12 +663,8 @@ async function bootGame() {
           earned = true;
           lines.push(t("toast.escapeBonus").replace("{n}", String(ESCAPE_COINS)));
         }
-        if (chaser.active) {
-          chaser.giveUp();
-          lines.unshift(t("toast.gotAway"));
-        }
         lines.push(t("toast.backToObby"));
-        pointAhead(frame.pad);
+        pointAhead(coursePad);
         showToast(lines[0]);
         toastTimer = 2.4;
         nextToast = lines.slice(1).join(" ") || null;
@@ -578,35 +679,64 @@ async function bootGame() {
       }
     }
 
-    const inPrison = isPrisonLevel(checkpointPad.level);
-    if (inPrison !== prisoner) wearPrisoner(inPrison);
+    if (escape.active !== prisoner) wearPrisoner(escape.active);
     const menus = ui.startOpen || ui.settingsOpen;
-    if (!inPrison || prison.locked || chaser.active) chaseIn = CHASE_DELAY;
-    else if (!menus) {
-      chaseIn -= dt;
-      if (chaseIn <= 0) {
-        chaser.start(hereIndex);
-        showToast(t("toast.chase"));
-        toastTimer = 2.4;
-        nextToast = null;
+    if (shooting.take() && !menus) escape.shoot();
+    const escapeEvents = escape.update(dt, clock, {
+      foot: frame.foot,
+      position: frame.position,
+      pad: frame.pad,
+      grounded: frame.grounded,
+      facing: frame.facing,
+      hold: menus || avatar.dancing || lockIn > 0,
+    });
+    for (const event of escapeEvents) {
+      if (event.type === "toast") {
+        showToast(event.text);
+        toastTimer = event.time;
+        nextToast = event.next;
+      } else if (event.type === "closeUp") {
+        closeUpCamera.position.copyFrom(event.eye);
+        closeUpCamera.setTarget(event.target);
+        scene.activeCamera = closeUpCamera;
+        closeUp = true;
+        audio.setWalking(false);
+      } else if (event.type === "closeUpEnd") {
+        endCloseUp();
+      } else if (event.type === "respawn") {
+        endCloseUp();
+        avatar.stopDance();
+        player.respawn(event.position, event.heading);
+        pop.place({ x: event.position.x, y: event.position.y - FOOT_OFFSET, z: event.position.z });
+      } else if (event.type === "checkpoint") {
+        showLevel(event.level);
+        if (event.level > best) {
+          best = event.level;
+          saveBest(best);
+        }
+        if (awardLevelCoin(coins, event.level)) {
+          showCoins();
+          coinPop.burst(frame.position);
+        }
+        avatar.dance(look.dance);
+        online.dance(look.dance);
+        showToast(`Level ${event.level}`);
+        toastTimer = 1.6;
+        nextToast = event.text;
+      } else if (event.type === "free") {
+        leaveEscape();
       }
     }
-    if (!inPrison && chaser.active) chaser.giveUp();
-    // Frozen (menus, dances, the cell, falls) it waits where it is; just after a respawn it can't catch you.
-    const frozen = menus || avatar.dancing || pop.active || Boolean(plunge) || prison.locked;
-    const caught = chaser.update(dt, clock, {
-      index: hereIndex,
-      foot: frame.foot,
-      hold: frozen,
-      canCatch: !frozen && fallLock <= 0,
-    });
-    if (caught) {
-      fallLock = 0.6;
-      lastSafePad = checkpointPad;
-      sendHome(checkpointPad);
-      showToast(t("toast.policeCaught"));
-      toastTimer = 1.8;
-      nextToast = t("toast.keepGoing");
+    const nearVent = escape.canOpen && !menus;
+    if (nearVent !== ventShown) {
+      ventShown = nearVent;
+      document.body.classList.toggle("near-vent", nearVent);
+    }
+    const fight = escape.fight;
+    const fightKey = fight ? `${fight.lives}/${fight.health}/${escape.armed}` : "";
+    if (fightKey !== fightShown) {
+      fightShown = fightKey;
+      showFight(fight, escape.armed);
     }
 
     if (hintTimer > 0) {
@@ -862,6 +992,16 @@ function showCoins() {
 function showEscape(level) {
   escapeStat.hidden = !isPrisonLevel(level);
   escapeCount.textContent = `${level - PRISON_LEVEL}/${FREEDOM_LEVEL - PRISON_LEVEL}`;
+}
+
+/** Your hearts and the warden's health bar while the boss fight is on. The touch blaster button shows while you hold the blaster. */
+function showFight(fight, armed) {
+  bossHud.hidden = !fight;
+  document.body.classList.toggle("armed", armed);
+  if (!fight) return;
+  livesEl.textContent = "♥".repeat(fight.lives) + "♡".repeat(fight.maxLives - fight.lives);
+  livesEl.setAttribute("aria-label", `${fight.lives}/${fight.maxLives}`);
+  bossFill.style.width = `${(fight.health / fight.maxHealth) * 100}%`;
 }
 
 function coinCount(n) {
@@ -1333,6 +1473,55 @@ function bindTouch(player) {
   });
 }
 
+/**
+ * The blaster fires while you hold F or the touch blaster button, and once for a quick click on the
+ * game (a longer press or a drag turns the camera instead).
+ */
+function bindShoot() {
+  const view = document.querySelector("#view");
+  const button = document.querySelector("#shoot");
+  let key = false;
+  let pressed = false;
+  let tap = false;
+  let down = null;
+  window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyF" && !(event.target instanceof HTMLInputElement)) key = true;
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.code === "KeyF") key = false;
+  });
+  window.addEventListener("blur", () => {
+    key = false;
+    pressed = false;
+  });
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    pressed = true;
+    button.setPointerCapture(event.pointerId);
+  });
+  button.addEventListener("pointerup", () => {
+    pressed = false;
+  });
+  button.addEventListener("pointercancel", () => {
+    pressed = false;
+  });
+  view.addEventListener("pointerdown", (event) => {
+    if (event.button === 0) down = { x: event.clientX, y: event.clientY, time: performance.now() };
+  });
+  view.addEventListener("pointerup", (event) => {
+    if (down && performance.now() - down.time < 250 && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 8) tap = true;
+    down = null;
+  });
+  return {
+    /** True while the blaster should fire this frame. */
+    take() {
+      const wants = key || pressed || tap;
+      tap = false;
+      return wants;
+    },
+  };
+}
+
 function createGraphics(scene, camera, world) {
   const hemi = new HemisphericLight("hemi", new Vector3(0.15, 1, 0.2), scene);
   hemi.intensity = 0.6;
@@ -1397,6 +1586,12 @@ function createGraphics(scene, camera, world) {
     },
     removePad(pad) {
       for (const mesh of casters(pad)) shadow.removeShadowCaster(mesh, true);
+    },
+    /** Disposed hazard meshes leave the shadow list on their own; only the new ones need adding. */
+    addHazards(pad) {
+      for (const hazard of pad.hazards) {
+        for (const mesh of hazard.meshes) shadow.addShadowCaster(mesh, true);
+      }
     },
     addStair(flight) {
       for (const mesh of flight.meshes) shadow.addShadowCaster(mesh, true);

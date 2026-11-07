@@ -13,7 +13,10 @@ export const BUBBLE_LIFT = 1.02;
 /** How long a chat line floats over the speaker before it fades. */
 const BUBBLE_SECONDS = 5;
 const FONT = "system-ui, -apple-system, Segoe UI, Arial, sans-serif";
+const BUBBLE_FONT = `700 52px "Dancing Script", "Segoe Script", "Brush Script MT", cursive`;
 const LABEL_GROUP = 1;
+// Canvas text never waits for a web font, so fetch it before the first bubble is painted.
+document.fonts.load(BUBBLE_FONT).catch(() => {});
 const glowSeen = new WeakMap();
 
 /**
@@ -180,9 +183,9 @@ function paintBubble(mesh, text) {
   const texture = mesh.material.emissiveTexture;
   const ctx = texture.getContext();
   ctx.clearRect(0, 0, BUBBLE_W, BUBBLE_H);
-  ctx.font = `700 46px ${FONT}`;
+  ctx.font = BUBBLE_FONT;
   const lines = wrap(ctx, text, BUBBLE_W - 80);
-  const lineH = 54;
+  const lineH = 56;
   const widest = Math.max(...lines.map((line) => ctx.measureText(line).width));
   const w = Math.min(BUBBLE_W - 8, widest + 64);
   const h = lines.length * lineH + 34;

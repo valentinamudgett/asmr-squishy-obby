@@ -203,6 +203,25 @@ export async function createAudio() {
       if (played) boomLock = now + boomSeconds * 1000;
       return played;
     },
+    /** A synth zap: "pew" for a blaster shot, "thump" when something gets hit. */
+    blip(kind) {
+      const ctx = audioEngine.audioContext ?? audioEngine._audioContext;
+      if (!unlocked || !ctx || audioEngine.volume <= 0) return;
+      const pew = kind === "pew";
+      const length = pew ? 0.14 : 0.22;
+      const now = ctx.currentTime;
+      const tone = ctx.createOscillator();
+      tone.type = pew ? "square" : "triangle";
+      tone.frequency.setValueAtTime(pew ? 1100 : 220, now);
+      tone.frequency.exponentialRampToValueAtTime(pew ? 240 : 60, now + length);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(pew ? 0.06 : 0.28, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + length);
+      tone.connect(gain);
+      gain.connect(ctx.destination);
+      tone.start(now);
+      tone.stop(now + length);
+    },
     get cues() {
       return cues;
     },

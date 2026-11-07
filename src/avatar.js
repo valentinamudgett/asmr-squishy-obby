@@ -219,6 +219,11 @@ export function buildAvatar(scene) {
   held.root.position.set(-0.01, -0.4, 0.16);
   held.root.rotation.set(0.85, -0.2, 0.15);
   held.root.setEnabled(false);
+  const blaster = buildBlaster(scene);
+  blaster.root.parent = arms[1].pivot;
+  blaster.root.position.set(0, -0.42, 0.01);
+  blaster.root.setEnabled(false);
+  let armed = false;
   const costumes = buildCostumes(scene, headNode, body, { arms, skin });
 
   const furTexture = new DynamicTexture("avatarFur", { width: 256, height: 256 }, scene, true);
@@ -278,6 +283,7 @@ export function buildAvatar(scene) {
     wearBand,
     ...bracelet.meshes,
     ...held.meshes,
+    ...blaster.meshes,
     ...costumes.meshes,
     hood,
     beltStrap,
@@ -378,6 +384,7 @@ export function buildAvatar(scene) {
       wearBand.setEnabled(Boolean(look.headband) && !outfit.hood && !hat);
       bracelet.root.setEnabled(Boolean(look.bracelet));
       held.show(look.held);
+      if (armed) held.root.setEnabled(false);
       belt.setEnabled(Boolean(outfit.belt));
       if (outfit.belt) beltMat.diffuseColor = hexToColor3(outfit.belt);
       hipCloth.setEnabled(Boolean(outfit.hipCloth));
@@ -402,6 +409,12 @@ export function buildAvatar(scene) {
     },
     stopDance() {
       move = null;
+    },
+    /** Holds the toy blaster out in the right hand, in place of any held squishy. */
+    setArmed(on) {
+      armed = on;
+      blaster.root.setEnabled(on);
+      held.root.setEnabled(!on && Boolean(held.id));
     },
     dispose() {
       root.dispose(false, true);
@@ -510,8 +523,10 @@ export function buildAvatar(scene) {
       rig.rotation.set(pitch, spin, 0);
       rig.position.set(0, rigLift + pivot * (1 - cos), -pivot * sin);
 
-      const hold = held.id ? (1 - flyBlend) * (1 - danceBlend) * (1 - wave) : 0;
+      const hold = held.id && !armed ? (1 - flyBlend) * (1 - danceBlend) * (1 - wave) : 0;
       if (hold > 0.001) toward(arms[1].pivot, -1.25, -0.15, 0.55, hold);
+      const aim = armed ? (1 - flyBlend) * (1 - danceBlend) * (1 - wave) : 0;
+      if (aim > 0.001) toward(arms[1].pivot, -1.5, 0, 0.1, aim);
       if (held.id) {
         const pulse = 1 + Math.sin(pose.time * 3.2) * 0.045;
         const armScale = arms[1].pivot.scaling.y || 1;
@@ -1887,6 +1902,34 @@ function buildHeldSquishies(scene) {
       for (const [key, group] of Object.entries(groups)) group.node.setEnabled(key === current);
     },
   };
+}
+
+/**
+ * A chunky toy blaster for the boss fight. The barrel runs down the arm (-y), so it points
+ * forward once the arm is raised, and the grip sits in the palm.
+ */
+function buildBlaster(scene) {
+  const root = new TransformNode("blaster", scene);
+  const body = accessoryMaterial(scene, "blasterBody", "#3a78f2");
+  body.specularColor = new Color3(0.5, 0.5, 0.55);
+  const trim = accessoryMaterial(scene, "blasterTrim", "#ffd23f");
+  const tip = accessoryMaterial(scene, "blasterTip", "#ff8a1c");
+  tip.emissiveColor = new Color3(0.35, 0.14, 0.02);
+  const part = (mesh, material, x, y, z) => {
+    mesh.parent = root;
+    mesh.position.set(x, y, z);
+    mesh.material = material;
+    mesh.isPickable = false;
+    return mesh;
+  };
+  const meshes = [
+    part(MeshBuilder.CreateBox("blasterBody", { width: 0.1, height: 0.3, depth: 0.12 }, scene), body, 0, -0.1, 0.02),
+    part(MeshBuilder.CreateBox("blasterStripe", { width: 0.105, height: 0.05, depth: 0.125 }, scene), trim, 0, -0.04, 0.02),
+    part(MeshBuilder.CreateCylinder("blasterBarrel", { height: 0.12, diameter: 0.06, tessellation: 12 }, scene), body, 0, -0.3, 0.04),
+    part(MeshBuilder.CreateCylinder("blasterTip", { height: 0.04, diameter: 0.075, tessellation: 12 }, scene), tip, 0, -0.37, 0.04),
+    part(MeshBuilder.CreateBox("blasterGrip", { width: 0.07, height: 0.07, depth: 0.12 }, scene), trim, 0, 0.0, -0.07),
+  ];
+  return { root, meshes };
 }
 
 /** A slim gold bangle with a pink bead, on the wrist. */

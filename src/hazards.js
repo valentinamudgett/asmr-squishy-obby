@@ -9,7 +9,6 @@ import {
   TransformNode,
   Vector3,
 } from "@babylonjs/core";
-import { buildCapybara } from "./capybara.js";
 import { shared } from "./foods.js";
 
 // Player capsule: center ± CORE, radius RADIUS. GRACE keeps grazes from counting.
@@ -175,64 +174,6 @@ export function createSpikes(scene, pad, difficulty, random) {
         pad.mesh.position.z - lx * s + lz * c,
       );
       return capsuleSphereHit(p, world, 0.4);
-    },
-    dispose() {
-      node.dispose();
-    },
-  };
-}
-
-/**
- * A capybara prison guard pacing back and forth across the pad. Bumping into one counts as a bonk.
- * `pace()` is read every frame, so Easy can slow the guards down.
- */
-export function createGuard(scene, pad, difficulty, random, pace = () => 1) {
-  const SIZE = 1.15;
-  const node = new TransformNode(`${pad.id}-guard`, scene);
-  node.parent = pad.mesh;
-  const body = buildCapybara(scene, "guard").clone(`${pad.id}-guardBody`, node);
-  body.isVisible = true;
-  body.isPickable = false;
-  body.scaling.setAll(SIZE);
-  const print = pad.footprint;
-  const circle = print.type === "circle";
-  // Pace the long way across a bar-shaped pad, any way across a round one.
-  const lane = circle ? random() * Math.PI : print.hz >= print.hx ? 0 : Math.PI / 2;
-  const half = Math.max(0.35, (circle ? print.r : Math.max(print.hx, print.hz)) - 0.62);
-  const laneX = Math.sin(lane);
-  const laneZ = Math.cos(lane);
-  const speed = (0.75 + 0.55 * difficulty) / half;
-  const phase = random() * Math.PI * 2;
-  const top = pad.thickness - 0.06;
-  let facing = lane;
-  const world = new Vector3();
-  return {
-    kind: "guard",
-    meshes: [body],
-    update(time, dt) {
-      const t = time * speed * pace() + phase;
-      const along = Math.sin(t) * half;
-      node.position.set((print.cx ?? 0) + laneX * along, top, (print.cz ?? 0) + laneZ * along);
-      const want = Math.cos(t) >= 0 ? lane : lane + Math.PI;
-      let turn = want - facing;
-      turn = Math.atan2(Math.sin(turn), Math.cos(turn));
-      facing += turn * Math.min(1, dt * 9);
-      node.rotation.y = facing;
-      // A little waddle as it walks.
-      body.position.y = Math.abs(Math.sin(t * 7)) * 0.05;
-      body.rotation.z = Math.sin(t * 7) * 0.06;
-    },
-    hit(p) {
-      const c = Math.cos(pad.meshYaw ?? 0);
-      const s = Math.sin(pad.meshYaw ?? 0);
-      const lx = node.position.x;
-      const lz = node.position.z;
-      world.set(
-        pad.mesh.position.x + lx * c + lz * s,
-        pad.mesh.position.y + top + 0.45 * SIZE,
-        pad.mesh.position.z - lx * s + lz * c,
-      );
-      return capsuleSphereHit(p, world, 0.46 * SIZE);
     },
     dispose() {
       node.dispose();
