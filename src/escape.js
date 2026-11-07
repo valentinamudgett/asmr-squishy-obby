@@ -8,6 +8,7 @@ import {
   PhysicsShapeBox,
   PhysicsShapeContainer,
   Quaternion,
+  Ray,
   StandardMaterial,
   TransformNode,
   Vector3,
@@ -226,9 +227,20 @@ export function createEscape(scene, { graphics, audio, avatar }) {
    * CLOSE_UP_SECONDS you're back at checkpoint `at`.
    */
   function catchBy(actor, at, text, next) {
-    actor.faceTo(here.x, here.z);
     const eye = new Vector3();
     const target = new Vector3();
+    // Toward you if the camera fits there (you're hidden for the close-up), else the next most open way.
+    const toward = Math.atan2(here.x - actor.position.x, here.z - actor.position.z);
+    let yaw = toward;
+    for (let step = 0; step < 8; step += 1) {
+      const turn = toward + (step % 2 ? 1 : -1) * Math.ceil(step / 2) * (Math.PI / 4);
+      actor.closeUp(eye, target, turn);
+      if (site.viewClear(actor, eye, target)) {
+        yaw = turn;
+        break;
+      }
+    }
+    actor.faceYaw(yaw);
     actor.closeUp(eye, target);
     caught = { left: CLOSE_UP_SECONDS, at, next };
     events.push({ type: "closeUp", eye: eye.addInPlace(origin), target: target.addInPlace(origin) });
@@ -977,6 +989,27 @@ function buildSite(scene, origin, { graphics, audio }) {
     fireShot: shots.fireShot,
     stepShots: shots.step,
     clearShots: shots.clear,
+    /**
+     * True when nothing stands between `target` (an actor's face) and `eye`, in prison space: no
+     * wall, bars, squishy, or other capybara, with a little room behind the camera too.
+     */
+    viewClear(actor, eye, target) {
+      const from = target.add(origin);
+      const way = eye.subtract(target);
+      const length = way.length() + 0.25;
+      way.normalize();
+      const blocks = (mesh) =>
+        mesh.metadata?.blocksCamera === true || mesh.name === "prison-prison-bars" || squishies.some((pad) => pad.mesh === mesh);
+      if (scene.pickWithRay(new Ray(from, way, length), blocks)?.hit) return false;
+      for (const other of [...police, killer]) {
+        if (other === actor || !other.body.isEnabled()) continue;
+        const middle = other.position.add(new Vector3(0, 0.5 * other.size, 0));
+        const along = Math.max(0, Math.min(length, Vector3.Dot(middle.subtract(target), way)));
+        const closest = target.add(way.scale(along));
+        if (Vector3.Distance(middle, closest) < 0.55 * other.size + 0.2) return false;
+      }
+      return true;
+    },
     animate(dt, time) {
       for (const pad of squishies) {
         pad.loaded = pad === this.standing;
@@ -1059,21 +1092,27 @@ function createActor(scene, root, look, size, name) {
       node.position.copyFrom(goal);
       node.rotation.y = start.facing;
     },
-    /** Turns to look at you, standing still: the pose for the caught close-up. */
-    faceTo(x, z) {
-      node.rotation.y = Math.atan2(x - node.position.x, z - node.position.z);
+    size,
+    /** Where it stands, in prison space. */
+    position: node.position,
+    /** Stands still facing `yaw`: the pose for the caught close-up. */
+    faceYaw(yaw) {
+      node.rotation.y = yaw;
       body.position.y = 0;
       body.rotation.z = 0;
     },
-    /** Its face (`target`) and a spot just in front of it (`eye`), in prison space. */
-    closeUp(eye, target) {
-      const yaw = node.rotation.y;
+    /**
+     * Its face (`target`) and a spot right in front of its nose (`eye`) for when it faces `yaw`, in
+     * prison space. Close enough that the face fills most of the close-up.
+     */
+    closeUp(eye, target, yaw = node.rotation.y) {
       const fx = Math.sin(yaw);
       const fz = Math.cos(yaw);
-      const face = look === "police" ? { y: 0.74, z: 0.22 } : { y: 0.66, z: 0.6 };
+      // Head middle and snout tip, along its nose, in the unscaled model.
+      const face = look === "police" ? { y: 0.74, z: 0.18, tip: 0.35 } : { y: 0.66, z: 0.55, tip: 0.79 };
       target.set(node.position.x + fx * face.z * size, node.position.y + face.y * size, node.position.z + fz * face.z * size);
-      const back = 0.75 + 0.35 * size;
-      eye.set(target.x + fx * back, target.y + 0.12 * size, target.z + fz * back);
+      const back = (face.tip - face.z) * size + 0.6;
+      eye.set(target.x + fx * back, target.y + 0.04 * size, target.z + fz * back);
     },
     /** Moves toward `target` (a route spot). True when it has caught you. */
     step(dt, target, spread, speed) {

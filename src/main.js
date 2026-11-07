@@ -424,15 +424,28 @@ async function bootGame() {
       nextToast = t("toast.backToObby");
     }
   };
-  // The caught close-up looks through its own camera for a second.
+  // The caught close-up looks through its own camera for a second, so the follow camera can't move
+  // it. You're hidden meanwhile (your name tag follows the avatar), so nothing of yours blocks the face.
   const closeUpCamera = new FreeCamera("closeUpCamera", new Vector3(), scene);
   closeUpCamera.minZ = 0.05;
   closeUpCamera.fov = 0.7;
   let closeUp = false;
+  function startCloseUp(eye, target) {
+    closeUpCamera.position.copyFrom(eye);
+    closeUpCamera.setTarget(target);
+    scene.activeCamera = closeUpCamera;
+    closeUp = true;
+    avatar.root.setEnabled(false);
+    selfTag.setShown(false);
+    selfBubble.setShown(false);
+    audio.setWalking(false);
+  }
   function endCloseUp() {
     if (!closeUp) return;
     closeUp = false;
     scene.activeCamera = player.camera;
+    avatar.root.setEnabled(true);
+    selfBubble.setShown(true);
   }
   const replayButton = document.querySelector("#replay-prison");
   const showReplay = () => {
@@ -696,11 +709,7 @@ async function bootGame() {
         toastTimer = event.time;
         nextToast = event.next;
       } else if (event.type === "closeUp") {
-        closeUpCamera.position.copyFrom(event.eye);
-        closeUpCamera.setTarget(event.target);
-        scene.activeCamera = closeUpCamera;
-        closeUp = true;
-        audio.setWalking(false);
+        startCloseUp(event.eye, event.target);
       } else if (event.type === "closeUpEnd") {
         endCloseUp();
       } else if (event.type === "respawn") {
