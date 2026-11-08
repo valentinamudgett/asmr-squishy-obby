@@ -7,8 +7,8 @@ import { linear, plainMaterial, recolorPad, unlitMaterial } from "./seasons.js";
  * Reaching this checkpoint locks you up in Capybara Prison (see escape.js). The course has no pads
  * between it and the FREEDOM_LEVEL checkpoint, where the escape lets you out again.
  */
-export const PRISON_LEVEL = 100;
-export const FREEDOM_LEVEL = 120;
+export const PRISON_LEVEL = 50;
+export const FREEDOM_LEVEL = 100;
 
 export function isPrisonLevel(level) {
   return level >= PRISON_LEVEL && level < FREEDOM_LEVEL;
@@ -19,8 +19,8 @@ const ALARM_ON = new Color3(1, 0.1, 0.06);
 const ALARM_OFF = new Color3(0.25, 0.02, 0.02);
 
 /**
- * The course side of Capybara Prison: the level-100 checkpoint wears jumpsuit orange with a
- * flashing alarm, a hopping capybara inmate, and the prison sign, and the level-120 checkpoint
+ * The course side of Capybara Prison: the level-50 checkpoint wears jumpsuit orange with a
+ * flashing alarm, a hopping capybara inmate, and the prison sign, and the level-100 checkpoint
  * gets a FREEDOM! sign.
  */
 export function createPrison(scene) {

@@ -100,8 +100,11 @@ export function createWorld(scene, lavaY) {
     get altitude() {
       return Math.max(0, height);
     },
-    /** `drop` is how far a long fall has gone. The backdrop sinks with it, so the fall never reaches the sea. */
-    update(time, dt, focus, level = 1, drop = 0) {
+    /**
+     * `drop` is how far a long fall has gone. The backdrop sinks with it, so the fall never reaches
+     * the sea. `indoors` (in the prison) keeps the cloud puffs, which follow you, out of the rooms.
+     */
+    update(time, dt, focus, level = 1, drop = 0, indoors = false) {
       const target = cloudTarget(level);
       if (cover < 0) cover = target;
       else cover += (target - cover) * (1 - Math.exp(-0.85 * dt));
@@ -143,7 +146,7 @@ export function createWorld(scene, lavaY) {
       cities.root.position.set(focus.x, base, focus.z);
       cities.update(time, height - lift);
       cities.setCloud(cover, backdrop === "lava" ? 1 : left, space);
-      clouds.update(time, dt, focus, cover, space);
+      clouds.update(time, dt, focus, indoors ? 0 : cover, space);
       stars.update(focus, space, time);
       earth.update(focus, space, dt);
       // No haze in space: the fog backs far off so the course stays crisp against the dark.
@@ -244,7 +247,7 @@ function buildSky(scene) {
 }
 
 /** Cellular lava: dark crust plates with glowing cracks between them. Tiles seamlessly. */
-function lavaTexture(scene, name, size, seed, crust, glow) {
+export function lavaTexture(scene, name, size, seed, crust, glow) {
   const texture = new DynamicTexture(name, { width: size, height: size }, scene, true);
   const ctx = texture.getContext();
   const image = ctx.createImageData(size, size);

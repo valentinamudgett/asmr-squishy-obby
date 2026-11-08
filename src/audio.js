@@ -203,10 +203,49 @@ export async function createAudio() {
       if (played) boomLock = now + boomSeconds * 1000;
       return played;
     },
-    /** A synth zap: "pew" for a blaster shot, "thump" when something gets hit. */
+    /**
+     * A synth zap: "pew" for a blaster shot, "thump" when something gets hit, "clank" for metal
+     * snapping together, "ding" for an elevator arriving.
+     */
     blip(kind) {
       const ctx = audioEngine.audioContext ?? audioEngine._audioContext;
       if (!unlocked || !ctx || audioEngine.volume <= 0) return;
+      if (kind === "ding") {
+        const now = ctx.currentTime;
+        [1319, 1047].forEach((pitch, index) => {
+          const start = now + index * 0.28;
+          const tone = ctx.createOscillator();
+          tone.type = "sine";
+          tone.frequency.setValueAtTime(pitch, start);
+          const gain = ctx.createGain();
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.setValueAtTime(0.16, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.9);
+          tone.connect(gain);
+          gain.connect(ctx.destination);
+          tone.start(start);
+          tone.stop(start + 0.9);
+        });
+        return;
+      }
+      if (kind === "clank") {
+        const now = ctx.currentTime;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.09, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        gain.connect(ctx.destination);
+        // Two clashing square tones ring like struck metal.
+        for (const pitch of [740, 1130]) {
+          const tone = ctx.createOscillator();
+          tone.type = "square";
+          tone.frequency.setValueAtTime(pitch, now);
+          tone.frequency.exponentialRampToValueAtTime(pitch * 0.82, now + 0.18);
+          tone.connect(gain);
+          tone.start(now);
+          tone.stop(now + 0.18);
+        }
+        return;
+      }
       const pew = kind === "pew";
       const length = pew ? 0.14 : 0.22;
       const now = ctx.currentTime;

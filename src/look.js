@@ -89,6 +89,7 @@ export function defaultLook() {
     bow: false,
     held: "none",
     costume: "none",
+    police: false,
     dance: "cheer",
     song: "jazz",
     quality: "high",
@@ -127,6 +128,7 @@ export function cleanLook(data) {
     if (typeof data[key] === "boolean") look[key] = data[key];
   }
   if (COSTUMES.some((costume) => costume.id === data.costume)) look.costume = data.costume;
+  if (typeof data.police === "boolean") look.police = data.police;
   if (DANCES.some((dance) => dance.id === data.dance)) look.dance = data.dance;
   if (SONGS.some((song) => song.id === data.song)) look.song = data.song;
   if (data.quality === "high" || data.quality === "low") look.quality = data.quality;
@@ -147,6 +149,7 @@ export function saveLook(look) {
       bow: look.bow,
       held: look.held,
       costume: look.costume,
+      police: look.police,
       dance: look.dance,
       song: look.song,
       quality: look.quality,

@@ -16,6 +16,10 @@ const AWAY_RATE = 1;
 const VIEW_DELAY = 0.15;
 /** Seconds without a pose before a player is hidden. */
 const STALE_AFTER = 4;
+/** After you catch a player as police, how long before you can catch that same one again. */
+const NAB_COOLDOWN = 8;
+/** How long a catch waits for the caught player's game to say it counted. */
+const NAB_ANSWER = 5;
 export const NAME_MAX = 18;
 export const CHAT_MAX = 120;
 const TRICKS = [null, "front", "back", "spin"];
@@ -71,7 +75,7 @@ export function cleanName(value) {
  * so there is no game server to run. `isNear(padIndex)` says whether that part of the
  * course is built here; players elsewhere on the climb are hidden.
  */
-export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, onChat, onFriended }) {
+export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, onChat, onFriended, onNabbed, onCaught }) {
   const remotes = new Map();
   const peers = new Set();
   let room = null;
@@ -97,6 +101,8 @@ export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, 
       dance: room.makeAction("dance"),
       chat: room.makeAction("chat"),
       friend: room.makeAction("friend"),
+      nab: room.makeAction("nab"),
+      nabbed: room.makeAction("nabbed"),
     };
     actions.pose.onMessage = (data, { peerId }) => receivePose(peerId, data);
     actions.profile.onMessage = (data, { peerId }) => receiveProfile(peerId, data);
@@ -114,6 +120,22 @@ export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, 
     actions.friend.onMessage = (_data, { peerId }) => {
       const remote = remotes.get(peerId);
       if (remote) onFriended?.(remote.figure.name);
+    };
+    // A police player says they caught you. Only someone you've heard from can, and the game checks
+    // they're police, in the prison, and right next to you. If it counts, they hear back.
+    actions.nab.onMessage = (_data, { peerId }) => {
+      const remote = remotes.get(peerId);
+      const last = remote?.snaps[remote.snaps.length - 1];
+      if (!remote || !last) return;
+      const caught = onNabbed?.({ name: remote.figure.name, police: Boolean(remote.look.police), index: remote.index, x: last.x, y: last.y, z: last.z });
+      if (caught) actions.nabbed.send(true, { target: peerId }).catch(warn);
+    };
+    // The player you caught as police says it counted.
+    actions.nabbed.onMessage = (_data, { peerId }) => {
+      const remote = remotes.get(peerId);
+      if (!remote?.nabOpen || now() - remote.nabAt > NAB_ANSWER) return;
+      remote.nabOpen = false;
+      onCaught?.(remote.figure.name);
     };
     room.onPeerJoin = (peerId) => {
       peers.add(peerId);
@@ -235,6 +257,7 @@ export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, 
           headband: Boolean(look.headband),
           bracelet: Boolean(look.bracelet),
           costume: look.costume,
+          police: Boolean(look.police),
         },
       };
       if (actions && peers.size) actions.profile.send(profile).catch(warn);
@@ -258,6 +281,25 @@ export function createOnline(scene, { day, graphics, isNear, onCount, onRoster, 
       const clean = cleanText(text, CHAT_MAX);
       if (clean && actions && peers.size) actions.chat.send(clean).catch(warn);
       return clean;
+    },
+    /**
+     * You're police in the prison: tries to catch a player in there who's playing as a prisoner,
+     * within `reach` of (x, y, z) and not tried by you in the last NAB_COOLDOWN seconds. `onCaught`
+     * gets their name once their game says it counted.
+     */
+    nabNear(x, y, z, reach, prisonIndex) {
+      if (!actions) return;
+      const at = now();
+      for (const [peerId, remote] of remotes) {
+        const last = remote.snaps[remote.snaps.length - 1];
+        if (!last || !remote.figure.shown || remote.index !== prisonIndex || remote.look.police) continue;
+        if (at - (remote.nabAt ?? -Infinity) < NAB_COOLDOWN) continue;
+        if (Math.hypot(last.x - x, last.z - z) > reach || Math.abs(last.y - y) > 1.2) continue;
+        remote.nabAt = at;
+        remote.nabOpen = true;
+        actions.nab.send(true, { target: peerId }).catch(warn);
+        return;
+      }
     },
     /** Lets a player know you added them as a friend. */
     befriend(peerId) {

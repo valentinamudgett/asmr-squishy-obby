@@ -22,9 +22,9 @@ import { awardLevelCoin, createCoinPop, earnCoins, LEVEL_COINS, loadCoins, spend
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
-import { BOSS_LEVEL, createEscape, KILLER_LEVEL, SODA_PRICE, SODA_SECONDS, SODA_SPEED, VENDING_LEVEL } from "./escape.js";
+import { BOSS_LEVEL, createEscape, KILLER_LEVEL, LAVA_LEVEL, SODA_PRICE, SODA_SPEED, VENDING_LEVEL } from "./escape.js";
 import { drawFace, FACES } from "./faces.js";
-import { BUBBLE_LIFT, createBubble, createNameTag } from "./figure.js";
+import { BUBBLE_LIFT, createBubble } from "./figure.js";
 import { DANCES } from "./dances.js";
 import { createGuideArrow } from "./guide.js";
 import { createHalloween } from "./halloween.js";
@@ -66,7 +66,9 @@ const levelEl = document.querySelector("#level");
 const escapeStat = document.querySelector("#escape-stat");
 const escapeCount = document.querySelector("#escape-count");
 const sodaStat = document.querySelector("#soda-stat");
-const sodaTime = document.querySelector("#soda-time");
+const keyStat = document.querySelector("#key-stat");
+const nabStat = document.querySelector("#nab-stat");
+const nabCountEl = document.querySelector("#nab-count");
 const actionPrompt = document.querySelector("#action-prompt");
 const actionButton = document.querySelector("#action-button");
 const coinsEl = document.querySelector("#coins");
@@ -91,8 +93,19 @@ const FALL_SECONDS = 2.5;
 const MIN_PLUNGE_SECONDS = 0.5;
 /** Paid once, the first time you break out of Capybara Prison. */
 const ESCAPE_COINS = 25;
-/** How long the screen goes dark between touching the level-100 checkpoint and waking up in the cell. */
+/** How long the screen goes dark between touching the level-50 checkpoint and waking up in the cell. */
 const LOCK_SECONDS = 0.55;
+/** The pad index sent to other players while you're in the prison, which isn't on the course. */
+const PRISON_INDEX = -1;
+/** Playing as police: coins for each prisoner you catch, and how close you have to get to a player or bot. */
+const NAB_COINS = 10;
+const NAB_REACH = 1.1;
+/**
+ * A police player's catch only counts from about this close, and only once in this many seconds,
+ * longer than their own wait so standing on your checkpoint can't catch you over and over.
+ */
+const NABBED_REACH = 3;
+const NABBED_COOLDOWN = 10;
 /**
  * Each holiday game style shows only in its own month, by the player's own clock: Valentine's Day
  * in February, Halloween in October, Thanksgiving in November, Christmas in December.
@@ -282,7 +295,9 @@ async function bootGame() {
   prison = createPrison(scene);
   for (const pad of course.pads) prison.addPad(pad);
   escape = createEscape(scene, { graphics, audio, avatar });
-  // In the prison you wear stripes. Only the avatar wears them: the saved look and the one other players see stay yours.
+  escape.setPolice(look.police);
+  // In the prison you wear stripes (or your police uniform, with "Play as police" on). Only the avatar
+  // wears them: the saved look and the one other players see stay yours.
   let prisoner = false;
   const wearPrisoner = (on) => {
     prisoner = on;
@@ -303,10 +318,13 @@ async function bootGame() {
     onChat: (line) => social?.addLine(line),
     onRoster: () => social?.refresh(),
   });
+  bots.setPolice(look.police);
   const online = createOnline(scene, {
     day,
     graphics,
+    // Players in the prison are all in the same place, so they see each other there and nowhere else.
     isNear: (index) => {
+      if (index === PRISON_INDEX || escape.active) return index === PRISON_INDEX && escape.active;
       const pads = course.pads;
       return pads.length > 0 && index >= pads[0].index - 2 && index <= pads[pads.length - 1].index + 2;
     },
@@ -318,9 +336,20 @@ async function bootGame() {
     onRoster: () => social?.refresh(),
     onChat: (line) => social?.addLine(line),
     onFriended: (name) => notify(t("friends.addedYou").replace("{name}", name)),
+    onNabbed: ({ name, police, index, x, y, z }) => {
+      if (!police || index !== PRISON_INDEX || look.police || clock - nabbedAt < NABBED_COOLDOWN) return false;
+      if (Math.hypot(x - selfFoot.x, z - selfFoot.z) > NABBED_REACH || Math.abs(y - selfFoot.y) > 2) return false;
+      if (!escape.nabbed(t("toast.policeNabbed").replace("{name}", name), t("toast.keepGoing"))) return false;
+      nabbedAt = clock;
+      return true;
+    },
+    onCaught: (name) => {
+      const at = { x: selfFoot.x, y: selfFoot.y + FOOT_OFFSET, z: selfFoot.z };
+      if (escape.active && look.police) caughtOne(t("toast.nabbedName").replace("{name}", name), at);
+    },
   });
+  // Your own chat shows over your head; your own name doesn't.
   const selfBubble = createBubble(scene, graphics);
-  const selfTag = createNameTag(scene, graphics);
 
   const preview = createPreview(document.querySelector("#preview"));
   preview.avatar.apply(look);
@@ -335,6 +364,8 @@ async function bootGame() {
     () => {
       online.setProfile(window.__obbyPreferences?.name ?? "", look);
       player.setAngelFlight(look.costume === "angel");
+      escape.setPolice(look.police);
+      bots.setPolice(look.police);
       if (prisoner) wearPrisoner(true);
     },
   );
@@ -379,6 +410,8 @@ async function bootGame() {
   const pop = createLavaPop(scene, avatar);
   const coinPop = createCoinPop(scene, player.camera);
   let meltHome = null;
+  // Where the lava room's lava puts you back once you've popped (position, heading).
+  let meltPrison = null;
   const pointAhead = (from) => {
     const next = from.flight?.steps[0] ?? course.pads.find((pad) => pad.index > from.index);
     if (next) guide.show(from, next);
@@ -397,26 +430,30 @@ async function bootGame() {
     levelEl.textContent = String(level);
     showEscape(level);
   };
-  /** Puts you in Capybara Prison at checkpoint `at` (100, 110, or 115). `again` is a replay from the Character studio. */
+  /** Puts you in Capybara Prison at checkpoint `at` (50, 75, 80, or 90). `again` is a replay from the Character studio. */
   const enterEscape = (at, again = false) => {
-    const gate = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === PRISON_LEVEL) ?? checkpointPad;
-    const spot = escape.enter(gate, at, { again });
+    const spot = escape.enter(at, { again });
+    nabCount = 0;
+    nabCountEl.textContent = "0";
+    bots.setPrison(escape.botPlan(), checkpointPad.index);
     guide.hide();
     avatar.stopDance();
     endCloseUp();
     plunge = null;
     meltHome = null;
+    meltPrison = null;
     lastSafePad = checkpointPad;
     player.respawn(spot.position, spot.heading);
     showLevel(at);
   };
   /**
-   * Out through the prison gate onto the level-120 checkpoint, which then lets you out as usual.
+   * Out through the prison gate onto the level-100 checkpoint, which then lets you out as usual.
    * After a replay you're already past it, so you go back to your own checkpoint instead.
    */
   const leaveEscape = () => {
     const again = escape.replay;
     escape.leave();
+    bots.setPrison(null, checkpointPad.index);
     endCloseUp();
     player.setSpeedBoost(1);
     const exit = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === FREEDOM_LEVEL);
@@ -441,7 +478,6 @@ async function bootGame() {
     scene.activeCamera = closeUpCamera;
     closeUp = true;
     avatar.root.setEnabled(false);
-    selfTag.setShown(false);
     selfBubble.setShown(false);
     audio.setWalking(false);
   }
@@ -472,13 +508,31 @@ async function bootGame() {
     escape.act();
   });
   let actionShown = null;
-  let sodaShown = 0;
+  let sodaShown = false;
+  let keyShown = false;
+  let nabShown = false;
   let hintTimer = 9;
   let clock = 0;
+  /** Where you stood last frame, to check a police player is really next to you when they say they caught you. */
+  const selfFoot = new Vector3();
+  let nabbedAt = -Infinity;
+  /** Prisoners you've caught as police since you came into the prison. */
+  let nabCount = 0;
+  const caughtOne = (text, position) => {
+    nabCount += 1;
+    nabCountEl.textContent = String(nabCount);
+    earnCoins(coins, NAB_COINS);
+    showCoins();
+    coinPop.burst(position);
+    audio.blip("thump");
+    showToast(text);
+    toastTimer = 1.8;
+    nextToast = t("toast.nabCoins").replace("{n}", String(NAB_COINS));
+  };
   let fightShown = "";
   showLevel(course.start.level);
   if (isPrisonLevel(best)) {
-    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
     enterEscape(at);
     if (at !== PRISON_LEVEL) {
       showToast(`Level ${at}`);
@@ -534,7 +588,7 @@ async function bootGame() {
     const here = frame.pad ?? lastSafePad;
     hereIndex = !inEscape && Number.isFinite(here.index) ? here.index : lastSafePad.index;
     const drop = plunge ? plunge.fromY - frame.position.y : 0;
-    const cover = world.update(clock, dt, frame.position, hereIndex / PADS_PER_LEVEL + 1, drop);
+    const cover = world.update(clock, dt, frame.position, hereIndex / PADS_PER_LEVEL + 1, drop, inEscape);
     // High up the skyline is below you, so stop tipping the view toward the horizon.
     player.setAimRaise(aimRaise * (1 - smoothstep(8, 120, world.altitude)));
     graphics.update(clock, cover);
@@ -576,15 +630,12 @@ async function bootGame() {
       flying: frame.flying,
       trick: frame.trick,
       trickP: frame.trickP,
-      index: hereIndex,
+      index: inEscape ? PRISON_INDEX : hereIndex,
       away: ui.startOpen,
     });
     online.update(dt, player.camera, clock);
-    bots.update(dt, player.camera, clock, hereIndex);
+    bots.update(dt, player.camera, clock, hereIndex, frame.foot);
     const headTop = frame.foot.y - (standing ? standing.sink : 0) + avatar.height;
-    selfTag.setName(online.name);
-    selfTag.setShown(avatar.root.isEnabled());
-    selfTag.update(frame.foot.x, headTop, frame.foot.z);
     selfBubble.update(dt, frame.foot.x, headTop + BUBBLE_LIFT, frame.foot.z);
 
     const lavaCue = pop.tick(dt, frame.foot, world.seaY);
@@ -594,6 +645,11 @@ async function bootGame() {
       meltHome = null;
       sendHome(home);
       fallLock = 0.6;
+    } else if (lavaCue === "done" && meltPrison) {
+      const { position, heading } = meltPrison;
+      meltPrison = null;
+      player.respawn(position, heading);
+      pop.place({ x: position.x, y: position.y - FOOT_OFFSET, z: position.z });
     }
 
     graphics.sun.position.set(frame.position.x + 8, frame.position.y + 18, frame.position.z - 6);
@@ -741,16 +797,29 @@ async function bootGame() {
         // Short on coins? The machine gives you one anyway.
         const paid = spendCoins(coins, SODA_PRICE);
         if (paid) showCoins();
-        player.setSpeedBoost(SODA_SPEED, SODA_SECONDS);
-        const speedy = t("toast.sodaBought").replace("{n}", String(SODA_SECONDS));
+        player.setSpeedBoost(SODA_SPEED, Infinity);
+        const speedy = t("toast.sodaBought");
         showToast(paid ? speedy : t("toast.sodaFree"));
         toastTimer = 2;
         nextToast = paid ? null : speedy;
         audio.blip("thump");
       } else if (event.type === "sodaEnd") {
         player.setSpeedBoost(1);
-        sodaShown = 0;
+        sodaShown = false;
         sodaStat.hidden = true;
+      } else if (event.type === "lava") {
+        avatar.stopDance();
+        audio.scream();
+        audio.setWalking(false);
+        showToast(t("toast.tooHot"));
+        toastTimer = 1.6;
+        nextToast = t("toast.backToLava");
+        if (pop.begin()) meltPrison = { position: event.position, heading: event.heading };
+        else player.respawn(event.position, event.heading);
+      } else if (event.type === "zipGrab") {
+        bots.cueChase();
+      } else if (event.type === "nab") {
+        caughtOne(t("toast.nabbed"), event.position);
       } else if (event.type === "free") {
         leaveEscape();
       }
@@ -761,17 +830,29 @@ async function bootGame() {
       document.body.classList.toggle("can-act", action !== null);
       if (action) [actionPrompt.textContent, actionButton.textContent] = actionText(action);
     }
-    const sodaLeft = Math.ceil(player.boostLeft);
-    if (sodaLeft !== sodaShown) {
-      if (sodaLeft === 0 && sodaShown > 0 && escape.active) {
-        showToast(t("toast.sodaGone"));
-        toastTimer = 1.6;
-        nextToast = null;
-      }
-      sodaShown = sodaLeft;
-      sodaStat.hidden = sodaLeft === 0;
-      sodaTime.textContent = `${sodaLeft}s`;
+    const sodaOn = player.boostLeft > 0;
+    if (sodaOn !== sodaShown) {
+      sodaShown = sodaOn;
+      sodaStat.hidden = !sodaOn;
     }
+    const keyOn = escape.hasKey;
+    if (keyOn !== keyShown) {
+      keyShown = keyOn;
+      keyStat.hidden = !keyOn;
+    }
+    // As police, other players and bots playing as prisoners are caught by touch.
+    const nabOn = escape.active && look.police;
+    if (nabOn && !menus && !closeUp) {
+      const { x, y, z } = frame.foot;
+      online.nabNear(x, y, z, NAB_REACH, PRISON_INDEX);
+      const name = bots.nabNear(x, y, z, NAB_REACH);
+      if (name) caughtOne(t("toast.nabbedName").replace("{name}", name), frame.position);
+    }
+    if (nabOn !== nabShown) {
+      nabShown = nabOn;
+      nabStat.hidden = !nabOn;
+    }
+    selfFoot.copyFrom(frame.foot);
     const fight = escape.fight;
     const fightKey = fight ? `${fight.lives}/${fight.health}/${escape.armed}` : "";
     if (fightKey !== fightShown) {
@@ -858,6 +939,13 @@ function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onThem
     button.addEventListener("click", () => selectDifficulty(button.dataset.difficulty));
   });
   selectDifficulty(preferences.difficulty);
+
+  // Police is part of your saved look, so the Character studio's toggle makes the switch and marks these.
+  menu.querySelectorAll("[data-role]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if ((button.dataset.role === "police") !== look.police) document.querySelector("#police").click();
+    });
+  });
 
   const selectBackground = (background) => {
     preferences.background = background;
@@ -1037,6 +1125,12 @@ function payCheckpoint(level) {
 function actionText(action) {
   if (action === "zip") return [t("prompt.zipline"), t("hud.grab")];
   if (action === "soda") return [t("prompt.soda").replace("{n}", String(SODA_PRICE)), t("hud.buy")];
+  if (action === "cupboard") return [t("prompt.cupboard"), t("hud.open")];
+  if (action === "unlock") return [t("prompt.unlock"), t("hud.unlock")];
+  if (action === "needKey") return [t("prompt.needKey"), t("hud.unlock")];
+  if (action === "liftDown") return [t("prompt.liftDown"), t("hud.ride")];
+  if (action === "liftUp") return [t("prompt.liftUp"), t("hud.ride")];
+  if (action === "liftCall") return [t("prompt.liftCall"), t("hud.call")];
   return [t("prompt.openVent"), t("hud.open")];
 }
 
@@ -1101,6 +1195,7 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
   const outfitBox = document.querySelector("#outfits");
   const costumeBox = document.querySelector("#costumes");
   const bowButton = document.querySelector("#bow");
+  const policeButton = document.querySelector("#police");
   const heldBox = document.querySelector("#held");
   const qualityBox = document.querySelector("#quality");
 
@@ -1232,6 +1327,10 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
     look.bow = !look.bow;
     publish();
   });
+  policeButton.addEventListener("click", () => {
+    look.police = !look.police;
+    publish();
+  });
   qualityBox.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
@@ -1323,6 +1422,11 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
     bowButton.title = bowOwned ? "" : lockTitle("extra", "bow");
     bowButton.setAttribute("aria-pressed", String(look.bow));
     bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${coinCount(priceOf("extra:bow"))}`;
+    policeButton.setAttribute("aria-pressed", String(look.police));
+    policeButton.textContent = look.police ? t("studio.policeOn") : t("studio.policeOff");
+    document.querySelectorAll("#start-menu [data-role]").forEach((button) => {
+      button.setAttribute("aria-pressed", String((button.dataset.role === "police") === look.police));
+    });
     document.querySelectorAll("#quality button").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.quality === look.quality));
     });

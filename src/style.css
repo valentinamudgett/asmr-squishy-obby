@@ -241,6 +241,10 @@ button, input { font: inherit; }
   animation: soda-glow 0.9s ease-in-out infinite alternate;
 }
 
+#key-stat {
+  background: #ffd84a;
+}
+
 @keyframes soda-glow {
   from { box-shadow: 0 0 0 rgba(63, 214, 255, 0); }
   to { box-shadow: 0 0 18px rgba(63, 214, 255, 0.85); }
@@ -939,6 +943,15 @@ body.show-touch #action-prompt { display: none; }
 
 [data-difficulty="easy"] .difficulty-icon { background: linear-gradient(145deg, #e4f9cf, #c9eedc); }
 [data-difficulty="hard"] .difficulty-icon { background: linear-gradient(145deg, #ffd9b0, #ffb3c4); }
+
+.role-picker .difficulty-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.picker-note {
+  margin: -2px 0 8px;
+  color: #8e7a99;
+  font-size: 0.78rem;
+}
+[data-role="prisoner"] .difficulty-icon { background: repeating-linear-gradient(0deg, #f4f1ea 0 7px, #c9c4bc 7px 14px); }
+[data-role="police"] .difficulty-icon { background: linear-gradient(145deg, #cfdcff, #9fb6ef); }
 
 .background-preview {
   position: relative;
@@ -1986,6 +1999,7 @@ body.title-open .players-panel { z-index: 8; }
   .start-subtitle { margin-bottom: 19px; }
   .start-journey { font-size: 0.82rem; }
   .difficulty-options, .background-options { grid-template-columns: 1fr; gap: 8px; }
+  .role-picker .difficulty-options { grid-template-columns: 1fr; }
   .theme-options { grid-auto-flow: row; }
   .difficulty-options button, .background-options button {
     grid-template-columns: auto 1fr;

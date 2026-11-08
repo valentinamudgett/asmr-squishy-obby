@@ -18,11 +18,11 @@ import {
   VertexBuffer,
   VertexData,
 } from "@babylonjs/core";
-import { buildCostumes, costumeById, costumeSkin } from "./costumes.js";
+import { buildCostumes, costumeById, costumeSkin, POLICE_CAP } from "./costumes.js";
 import { DANCE_LENGTH, danceById } from "./dances.js";
 import { drawFace } from "./faces.js";
 import { hexToColor3, mulberry32, paint, roundedBox, smoothstep } from "./geometry.js";
-import { fabricFontsReady, outfitById, paintOverlay, paintPattern, patternKey, patternNeedsFonts } from "./outfits.js";
+import { fabricFontsReady, outfitById, paintOverlay, paintPattern, patternKey, patternNeedsFonts, POLICE_OUTFIT } from "./outfits.js";
 
 export { hexToColor3 };
 
@@ -340,6 +340,8 @@ export function buildAvatar(scene) {
       return height;
     },
     apply(look) {
+      // "Play as police" wears the uniform and cap over whatever outfit and costume are picked.
+      if (look.police) look = { ...look, outfit: POLICE_OUTFIT.id, costume: POLICE_CAP.id };
       const boy = look.body === "boy";
       const outfit = outfitById(look.outfit);
       const fit = shape(look.age, boy);

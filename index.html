@@ -24,7 +24,15 @@
         </p>
         <p id="soda-stat" hidden>
           <span data-i18n="hud.soda">Soda</span>
-          <strong id="soda-time">0</strong>
+          <strong>⚡</strong>
+        </p>
+        <p id="key-stat" hidden>
+          <span data-i18n="hud.key">Key</span>
+          <strong>🔑</strong>
+        </p>
+        <p id="nab-stat" hidden>
+          <span data-i18n="hud.caught">Caught</span>
+          <strong id="nab-count">0</strong>
         </p>
         <p id="coin-stat">
           <span class="coin-name" data-i18n="hud.coins">Coins</span>
@@ -258,6 +266,23 @@
           </div>
         </fieldset>
 
+        <fieldset class="difficulty-picker role-picker">
+          <legend data-i18n="start.roleLabel">Play as</legend>
+          <p class="picker-note" data-i18n="start.roleNote">Who will you be in Capybara Prison?</p>
+          <div class="difficulty-options">
+            <button type="button" data-role="prisoner" aria-pressed="true">
+              <span class="difficulty-icon" aria-hidden="true">🏃</span>
+              <strong data-i18n="role.prisoner">Prisoner</strong>
+              <small data-i18n="role.prisonerHint">Wear prison stripes</small>
+            </button>
+            <button type="button" data-role="police" aria-pressed="false">
+              <span class="difficulty-icon" aria-hidden="true">👮</span>
+              <strong data-i18n="role.police">Police</strong>
+              <small data-i18n="role.policeHint">Uniform and cap, all the time</small>
+            </button>
+          </div>
+        </fieldset>
+
         <fieldset class="background-picker">
           <legend data-i18n="start.backgroundLabel">Choose your background</legend>
           <div class="background-options">
@@ -375,6 +400,11 @@
         <p class="label" id="costume-label" data-i18n="studio.costume">Holiday costume</p>
         <div id="costumes" class="segment" role="group" aria-labelledby="costume-label"></div>
         <p class="note" data-i18n="studio.costumeNote">Fall leaves and Elf are free. Buy more costumes in Rewards. Angels can fly: press jump again in the air.</p>
+        <p class="label" id="police-label" data-i18n="studio.police">Play as police</p>
+        <div class="row">
+          <button id="police" type="button" class="toggle" aria-pressed="false" aria-labelledby="police-label" data-i18n="studio.policeOff">Police off</button>
+        </div>
+        <p class="note" data-i18n="studio.policeNote">A navy police uniform and cap with a gold star badge. In the prison you wear it instead of the stripes. Turn it off to get your own outfit back.</p>
         <p class="label" id="skin-label">Skin tone</p>
         <div id="skin-swatches" class="row" role="group" aria-labelledby="skin-label"></div>
         <p class="label" data-i18n="studio.accessory">Accessories</p>

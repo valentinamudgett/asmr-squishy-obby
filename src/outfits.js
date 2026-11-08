@@ -142,8 +142,30 @@ export const PRISONER_OUTFIT = {
   shoes: "#2a2a2e",
 };
 
+const POLICE_NAVY = "#22325a";
+
+/**
+ * Worn with "Play as police" (see avatar.js), with the police cap from costumes.js. Not in OUTFITS,
+ * so it is never picked or sold: the toggle is saved instead.
+ */
+export const POLICE_OUTFIT = {
+  id: "police",
+  label: "Police uniform",
+  swatch: [POLICE_NAVY, "#f2c230"],
+  torso: POLICE_NAVY,
+  overlay: "police",
+  sleeve: POLICE_NAVY,
+  forearm: POLICE_NAVY,
+  skirt: null,
+  thigh: "#1a2644",
+  shin: "#1a2644",
+  shoes: "#111114",
+  belt: "#141416",
+};
+
 export function outfitById(id) {
   if (id === PRISONER_OUTFIT.id) return PRISONER_OUTFIT;
+  if (id === POLICE_OUTFIT.id) return POLICE_OUTFIT;
   return OUTFITS.find((outfit) => outfit.id === id) ?? OUTFITS[0];
 }
 
@@ -551,6 +573,40 @@ function paintRest(ctx, size, overlay) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("100", size / 2, size * 0.44);
+    return;
+  }
+  if (overlay === "police") {
+    // A shirt collar, buttons down the middle, two pocket flaps, and a gold star badge.
+    ctx.fillStyle = "#16203d";
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(size / 2, size * 0.12);
+      ctx.lineTo(size / 2 + side * size * 0.2, 0);
+      ctx.lineTo(size / 2 + side * size * 0.24, size * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.strokeStyle = "#16203d";
+    ctx.lineWidth = size * 0.014;
+    ctx.beginPath();
+    ctx.moveTo(size / 2, size * 0.12);
+    ctx.lineTo(size / 2, size);
+    ctx.stroke();
+    ctx.fillStyle = "#c9ccd6";
+    for (const y of [0.26, 0.44, 0.62, 0.8]) {
+      ctx.beginPath();
+      ctx.arc(size * 0.53, size * y, size * 0.018, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#1a2647";
+    for (const x of [0.22, 0.62]) {
+      roundRect(ctx, size * x, size * 0.45, size * 0.18, size * 0.07, size * 0.015);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#b8871a";
+    star(ctx, size * 0.71, size * 0.28, size * 0.11);
+    ctx.fillStyle = "#ffd447";
+    star(ctx, size * 0.71, size * 0.28, size * 0.085);
     return;
   }
   if (overlay === "eightyNine") {

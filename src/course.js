@@ -68,7 +68,7 @@ const HAZARD_TUNING = {
   medium: { chance: 0.7, pace: (d) => 0.7 * d, spaced: true, everyPad: false },
   hard: { chance: 1.15, pace: (d) => 0.4 + d, spaced: false, everyPad: true },
 };
-/** Pads between the level-100 and level-120 checkpoints are never built: that climb is the prison escape. */
+/** Pads between the level-50 and level-100 checkpoints are never built: that climb is the prison escape. */
 const PRISON_INDEX = (PRISON_LEVEL - 1) * PADS_PER_LEVEL;
 const FREEDOM_INDEX = (FREEDOM_LEVEL - 1) * PADS_PER_LEVEL;
 

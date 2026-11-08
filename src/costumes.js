@@ -32,7 +32,11 @@ export function costumeSkin(id, hex) {
   return Color3.Lerp(hexToColor3(hex), hexToColor3(tint[0]), tint[1]);
 }
 
+/** Worn with the police uniform for "Play as police". Not in COSTUMES, so it is never picked or sold. */
+export const POLICE_CAP = { id: "police", label: "Police cap", icon: "👮", head: true };
+
 export function costumeById(id) {
+  if (id === POLICE_CAP.id) return POLICE_CAP;
   return COSTUMES.find((costume) => costume.id === id) ?? COSTUMES[0];
 }
 
@@ -487,7 +491,28 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   const acornCap = add(MeshBuilder.CreateSphere("leafCrownAcornCap", { diameter: 0.066, segments: 10, slice: 0.5 }, scene), acorn, "#6a4224");
   acornCap.position.y = 0.006;
 
-  const outfits = { leaves, turkey, pilgrim, scarecrow, pie, elf, santa, reindeer, snowman, gingerbread, angel };
+  // The police cap: a navy crown flaring over a black band, a shiny black peak, and a gold badge.
+  const police = { head: node("policeCap", head), back: null, more: [] };
+  const policeTilt = pivot("policeCapTilt", police.head);
+  policeTilt.position.y = -0.05;
+  policeTilt.rotation.x = 0.06;
+  add(MeshBuilder.CreateCylinder("policeCapBand", { height: 0.07, diameter: 0.26, tessellation: 28 }, scene), policeTilt, "#141416").position.y = 0.035;
+  const policeCrown = add(
+    MeshBuilder.CreateCylinder("policeCapCrown", { height: 0.09, diameterTop: 0.34, diameterBottom: 0.26, tessellation: 28 }, scene),
+    policeTilt,
+    "#1f2d4d",
+  );
+  policeCrown.position.y = 0.115;
+  add(MeshBuilder.CreateCylinder("policeCapTop", { height: 0.02, diameter: 0.34, tessellation: 28 }, scene), policeTilt, "#22325a").position.y = 0.17;
+  const policePeak = add(MeshBuilder.CreateCylinder("policeCapPeak", { height: 0.016, diameter: 0.26, tessellation: 28 }, scene), policeTilt, "#0b0b0d");
+  policePeak.scaling.x = 0.92;
+  policePeak.position.set(0, 0.008, 0.08);
+  policePeak.rotation.x = 0.22;
+  const policeBadge = add(MeshBuilder.CreateCylinder("policeCapBadge", { height: 0.012, diameter: 0.07, tessellation: 5 }, scene), policeTilt, "#f2c230", true);
+  policeBadge.rotation.x = Math.PI / 2;
+  policeBadge.position.set(0, 0.115, 0.152);
+
+  const outfits = { leaves, turkey, pilgrim, scarecrow, pie, elf, santa, reindeer, snowman, gingerbread, angel, police };
   let worn = "none";
 
   return {

@@ -20,39 +20,60 @@ import { t } from "./i18n.js";
 import { FOOT_OFFSET } from "./player.js";
 import { PRISON_LEVEL } from "./prison.js";
 import { plainMaterial, unlitMaterial } from "./seasons.js";
+import { lavaTexture } from "./world.js";
 
-/** Checkpoints inside the prison. PRISON_LEVEL is the cell; FREEDOM_LEVEL is back out on the course. */
-export const KILLER_LEVEL = 110;
+/**
+ * Checkpoints inside the prison. PRISON_LEVEL is the cell; FREEDOM_LEVEL is back out on the course.
+ * LAVA_LEVEL is the lava room off the top of the police stairs, where the police can't get you.
+ */
+export const LAVA_LEVEL = 60;
+export const KILLER_LEVEL = 75;
 /** The vending room past the killer capybara's obby, where the chef comes after you. */
-export const VENDING_LEVEL = 112;
-export const BOSS_LEVEL = 115;
-/** The energy soda from the vending machine: its price in coins, the run speed it gives, and for how long. */
+export const VENDING_LEVEL = 80;
+export const BOSS_LEVEL = 90;
+/** The energy soda from the vending machine: its price in coins and the run speed it gives until level 90 or a catch. */
 export const SODA_PRICE = 3;
-export const SODA_SPEED = 1.6;
-export const SODA_SECONDS = 18;
+export const SODA_SPEED = 2.6;
 
-/** The prison is built off to the side of the level-100 checkpoint, well clear of the course. */
-const OFFSET = new Vector3(160, -2, 0);
+/**
+ * Where the prison stands in the world: one spot for everyone, replays included, so other players in
+ * it show up in the right place. Level-50 height, and far enough out that no course pad reaches it.
+ */
+export const PRISON_ORIGIN = new Vector3(260, 375, 0);
 const LIVES = 10;
 const BOSS_HEALTH = 5;
 /**
  * Per difficulty. The player runs at 4.4 m/s, so police that keep coming are a little slower. The
- * chef is faster than a run but slower than a run on soda (7 m/s); `chefWait` is how long it holds
- * off when you don't buy one.
+ * chef is more than twice as fast as a run, but a little slower than a run on soda (11.4 m/s).
+ * `escapee` is the prisoner you chase when you play as police, slower than you so you can catch it.
  */
 const PACE = {
-  easy: { police: 3.3, policeDelay: 2.6, killer: 4.0, killerDelay: 2.2, chef: 5.4, chefDelay: 1.6, chefWait: 5, fireEvery: 1.7, fireSpeed: 10 },
-  medium: { police: 3.8, policeDelay: 1.9, killer: 4.6, killerDelay: 1.6, chef: 5.9, chefDelay: 1.3, chefWait: 4, fireEvery: 1.25, fireSpeed: 13 },
-  hard: { police: 4.2, policeDelay: 1.3, killer: 5.2, killerDelay: 1.1, chef: 6.4, chefDelay: 1, chefWait: 3, fireEvery: 0.9, fireSpeed: 16 },
+  easy: { police: 3.3, policeDelay: 2.6, killer: 4.0, killerDelay: 2.2, chef: 9.7, chefDelay: 2.2, fireEvery: 1.7, fireSpeed: 10, escapee: 2.4 },
+  medium: { police: 3.8, policeDelay: 1.9, killer: 4.6, killerDelay: 1.6, chef: 10.1, chefDelay: 1.8, fireEvery: 1.25, fireSpeed: 13, escapee: 3 },
+  hard: { police: 4.2, policeDelay: 1.3, killer: 5.2, killerDelay: 1.1, chef: 10.6, chefDelay: 1.4, fireEvery: 0.9, fireSpeed: 16, escapee: 3.5 },
 };
 /** Where each checkpoint puts you, in prison space, and which way you face. */
 const SPAWNS = {
   [PRISON_LEVEL]: { x: 0.8, y: 0, z: 1.2, heading: -Math.PI / 2 },
-  [KILLER_LEVEL]: { x: 10.5, y: 17.6, z: 1.5, heading: Math.PI / 2 },
+  [LAVA_LEVEL]: { x: -19.5, y: 9, z: 8.6, heading: 0 },
+  [KILLER_LEVEL]: { x: 10.5, y: 17.6, z: -4.2, heading: Math.PI / 2 },
   [VENDING_LEVEL]: { x: 41.8, y: 21.8, z: 10.6, heading: -Math.PI / 2 },
   [BOSS_LEVEL]: { x: 46.6, y: 21.8, z: 0, heading: Math.PI / 2 },
 };
+/**
+ * The prisoners you chase as police run the police route, from the hall up the stairs to the lava
+ * room's door. Each comes out ESCAPEE_AHEAD meters along it from you, waits once it's ESCAPEE_LEAD
+ * ahead, and is caught within ESCAPEE_REACH. ESCAPEE_AGAIN seconds later another one gets out.
+ */
+const ESCAPEE_SIZE = 1.25;
+const ESCAPEE_AHEAD = 7;
+const ESCAPEE_LEAD = 10;
+const ESCAPEE_REACH = 1.1;
+const ESCAPEE_FIRST = 1.5;
+const ESCAPEE_AGAIN = 3;
 const HALL_FLOOR = -3;
+/** Playing as police, level 50 starts you in the hall by the police door instead of the cell. */
+const POLICE_START = { x: -8.4, y: HALL_FLOOR, z: 0, heading: -Math.PI / 2 };
 const SQUISHY_FLOOR = 9;
 const KILLER_FLOOR = 17.6;
 /** Where the killer capybara's floor ends and the obby over the goo begins. */
@@ -64,30 +85,120 @@ const BOSS_SIZE = 4.2;
 const KILLER_SIZE = 1.6;
 const CHEF_SIZE = 1.8;
 const POLICE_SIZE = 1.3;
-/** Where the second vent comes out, high on the killer capybara's wall. */
+/**
+ * The cell block is one tall open hall, ceiling at BLOCK_TOP: the stairwell round the barred cells,
+ * the squishy wall, and a goo pit over your own cell, joined to the killer capybara's room above
+ * its floor. The second vent runs round the outside to a ledge high on the stairwell's far wall.
+ */
 const LEDGE_TOP = 19.4;
-/** The zipline from the ledge down to the level-110 checkpoint: cable ends, in prison space. */
-const ZIP_FROM = { x: 8, y: 22.2, z: -6.8 };
-const ZIP_TO = { x: 10.5, y: 20.05, z: 1.5 };
-const ZIP_SPEED = 5;
+const BLOCK_TOP = 30;
+const GOO_PIT = { x0: -3.6, x1: 6, top: 5 };
+/** The squishy wall's top on the zipline's side, low enough for the rider's feet to pass over. */
+const EAST_WALL_TOP = 17;
+/** Walls between the cell block's halves stop here, under the zipline. */
+const SPLIT_TOP = 16.4;
+/** Cell Block B, south of the stairwell: rows of barred cells far below the zipline. x0, x1, z0, z1. */
+const BLOCK_B = { x0: -30, x1: 6, z0: -38, z1: -6.4 };
+/** Its rows of cells: the middle of each row, and the z span they run along. */
+const CELL_ROWS = [-25.7, -14.9, -4.1];
+const CELL_ROW_Z = [-32, -12];
+/**
+ * The lava room, north of the stairwell and the squishy room on the squishy room's floor: in through
+ * LAVA_DOOR (x0, x1 in the stairwell's north wall) off the top of the stairs, cupboards round its west
+ * end, a lava pool across the middle, and out through LAVA_EXIT (x0, x1 in the squishy room's north
+ * wall) at its east end.
+ */
+const LAVA_ROOM = { x0: -30, x1: -4, z0: 6.4, z1: 18.4, top: 15.4 };
+const LAVA_POOL = { x0: -17, x1: -6.6, y: 8.4 };
+const LAVA_DOOR = [-20.6, -18.4];
+const LAVA_EXIT = [-6.2, -4.4];
+/**
+ * The little cages the key makes form on the north wall over the lava: each one's middle (x) and
+ * top, climbing like stairs from the west floor's edge toward the exit end, CAGE_SIZE square and
+ * CAGE_TALL deep with gaps like the obby's. You drop off the last one onto the east floor.
+ */
+const CAGES = [
+  [-15.7, 9.6],
+  [-13.6, 10.2],
+  [-11.5, 10.8],
+  [-9.4, 11.4],
+  [-7.3, 12],
+];
+const CAGE_SIZE = 1.3;
+const CAGE_TALL = 1;
+const CAGE_Z = LAVA_ROOM.z1 - CAGE_SIZE / 2;
+/**
+ * The top floor the cage stairs climb to, at the lava room's east end from x0 and z0 to the walls,
+ * and the elevator just south of its edge that takes you down to the floor by the exit door. LIFT
+ * is the car's footprint (x0, x1, z0, z1). It rides for LIFT_SECONDS; its gates take
+ * LIFT_GATE_SECONDS to slide shut or open. Call panels are on the east wall at LIFT_PANELS (z) on
+ * each floor. With nobody in it, it goes back up LIFT_RETURN_SECONDS after reaching the bottom.
+ */
+const LANDING = { x0: LAVA_POOL.x1, z0: 11.6, top: 12.6 };
+const LIFT = { x0: -6.5, x1: -4.1, z0: 9.4, z1: 11.6 };
+const LIFT_TALL = 2.3;
+const LIFT_SECONDS = 3.2;
+const LIFT_GATE_SECONDS = 0.5;
+const LIFT_PANELS = { top: 12.3, bottom: 8.8 };
+const LIFT_REACH = 1.3;
+const LIFT_RETURN_SECONDS = 4;
+/** Cupboards round the west end: where each stands against the wall, and the way its doors face. */
+const CUPBOARDS = [
+  { x: -29.65, z: 9.6, yaw: Math.PI / 2 },
+  { x: -29.65, z: 13, yaw: Math.PI / 2 },
+  { x: -29.65, z: 16.4, yaw: Math.PI / 2 },
+  { x: -26, z: 18.05, yaw: Math.PI },
+  { x: -22, z: 18.05, yaw: Math.PI },
+  { x: -26, z: 6.75, yaw: 0 },
+];
+const CUPBOARD_REACH = 1.4;
+/** The big red button's pedestal by the lava, padlocked until you have the key, and how close you must be to unlock it. */
+const BUTTON = { x: -18.3, z: 16.6 };
+const BUTTON_REACH = 1.5;
+/** How long the cages stay formed for a bot that unlocks them: long enough for it to climb across. */
+const BOT_CAGE_SECONDS = 10;
+/**
+ * The zipline: from the ledge it zig-zags south and north over the cell blocks along ZIP_LEGS (x),
+ * turning in smooth half circles round ZIP_SOUTH and ZIP_NORTH (z) so every northern turn swings
+ * back over the stairwell and the squishy wall, then bends east to the level-75 checkpoint. In
+ * prison space; about 200 m, with brackets out of the walls at the turns.
+ */
+const ZIP_FROM = { x: -28.4, y: LEDGE_TOP + 2, z: -4.2 };
+const ZIP_TO = { x: 10.5, y: 20.05, z: -4.2 };
+const ZIP_LEGS = [-28.4, -23, -17.6, -12.2, -6.8, -1.4];
+const ZIP_SOUTH = -28;
+const ZIP_NORTH = -3.4;
+const ZIP_BEND = 3;
+/** The ride starts slow, speeds up to ZIP_SPEED on the straights, and slows to ZIP_TURN_SPEED round the turns. */
+const ZIP_START_SPEED = 2.5;
+const ZIP_SPEED = 12;
+const ZIP_TURN_SPEED = 7;
+const ZIP_ACCEL = 5;
+const ZIP_BRAKE = 8;
+/** How far ahead of a turn the handle starts to slow. */
+const ZIP_LOOKAHEAD = 6;
 /** From the cable down to your feet while you hang from the handle. */
 const ZIP_HANG = 1.95;
 /** Standing this close under the handle grabs it; this close lets you grab it with E. */
 const ZIP_TOUCH = 0.5;
 const ZIP_REACH = 1.6;
 /** The vending machine's front, in prison space, and how close you must be to buy. */
-const MACHINE = { x: 35.6, z: 10.4 };
+const MACHINE = { x: 35.6, z: 12.4 };
 const MACHINE_REACH = 2;
-/** Past this x you're out of the vending room and into the kitchen. */
-const KITCHEN_X = 44;
+/** The kitchen door in the vending room's north wall, shut until you've had the soda: x0, x1. */
+const KITCHEN_DOOR = [39.6, 43.2];
+/** Floor-to-ceiling height of the chef chase rooms. */
+const CHASE_HEIGHT = 5;
+/** The arena's side door, where the chef chase ends: x0, x1 in the arena's north wall. */
+const ARENA_DOOR = [46, 50];
 const SHOT_SPEED = 32;
 const SHOT_COOLDOWN = 0.28;
 /** Shots within this angle of where you face curve onto the boss. */
 const AUTO_AIM = 0.7;
 
 /**
- * The police capybaras' way from their door, across the hall, up the four flights, and over to the
- * foot of the squishy wall. `w` is how far either side of the line they may step.
+ * The police capybaras' way from their door, across the hall, and up the four flights to the lava
+ * room's door, where they have to stop. `w` is how far either side of the line they may step.
  */
 const POLICE_ROUTE = [
   { x: -6.8, y: HALL_FLOOR, z: 0, w: 5 },
@@ -107,27 +218,93 @@ const POLICE_ROUTE = [
   { x: -27, y: 6, z: -4.75, w: 1 },
   { x: -21, y: 9, z: -4.75, w: 1.2 },
   { x: -19.5, y: 9, z: -4.75, w: 1.2 },
-  { x: -19.5, y: 9, z: 0, w: 1.2 },
+  { x: -19.5, y: 9, z: 4.4 },
+];
+/** Once you're out of the lava room they come at you through the side door at the top of the stairs. */
+const SIDE_ROUTE = [
+  { x: -19.2, y: SQUISHY_FLOOR, z: 0, w: 1 },
   { x: -16.5, y: SQUISHY_FLOOR, z: 0, w: 5.2 },
-  { x: -7.5, y: SQUISHY_FLOOR, z: 0 },
+  { x: -5, y: SQUISHY_FLOOR, z: 0 },
 ];
 /** The killer capybara's floor, from the vent wall to the edge of the goo pit. */
 const KILLER_ROUTE = [
   { x: 7.2, y: KILLER_FLOOR, z: 0, w: 7.3 },
   { x: PIT_EDGE - 0.6, y: KILLER_FLOOR, z: 0 },
 ];
-/** The chef's way from the vending room, down the kitchen, and to the arena door. */
-const CHEF_ROUTE = [
-  { x: 35, y: ARENA_FLOOR, z: 12.4, w: 3.2 },
-  { x: KITCHEN_X, y: ARENA_FLOOR, z: 14.4, w: 1.6 },
-  { x: 60.75, y: ARENA_FLOOR, z: 14.4, w: 1.4 },
-  { x: 60.75, y: ARENA_FLOOR, z: 11.4 },
+/**
+ * The chef chase, about 660 m of rooms north of the vending room (a minute even on soda): up the
+ * kitchen, east through the pantry between its shelves, down the freezer, then up one side of the
+ * dining hall and back down the other to the arena's side door. Each room is a lane about 9.6 m
+ * wide. CHASE_END is the north wall, PANTRY_Z0 the pantry's south side.
+ */
+const CHASE_END = 177;
+const PANTRY_Z0 = CHASE_END - 9.6;
+const CHASE_ROOMS = {
+  kitchen: { x0: 34, x1: 44, z0: 16.8, z1: CHASE_END },
+  pantry: { x0: 44.4, x1: 74, z0: PANTRY_Z0, z1: CHASE_END },
+  freezer: { x0: 64.4, x1: 74, z0: 12.4, z1: PANTRY_Z0 },
+  dining: { x0: 44.4, x1: 64, z0: 12.4, z1: PANTRY_Z0 - 0.4 },
+};
+/** The dining hall's middle row of screens splits it into two lanes, joined past its north end. */
+const DINING_SPLIT = { x: 54, z1: PANTRY_Z0 - 9.4 };
+/** Pantry shelves, too tall to jump: x, and the z span each one blocks (the gap is on the other side). */
+const SHELVES = [
+  [50, CHASE_END - 5, CHASE_END],
+  [56, PANTRY_Z0, PANTRY_Z0 + 5],
+  [62, CHASE_END - 5, CHASE_END],
+  [68, PANTRY_Z0, PANTRY_Z0 + 5],
 ];
-/** Kitchen counters to jump or weave round: x0, x1, z0, z1. */
-const COUNTERS = [
-  [48.5, 49.7, 12.4, 14.6],
-  [53, 54.2, 14.2, 16.4],
-  [57, 58.2, 12.4, 14.4],
+const SIDES = ["west", "east", "full"];
+/**
+ * Low things across the lanes: x0, x1, z0, z1, height. Kitchen counters and dining tables are 0.75
+ * to 0.8 m and freezer ice 0.6 m, under the 1.2 m a jump rises. The full-width ones must be jumped,
+ * and they are 1.2 to 1.6 m deep, well inside the 2.5 m a running jump carries.
+ */
+const OBSTACLES = [
+  // Kitchen counters every 7 to 8 m up to 15 m short of the pantry, in turn west, east, and full width.
+  ...Array.from({ length: 19 }, (_, i) => [24 + i * 7 + Math.floor(i / 3), SIDES[i % 3]]).map(([z, side]) => [
+    side === "east" ? 38.6 : 34,
+    side === "west" ? 39.4 : 44,
+    z,
+    z + 1.2,
+    0.75,
+    "counter",
+  ]),
+  // Freezer ice every 8 m going south from 8.4 m below the pantry: full width, west, east.
+  ...Array.from({ length: 17 }, (_, i) => [PANTRY_Z0 - 8.4 - i * 8, ["full", "west", "east"][i % 3]]).map(([z, side]) => [
+    side === "east" ? 69.2 : 64.4,
+    side === "west" ? 69.2 : 74,
+    z,
+    z + 1.2,
+    0.6,
+    "ice",
+  ]),
+  // Dining tables every 8 m in both lanes, every third row full width.
+  ...Array.from({ length: 17 }, (_, row) => 20 + row * 8).flatMap((z, row) => [
+    row % 3 === 2 ? [54.4, 64, z, z + 1.4, 0.8, "table"] : [57.7, 60.7, z, z + 1.6, 0.8, "table"],
+    row % 3 === 1 ? [44.4, 54, z + 4, z + 5.4, 0.8, "table"] : [47.7, 50.7, z + 4, z + 5.6, 0.8, "table"],
+  ]),
+];
+/** The chef's way from its door, through the rooms (weaving between the shelves), to the arena door. */
+const CHEF_ROUTE = [
+  { x: 35, y: ARENA_FLOOR, z: 9.8, w: 2.6 },
+  { x: 41.4, y: ARENA_FLOOR, z: 15.6, w: 1.4 },
+  { x: 39, y: ARENA_FLOOR, z: 19, w: 4.2 },
+  { x: 39, y: ARENA_FLOOR, z: CHASE_END - 4.8, w: 1.6 },
+  { x: 48.5, y: ARENA_FLOOR, z: PANTRY_Z0 + 2.3, w: 1 },
+  { x: 51.5, y: ARENA_FLOOR, z: PANTRY_Z0 + 2.3, w: 1 },
+  { x: 54.5, y: ARENA_FLOOR, z: CHASE_END - 2.3, w: 1 },
+  { x: 57.5, y: ARENA_FLOOR, z: CHASE_END - 2.3, w: 1 },
+  { x: 60.5, y: ARENA_FLOOR, z: PANTRY_Z0 + 2.3, w: 1 },
+  { x: 63.5, y: ARENA_FLOOR, z: PANTRY_Z0 + 2.3, w: 1 },
+  { x: 66.5, y: ARENA_FLOOR, z: CHASE_END - 2.3, w: 1 },
+  { x: 69.4, y: ARENA_FLOOR, z: CHASE_END - 2.3, w: 3.8 },
+  { x: 69.2, y: ARENA_FLOOR, z: 17.2, w: 3.5 },
+  { x: 59.2, y: ARENA_FLOOR, z: 17.2, w: 3.8 },
+  { x: 59.2, y: ARENA_FLOOR, z: PANTRY_Z0 - 4.9, w: 3.5 },
+  { x: 49.2, y: ARENA_FLOOR, z: PANTRY_Z0 - 4.9, w: 3.8 },
+  { x: 49.2, y: ARENA_FLOOR, z: 13.6, w: 1.4 },
+  { x: 48, y: ARENA_FLOOR, z: 11 },
 ];
 /**
  * The big squishies stuck to the walls, bottom to top: once round the room and on to the one under
@@ -160,17 +337,28 @@ const VENT_PATH = [
   [-12.5, -1.5],
   [-15.1, -1.5],
 ];
-/** The second vent's centre line, from the squishy room wall to the ledge in the killer capybara's room. */
+/**
+ * The second vent's centre line, from the top of the squishy wall out through the north wall,
+ * zig-zagging west outside the cell block, and in through the far wall onto the zipline ledge.
+ */
 const VENT2_PATH = [
   [-3.6, 4.5],
-  [-1.2, 4.5],
-  [-1.2, -2.5],
-  [1.6, -2.5],
-  [1.6, 4.5],
-  [4.2, 4.5],
-  [4.2, -5.5],
-  [6, -5.5],
+  [-2.2, 4.5],
+  [-2.2, 8.4],
+  [-8, 8.4],
+  [-8, 11.4],
+  [-14, 11.4],
+  [-14, 8.4],
+  [-20, 8.4],
+  [-20, 11.4],
+  [-26, 11.4],
+  [-26, 8.4],
+  [-32.2, 8.4],
+  [-32.2, -4.2],
+  [-30, -4.2],
 ];
+/** The zipline ledge on the stairwell's far wall: x0, x1, z0, z1, with the vent coming out at ZIP_FROM.z. */
+const ZIP_LEDGE = [-30, -27, -6, -2.4];
 /** Half the width of a vent: room for the capsule to turn and the camera to stay inside. */
 const DUCT_HALF = 0.9;
 /** Vent covers: where the closed grate sits, which edge it hinges on, and which way it swings. */
@@ -199,20 +387,22 @@ const COVER = [
 ];
 
 /**
- * Capybara Prison, the climb from the level-100 checkpoint to level 120. It is its own building,
+ * Capybara Prison, the climb from the level-50 checkpoint to level 100. It is its own building,
  * put up beside the course when you get locked up and taken down again once you're free:
  *
  * 1. Your cell. Climb the stool, the desk, and the top bunk into the vent in the wall.
  * 2. The vent drops you through the hall ceiling. Police capybaras come out of their door and chase
  *    you up four flights of stairs. If they catch you, it's back to the cell.
  * 3. Big squishies stuck to the wall climb to a second vent. The police can't catch you on them.
- * 4. The vent comes out on a ledge, and a zipline carries you down to level 110. A killer capybara
- *    chases you across the floor until you're on the obby over the goo.
- * 5. Level 112: a vending machine sells an energy soda that makes you run faster for a while. Then a
- *    chef capybara chases you down the kitchen to the arena door.
- * 6. Level 115: the warden, a giant capybara, throws mandarins at you. You get a blaster and 10
+ * 4. The vent goes round the outside to a ledge high on the stairwell's far wall, and a long
+ *    zipline carries you over the cells, the police stairs, and the squishy wall to level 75. A
+ *    killer capybara chases you across the floor until you're on the obby over the goo.
+ * 5. Level 80: a vending machine sells an energy soda that makes you run faster until level 90.
+ *    Drinking it opens the kitchen door and lets the chef capybara out, and it chases you through
+ *    the kitchen, pantry, freezer, and dining hall to the arena door.
+ * 6. Level 90: the warden, a giant capybara, throws mandarins at you. You get a blaster and 10
  *    lives; five hits wins, and losing all your lives starts the fight over.
- * 7. The gate behind the warden opens, and walking through it sends you out to level 120.
+ * 7. The gate behind the warden opens, and walking through it sends you out to level 100.
  */
 export function createEscape(scene, { graphics, audio, avatar }) {
   let pace = PACE.easy;
@@ -224,7 +414,7 @@ export function createEscape(scene, { graphics, audio, avatar }) {
   let policeIn = 0;
   let safeShown = false;
   let obbyShown = false;
-  const origin = new Vector3();
+  const origin = PRISON_ORIGIN.clone();
   const here = new Vector3();
   const center = new Vector3();
   const lastCenter = new Vector3();
@@ -233,36 +423,73 @@ export function createEscape(scene, { graphics, audio, avatar }) {
   /** Set while the caught close-up plays: seconds left, where you go back to, and what it says then. */
   let caught = null;
   let replay = false;
-  /** How far along the zipline you are while riding it. */
+  /** How far along the zipline you are while riding it, and how fast you're going. */
   let rideS = 0;
-  /** Whether you've had the soda since the last time you were at level 112, and when the chef comes out. */
+  let rideSpeed = ZIP_START_SPEED;
+  /** Whether you've had the soda since the last time you were at level 80, and when the chef comes out after it. */
   let soda = false;
-  let chefIn = 0;
+  let chefIn = Infinity;
+  /** True once you're out of the lava room and the police come through the side door. */
+  let late = false;
+  /** Seconds before the lava can melt you again, so one fall pops you once. */
+  let melt = 0;
+  /** True while the lava room's elevator carries you. */
+  let lifting = false;
+  /** Whether the "take the elevator" toast has shown since the last reset. */
+  let liftShown = false;
+  /** Playing as police: the police capybaras are on your side, and you catch escaping prisoners. */
+  let police = false;
+  /** Seconds until the next escaping prisoner gets out (Infinity: none will). */
+  let escapeeIn = Infinity;
+  const escapeeGoal = new Vector3();
   const events = [];
 
   const toast = (text, next = null, time = 2.2) => events.push({ type: "toast", text, next, time });
   const world = (x, y, z) => new Vector3(origin.x + x, origin.y + y, origin.z + z);
 
   function spot(at) {
-    const spawn = SPAWNS[at];
+    const spawn = police && at === PRISON_LEVEL ? POLICE_START : SPAWNS[at];
     return { position: world(spawn.x, spawn.y + FOOT_OFFSET + 0.06, spawn.z), heading: spawn.heading };
   }
 
   /** Puts the actors back the way they are when you arrive at checkpoint `at`. */
   function reset(at) {
+    // Running into the lava room, the police chasing you walk on up to its door instead of vanishing.
+    const fromChase = phase === "chase" && !late && at === LAVA_LEVEL;
     level = at;
-    phase = { [PRISON_LEVEL]: "cell", [KILLER_LEVEL]: "killer", [VENDING_LEVEL]: "chef" }[at] ?? "boss";
+    phase = { [PRISON_LEVEL]: police ? "chase" : "cell", [LAVA_LEVEL]: "lava", [KILLER_LEVEL]: "killer", [VENDING_LEVEL]: "chef" }[at] ?? "boss";
+    site.escapee.hide();
+    escapeeIn = police && at === PRISON_LEVEL ? ESCAPEE_FIRST : Infinity;
     safeShown = false;
     obbyShown = false;
-    for (const officer of site.police) officer.hide();
+    late = false;
+    melt = 0;
+    for (const officer of site.police) {
+      if (!fromChase) officer.hide();
+      officer.route = site.policeRoute;
+    }
+    site.sideDoor.close();
+    if (at === PRISON_LEVEL) site.lava.reset();
+    site.lift.reset();
+    lifting = false;
+    liftShown = false;
+    if (phase === "lava") {
+      site.police.forEach((officer, index) => {
+        if (officer.out) return;
+        officer.door = site.lavaWait[index];
+        officer.release(0);
+        officer.door = null;
+      });
+    }
     site.killer.hide();
     site.chef.hide();
     if (phase === "killer") site.killer.wait = pace.killerDelay;
     rideS = 0;
     site.zip.place(0);
     soda = false;
-    chefIn = pace.chefWait;
-    if (at === VENDING_LEVEL) events.push({ type: "sodaEnd" });
+    chefIn = Infinity;
+    site.kitchenDoor.close();
+    events.push({ type: "sodaEnd" });
     site.clearShots();
     fight = null;
     site.boss.restore();
@@ -310,40 +537,169 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     reset(at);
   }
 
+  function inLavaRoom() {
+    return here.z > LAVA_ROOM.z0 + 0.2 && here.x > LAVA_ROOM.x0 && here.x < LAVA_ROOM.x1 && here.y > SQUISHY_FLOOR - 1;
+  }
+
   function updateChase(dt) {
-    if (policeIn > 0) {
+    if (policeIn > 0 && !police) {
       policeIn -= dt;
-      if (policeIn <= 0) site.police.forEach((officer, index) => officer.release(index * 0.7));
+      if (policeIn <= 0) {
+        if (late) {
+          site.sideDoor.open();
+          audio.blip("thump");
+        }
+        site.police.forEach((officer, index) => officer.release(index * 0.7));
+      }
     }
-    const target = site.policeRoute.project(here.x, here.y, here.z);
+    const route = late ? site.sideRoute : site.policeRoute;
+    const target = route.project(here.x, here.y, here.z);
     const onSquishy = site.standing !== null;
     // Higher than a jump from the floor means you're hopping between squishies.
     const safe = onSquishy || (here.x > -17.6 && here.y > SQUISHY_FLOOR + 1.3);
     let catcher = null;
-    site.police.forEach((officer, index) => {
-      if (officer.step(dt, target, index === 0 ? 0.4 : -0.4, pace.police) && !safe) catcher ??= officer;
-    });
+    if (police) {
+      if (!late) updateEscapee(dt);
+    } else {
+      site.police.forEach((officer, index) => {
+        if (officer.step(dt, target, index === 0 ? 0.4 : -0.4, pace.police) && !safe) catcher ??= officer;
+      });
+    }
     if (catcher) {
-      catchBy(catcher, PRISON_LEVEL, t("toast.policeCaught"), t("toast.backToCell"));
+      if (late) catchBy(catcher, LAVA_LEVEL, t("toast.policeCaught"), t("toast.backToLava"));
+      else catchBy(catcher, PRISON_LEVEL, t("toast.policeCaught"), t("toast.backToCell"));
+      return;
+    }
+    // Into the lava room: the police have to stop at its door. Back in from the squishy room, they
+    // go back round to wait at the door again.
+    if (inLavaRoom()) {
+      if (late) reset(LAVA_LEVEL);
+      else reach(LAVA_LEVEL, police ? t("toast.lavaRoomPolice") : t("toast.lavaRoom"));
       return;
     }
     if (onSquishy && !safeShown) {
       safeShown = true;
-      toast(t("toast.squishySafe"), t("toast.climbSquishies"), 2.6);
+      if (!police) toast(t("toast.squishySafe"), t("toast.climbSquishies"), 2.6);
+    }
+    // Over the squishy wall's low end and into the goo over your cell: back to the foot of the wall.
+    if (here.x > GOO_PIT.x0 && here.y < SQUISHY_FLOOR - 1 && here.y > GOO_PIT.top - 1) {
+      events.push({ type: "respawn", position: world(-11, SQUISHY_FLOOR + FOOT_OFFSET + 0.06, -2.6), heading: Math.PI / 2 });
+      toast(t("toast.goo"), t("toast.climbSquishies"), 1.8);
+      return;
+    }
+    // Over the low wall into Cell Block B: back to the foot of the squishy wall too.
+    if (here.z < BLOCK_B.z1 && here.y < SPLIT_TOP - 1) {
+      events.push({ type: "respawn", position: world(-11, SQUISHY_FLOOR + FOOT_OFFSET + 0.06, -2.6), heading: Math.PI / 2 });
+      toast(t("toast.falling"), t("toast.climbSquishies"), 1.8);
+      return;
     }
     if (here.x > -3.8 && here.y > LEDGE_TOP - 0.4) {
       phase = "duct";
       for (const officer of site.police) officer.hide();
+      events.push({ type: "ventTwo" });
     }
   }
 
-  /** Through the second vent and out on the ledge: grab the zipline, or drop down, to reach level 110. */
+  /**
+   * Level 60, the lava room: the police stamp about outside its door while you find the key, unlock
+   * the button, and climb the cages it forms on the wall over the lava. Out the far door into the squishy room, they come
+   * at you through the side door; back out the way you came, they get you.
+   */
+  function updateLava(dt) {
+    site.police.forEach((officer, index) => {
+      officer.step(dt, site.lavaWait[index], 0, pace.police);
+      officer.stomp(dt, 0);
+    });
+    melt = Math.max(0, melt - dt);
+    if (!liftShown && here.y > LANDING.top - 0.3 && here.x > LANDING.x0 && here.z > LANDING.z0) {
+      liftShown = true;
+      toast(t("toast.takeLift"), null, 2.4);
+    }
+    const overPool = here.x > LAVA_POOL.x0 && here.x < LAVA_POOL.x1 && here.z > LAVA_ROOM.z0;
+    if (overPool && here.y < LAVA_POOL.y + 0.3) {
+      if (melt <= 0) {
+        melt = 3;
+        events.push({ type: "lava", ...spot(LAVA_LEVEL) });
+      }
+      return;
+    }
+    if (here.z > LAVA_ROOM.z0 - 0.2) return;
+    if (here.x < -18) {
+      if (!police) catchBy(site.police[0], LAVA_LEVEL, t("toast.policeCaught"), t("toast.backToLava"));
+      return;
+    }
+    phase = "chase";
+    late = true;
+    safeShown = false;
+    for (const officer of site.police) {
+      officer.hide();
+      officer.route = site.sideRoute;
+    }
+    policeIn = pace.policeDelay + 0.6;
+    if (police) toast(t("toast.climbSquishies"), null, 2.6);
+    else toast(t("toast.sideDoor"), t("toast.climbSquishies"), 2.6);
+  }
+
+  /**
+   * Playing as police in the hall and up the stairs: a prisoner gets out ahead of you and runs for
+   * the lava room's door, waiting whenever it's far ahead. Touch it to catch it; another gets out a
+   * little later, caught or not.
+   */
+  function updateEscapee(dt) {
+    const runner = site.escapee;
+    const route = site.escapeeRoute;
+    const you = route.project(here.x, here.y, here.z).s;
+    if (!runner.out) {
+      escapeeIn -= dt;
+      if (escapeeIn > 0) return;
+      escapeeIn = Infinity;
+      const s = you + ESCAPEE_AHEAD;
+      // Too near the door to get away from you: none until you're back down the stairs.
+      if (s > route.length - ESCAPEE_AHEAD) {
+        escapeeIn = ESCAPEE_AGAIN;
+        return;
+      }
+      route.at(s, 0, escapeeGoal);
+      runner.door = { s, side: 0, facing: Math.atan2(escapeeGoal.x - here.x, escapeeGoal.z - here.z) };
+      runner.release(0);
+      runner.door = null;
+      toast(t("toast.escapeeOut"), null, 2);
+      return;
+    }
+    const at = route.project(runner.position.x, runner.position.y, runner.position.z).s;
+    const waiting = at - you > ESCAPEE_LEAD;
+    const goal = waiting ? at : route.length;
+    route.at(goal, 0, escapeeGoal);
+    const target = { s: goal, side: 0, x: escapeeGoal.x, y: escapeeGoal.y, z: escapeeGoal.z };
+    runner.step(dt, target, 0, pace.escapee);
+    if (waiting) runner.stomp(dt, Math.atan2(here.x - runner.position.x, here.z - runner.position.z));
+    const close = Math.hypot(here.x - runner.position.x, here.z - runner.position.z) < ESCAPEE_REACH;
+    if (close && Math.abs(here.y - runner.position.y) < 1.2) {
+      events.push({ type: "nab", position: world(runner.position.x, runner.position.y + 0.6, runner.position.z) });
+      runner.hide();
+      escapeeIn = ESCAPEE_AGAIN;
+    } else if (at >= route.length - 0.4) {
+      runner.hide();
+      escapeeIn = ESCAPEE_AGAIN;
+      toast(t("toast.escapeeAway"), null, 2);
+    }
+  }
+
+  /**
+   * Through the second vent and out on the ledge: grab the zipline to reach level 75. Falling off
+   * the ledge puts you back on it (you haven't reached 75 yet).
+   */
   function updateDuct(grounded) {
     if (here.y > LEDGE_TOP - 0.3 && Math.hypot(here.x - ZIP_FROM.x, here.z - ZIP_FROM.z) < ZIP_TOUCH) {
       grab();
       return;
     }
-    if (grounded && here.x > 6.4 && here.y < KILLER_FLOOR + 0.5) reach(KILLER_LEVEL, t("toast.killer"));
+    if (here.x < GOO_PIT.x1 + 0.4 && here.y < LEDGE_TOP - 3) {
+      events.push({ type: "respawn", position: world(ZIP_LEDGE[0] + 0.8, LEDGE_TOP + FOOT_OFFSET + 0.06, ZIP_FROM.z), heading: Math.PI });
+      toast(t("toast.falling"), t("toast.grabZipline"), 1.8);
+      return;
+    }
+    if (grounded && here.x > GOO_PIT.x1 + 0.4 && here.y > KILLER_FLOOR - 0.5 && here.y < KILLER_FLOOR + 0.5) reach(KILLER_LEVEL, t("toast.killer"));
   }
 
   function nearHandle() {
@@ -353,23 +709,51 @@ export function createEscape(scene, { graphics, audio, avatar }) {
   function grab() {
     phase = "zip";
     rideS = 0;
+    rideSpeed = ZIP_START_SPEED;
     audio.blip("thump");
+    events.push({ type: "zipGrab" });
+  }
+
+  function nearCupboard() {
+    if (phase !== "lava" || here.y < SQUISHY_FLOOR - 0.3) return null;
+    return site.lava.cupboards.find((cupboard) => !cupboard.opened && Math.hypot(center.x - cupboard.front.x, center.z - cupboard.front.z) < CUPBOARD_REACH) ?? null;
+  }
+
+  /** Standing in the elevator car while it's parked. */
+  function inLift() {
+    return site.lift.parked && insideLift(center.x, center.z) && Math.abs(here.y - site.lift.y) < 0.5;
+  }
+
+  /** Below the car, where it mustn't come down on you. */
+  function underLift() {
+    return insideLift(center.x, center.z, 0.4) && here.y < site.lift.y - 0.5;
+  }
+
+  /** By the call panel on the floor the parked car isn't on. */
+  function nearLiftPanel() {
+    if (!site.lift.parked) return false;
+    const up = here.y > LANDING.top - 0.5;
+    if (up === site.lift.atTop || Math.abs(here.y - (up ? LANDING.top : SQUISHY_FLOOR)) > 0.5) return false;
+    return Math.hypot(center.x - (LIFT.x1 - 0.3), center.z - (up ? LIFT_PANELS.top : LIFT_PANELS.bottom)) < LIFT_REACH;
+  }
+
+  function nearLock() {
+    return phase === "lava" && !site.lava.unlocked && here.y > SQUISHY_FLOOR - 0.3 && Math.hypot(center.x - BUTTON.x, center.z - BUTTON.z) < BUTTON_REACH;
   }
 
   function nearMachine() {
     return phase === "chef" && !soda && here.y > ARENA_FLOOR - 0.3 && Math.hypot(center.x - MACHINE.x, center.z - MACHINE.z) < MACHINE_REACH;
   }
 
-  /** Level 112: the chef comes out once you've had the soda (or got tired of waiting) and runs you down the kitchen. */
+  /** Level 80: the chef only comes out once you've drunk the soda, then runs you through the rooms to the arena. */
   function updateChef(dt) {
     if (here.y < ARENA_FLOOR - 3) {
       respawn(VENDING_LEVEL, t("toast.goo"), t("toast.keepGoing"));
       return;
     }
     const chef = site.chef;
-    if (!chef.out) {
+    if (!chef.out && soda) {
       chefIn -= dt;
-      if (here.x > KITCHEN_X) chefIn = Math.min(chefIn, 0.3);
       if (chefIn <= 0) {
         chef.release(0);
         toast(t("toast.chef"), null, 2.2);
@@ -478,23 +862,93 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     setDifficulty(difficulty) {
       pace = PACE[difficulty] ?? PACE.easy;
     },
-    /**
-     * Locks you up at checkpoint `at` (100, 110, 112, or 115), building the prison beside `gate`, the
-     * level-100 checkpoint pad (or any pad, for a replay). Returns where to put the player.
-     */
-    enter(gate, at, { again = false } = {}) {
+    /** Locks you up at checkpoint `at` (50, 75, 80, or 90), building the prison. Returns where to put the player. */
+    enter(at, { again = false } = {}) {
       replay = again;
-      origin.set(gate.homeX + OFFSET.x, gate.homeY + OFFSET.y, gate.homeZ + OFFSET.z);
-      if (site && !site.origin.equals(origin)) {
-        site.dispose();
-        site = null;
-      }
       site ??= buildSite(scene, origin, { graphics, audio });
       active = true;
       events.length = 0;
       reset(SPAWNS[at] ? at : PRISON_LEVEL);
-      if (level === PRISON_LEVEL) toast(t("toast.lockedUp"), t("toast.findVent"), 3);
+      if (level === PRISON_LEVEL) {
+        if (police) toast(t("toast.policeShift"), t("toast.catchThem"), 3);
+        else toast(t("toast.lockedUp"), t("toast.findVent"), 3);
+      }
       return spot(level);
+    },
+    /**
+     * Playing as police or not. In the prison it takes over from where you are: as police the
+     * capybara police leave you be and prisoners start getting out; back as a prisoner, the police
+     * come after you again.
+     */
+    setPolice(on) {
+      if (police === on) return;
+      police = on;
+      if (!active || !site) return;
+      if (on) {
+        for (const officer of site.police) officer.hide();
+        policeIn = 0;
+        if (phase === "chase" && !late) escapeeIn = ESCAPEE_FIRST;
+      } else {
+        site.escapee.hide();
+        escapeeIn = Infinity;
+        if (phase === "chase") policeIn = pace.policeDelay;
+      }
+    },
+    /** A police player caught you: back to your checkpoint. False when that can't happen right now. */
+    nabbed(text, next) {
+      if (!active || !site || police || caught || phase === "zip") return false;
+      respawn(level, text, next);
+      return true;
+    },
+    /**
+     * The bots' way through the prison (see `botRoute`), in world space, starting from the stretch
+     * you're on: `nodes`, `start`, `hop(x, z)` (how high to hop at a spot in the chef chase), and
+     * the soda and zipline speeds.
+     */
+    botPlan() {
+      const nodes = botRoute(site?.lava.keyIndex ?? 0).map((node) => ({
+        ...node,
+        x: node.x + origin.x,
+        y: node.y + origin.y,
+        z: node.z + origin.z,
+        section: node.section && { ...node.section, safeX: node.section.safeX === undefined ? undefined : node.section.safeX + origin.x },
+      }));
+      const from = level === BOSS_LEVEL ? VENDING_LEVEL : level;
+      const path = site?.zip.path ?? createZipPath();
+      const shift = origin.clone();
+      return {
+        nodes,
+        start: Math.max(0, nodes.findIndex((node) => node.section?.level === from)),
+        hop: (x, z) => obstacleHop(x - origin.x, z - origin.z),
+        /**
+         * The lava room: a bot opens cupboard `index` for a look, unlocks the button to borrow the
+         * cages, and takes the elevator down (it only goes if you're not in it or under it).
+         */
+        lava: {
+          open: (index) => site?.lava.peek(index),
+          unlock: () => site?.lava.borrow(BOT_CAGE_SECONDS),
+          lift: () => {
+            if (site?.lift.atTop && !lifting && !inLift() && !underLift()) site.lift.go();
+          },
+          liftSeconds: LIFT_GATE_SECONDS + LIFT_SECONDS,
+        },
+        soda: SODA_SPEED,
+        zip: {
+          start: ZIP_START_SPEED,
+          accel: ZIP_ACCEL,
+          brake: ZIP_BRAKE,
+          length: path.length,
+          target: (s) => zipTarget(path, s),
+          /** Puts the cable point `s` along into `out` (world space) and returns the heading there. */
+          at(s, out) {
+            const heading = path.at(s, out);
+            out.x += shift.x;
+            out.y += shift.y;
+            out.z += shift.z;
+            return heading;
+          },
+        },
+      };
     },
     /** Out through the gate: the prison comes down. */
     leave() {
@@ -530,26 +984,53 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     },
     /**
      * What E (or the touch action button) does where you stand: "vent" opens a vent grate, "zip"
-     * grabs the zipline, "soda" buys an energy soda. Null when there's nothing to do.
+     * grabs the zipline, "cupboard" opens a cupboard, "unlock" unlocks the lava room's button with
+     * the key ("needKey" without it), "liftDown" or "liftUp" rides the elevator you're standing in,
+     * "liftCall" calls it to your floor, "soda" buys an energy soda. Null when there's nothing to do.
      */
     get action() {
-      if (!active || !site || caught !== null) return null;
+      if (!active || !site || caught !== null || lifting) return null;
       if (site.grates.some((grate) => grate.closed && Vector3.Distance(grate.center, center) < GRATE_REACH)) return "vent";
       if (nearHandle()) return "zip";
+      if (nearCupboard()) return "cupboard";
+      if (nearLock()) return site.lava.hasKey ? "unlock" : "needKey";
+      if (phase === "lava" && inLift()) return site.lift.atTop ? "liftDown" : "liftUp";
+      if (phase === "lava" && nearLiftPanel()) return "liftCall";
       if (nearMachine()) return "soda";
       return null;
+    },
+    /** True while you carry the lava room's key. */
+    get hasKey() {
+      return active && site !== null && site.lava.hasKey;
     },
     act() {
       const action = this.action;
       if (action === "vent") {
         site.grates.find((each) => each.closed && Vector3.Distance(each.center, center) < GRATE_REACH).open();
         audio.blip("thump");
+      } else if (action === "cupboard") {
+        audio.blip("thump");
+        if (site.lava.open(nearCupboard())) toast(t("toast.keyFound"), t("toast.findLock"), 2.4);
+        else toast(t("toast.emptyCupboard"), null, 1.4);
+      } else if (action === "needKey") {
+        toast(t("toast.needKey"), null, 2);
+      } else if (action === "unlock") {
+        site.lava.unlock();
+        audio.blip("clank");
+        toast(t("toast.cagesForm"), t("toast.climbCages"), 2.4);
+      } else if (action === "liftDown" || action === "liftUp") {
+        lifting = site.lift.go();
+        audio.blip("clank");
+      } else if (action === "liftCall") {
+        site.lift.go();
+        audio.blip("clank");
       } else if (action === "zip") {
         grab();
       } else if (action === "soda") {
         // main.js takes the coins and gives you the speed.
         soda = true;
-        if (!site.chef.out) chefIn = pace.chefDelay;
+        chefIn = pace.chefDelay;
+        site.kitchenDoor.open();
         events.push({ type: "soda" });
       }
     },
@@ -558,12 +1039,26 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       return active && phase === "zip";
     },
     /**
-     * Moves you along the zipline. Call before the player update; while riding, put the capsule
-     * centre at the returned position instead. Null when you're not on it (or it just let go).
+     * Moves you along the zipline, or down (or up) in the lava room's elevator, standing in the
+     * middle of the car facing east so the camera watches from over the lava. Call before the
+     * player update; while riding, put the capsule centre at the returned position instead. Null
+     * when you're not on either (or it just let you go).
      */
     ride(dt, hold) {
-      if (!active || !site || phase !== "zip") return null;
-      if (!hold) rideS = Math.min(site.zip.length, rideS + ZIP_SPEED * dt);
+      if (!active || !site) return null;
+      if (lifting) {
+        if (site.lift.parked) {
+          lifting = false;
+          return null;
+        }
+        return { position: world((LIFT.x0 + LIFT.x1) / 2, site.lift.y + FOOT_OFFSET + 0.02, (LIFT.z0 + LIFT.z1) / 2), heading: Math.PI / 2 };
+      }
+      if (phase !== "zip") return null;
+      if (!hold) {
+        const change = zipTarget(site.zip.path, rideS) - rideSpeed;
+        rideSpeed += Math.max(-ZIP_BRAKE * dt, Math.min(ZIP_ACCEL * dt, change));
+        rideS = Math.min(site.zip.length, rideS + rideSpeed * dt);
+      }
       const point = site.zip.place(rideS);
       if (rideS >= site.zip.length) phase = "duct";
       return { position: world(point.x, point.y - ZIP_HANG + FOOT_OFFSET, point.z), heading: site.zip.heading };
@@ -571,8 +1066,10 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     /**
      * `hold` freezes the actors (menus, dances, screen changes). Returns this frame's events:
      * `toast`, `respawn` (position, heading), `checkpoint` (level, text), `closeUp` (eye, target:
-     * look at the capybara that caught you), `closeUpEnd`, `soda` (you bought one), `sodaEnd` (it's
-     * taken away), and `free`.
+     * look at the capybara that caught you), `closeUpEnd`, `ventTwo` (you're on your way to the
+     * zipline), `zipGrab` (you're on it), `lava` (position, heading: you fell in the lava room's lava;
+     * where to put you after the pop), `soda` (you bought one), `sodaEnd` (it's taken away), `nab`
+     * (position: as police you caught an escaping prisoner there), and `free`.
      */
     update(dt, time, { foot, position, pad, grounded, facing: faceAngle, hold }) {
       if (!active || !site) return events.splice(0);
@@ -583,6 +1080,12 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       cooldown = Math.max(0, cooldown - dt);
       site.standing = grounded && site.squishies.includes(pad) ? pad : null;
       site.animate(dt, time);
+      if (site.lava.takeClank()) audio.blip("clank");
+      if (site.lift.takeDing()) {
+        audio.blip("ding");
+        if (lifting && !site.lift.atTop) toast(t("toast.liftArrived"), null, 2.4);
+      }
+      if (site.lift.idle > LIFT_RETURN_SECONDS && !inLift()) site.lift.go();
       // Held events wait, so the lock-up toast shows once you leave the start menu.
       if (hold) return [];
       if (caught) {
@@ -600,9 +1103,14 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       }
       if (phase === "cell" && here.y < HALL_FLOOR + 2 && here.x < -6) {
         phase = "chase";
-        policeIn = pace.policeDelay;
-        toast(t("toast.policeSpotted"), null, 2.6);
+        if (police) {
+          escapeeIn = ESCAPEE_FIRST;
+        } else {
+          policeIn = pace.policeDelay;
+          toast(t("toast.policeSpotted"), null, 2.6);
+        }
       } else if (phase === "chase") updateChase(dt);
+      else if (phase === "lava") updateLava(dt);
       else if (phase === "duct") updateDuct(grounded);
       else if (phase === "killer") updateKiller(dt);
       else if (phase === "chef") updateChef(dt);
@@ -621,6 +1129,61 @@ export function createEscape(scene, { graphics, audio, avatar }) {
 
 function coarse() {
   return window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("show-touch");
+}
+
+/**
+ * The way the bots run the escape, in prison space: spots to get to and how ("run", "crawl", "hop",
+ * "drop", "lift" down in the lava room's elevator, or "ride" the zipline). A `section` starts a
+ * stretch a bot goes back to the start of when it's caught or misses a `risky` hop: who chases it
+ * there, whether it has had the soda, and what it says. `pause` waits on arrival; `open` (a
+ * cupboard's index), `unlock` (the lava room's button), and `lift` (calling the elevator down)
+ * happen on arrival. `keyIndex` is the cupboard with the key in it.
+ */
+function botRoute(keyIndex) {
+  const at = (x, y, z, how = "run", extra = {}) => ({ x, y, z, how, ...extra });
+  const F = ARENA_FLOOR;
+  const S = SQUISHY_FLOOR;
+  const cupboard = CUPBOARDS[keyIndex];
+  // Starting spots a little off yours, so nobody stands inside you.
+  return [
+    at(1.4, 0, -0.9, "run", { section: { level: PRISON_LEVEL, say: "prisonStart" }, pause: 1 }),
+    at(-1.2, 0, 0.5),
+    at(-1.65, 0.45, 0.5, "hop"),
+    at(-2.6, 0.85, 0.5, "hop"),
+    at(-2.5, 1.65, -1.5, "hop"),
+    ...VENT_PATH.map(([x, z]) => at(x, 1.65, z, "crawl")),
+    at(-15.1, HALL_FLOOR, -1.5, "drop", { section: { chaser: "police", say: "prisonRun" } }),
+    ...POLICE_ROUTE.slice(1).map((point) => at(point.x, point.y, point.z)),
+    at(-20.6, S, 9.4, "run", { section: { level: LAVA_LEVEL, lava: true, say: "prisonLava" } }),
+    at(cupboard.x + Math.sin(cupboard.yaw) * 0.9, S, cupboard.z + Math.cos(cupboard.yaw) * 0.9, "run", { pause: 1.2, open: keyIndex, say: "prisonKey" }),
+    at(BUTTON.x - 0.6, S, BUTTON.z - 0.9, "run", { pause: 2.2, unlock: true, say: "prisonUnlock" }),
+    at(LAVA_POOL.x0 - 0.5, S, CAGE_Z),
+    ...CAGES.map(([x, top]) => at(x, top, CAGE_Z, "hop", { risky: true })),
+    at(-5.3, LANDING.top, 16.4, "hop"),
+    at(-5.3, LANDING.top, 12.4),
+    at((LIFT.x0 + LIFT.x1) / 2, LANDING.top, (LIFT.z0 + LIFT.z1) / 2, "run", { pause: 0.4, lift: true, say: "prisonLift" }),
+    at((LIFT.x0 + LIFT.x1) / 2, S, (LIFT.z0 + LIFT.z1) / 2, "lift"),
+    at((LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S, 7.6),
+    at((LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S, 4.6),
+    at(-12.6, S, -2.7, "run", { section: { say: "prisonSafe" } }),
+    ...WALL_SQUISHIES.map((pad) => at(pad.x, pad.top, pad.z, "hop", { risky: true })),
+    at(-3.6, LEDGE_TOP, 4.5, "hop"),
+    ...VENT2_PATH.slice(1).map(([x, z]) => at(x, LEDGE_TOP, z, "crawl")),
+    at(ZIP_FROM.x, LEDGE_TOP, ZIP_FROM.z, "run", { pause: 0.6, say: "prisonZip" }),
+    at(ZIP_TO.x, ZIP_TO.y - ZIP_HANG, ZIP_TO.z, "ride"),
+    at(SPAWNS[KILLER_LEVEL].x, KILLER_FLOOR, SPAWNS[KILLER_LEVEL].z, "drop", {
+      section: { level: KILLER_LEVEL, chaser: "killer", safeX: PIT_EDGE, goo: true, say: "prisonKiller" },
+    }),
+    at(PIT_EDGE - 0.5, KILLER_FLOOR, -1),
+    ...OBBY.map(([x0, x1, z0, z1, top]) => at((x0 + x1) / 2, top, (z0 + z1) / 2, "hop", { risky: true })),
+    at(41.4, F, 0.2, "hop"),
+    at(41.8, F, 7.6),
+    at(40, F, 10.4, "run", { section: { level: VENDING_LEVEL } }),
+    at(MACHINE.x + 0.8, F, MACHINE.z, "run", { pause: 1.5, say: "prisonSoda" }),
+    at(41.4, F, 15.4, "run", { section: { chaser: "chef", soda: true, hops: true, say: "prisonChef" } }),
+    ...CHEF_ROUTE.slice(2).map((point) => at(point.x, point.y, point.z)),
+    at(47.6, F, 5, "run", { section: { level: BOSS_LEVEL, say: "prisonMadeIt" }, pause: 5 }),
+  ];
 }
 
 /** Everything that makes up the prison, in prison space with `origin` as (0, 0, 0). */
@@ -664,11 +1227,21 @@ function buildSite(scene, origin, { graphics, audio }) {
     vend: material("vend", "#c8203a", 0.1),
     vendGlow: material("vendGlow", "#bff1ff", 0.85),
     cans: ["#2f7bff", "#3ddc84", "#ff4fa3", "#ffcf3a"].map((hex, index) => material(`can${index}`, hex, 0.35)),
+    ice: material("ice", "#cfe9ff", 0.16),
+    frost: material("frost", "#8fb8d4", 0.08),
+    carpet: material("carpet", "#7a2232"),
+    dining: material("dining", "#d9c7a3"),
+    cloth: material("cloth", "#f2eee4", 0.1),
+    shelf: material("shelf", "#8a6038"),
     arena: material("arena", "#3b2f4a"),
     arenaWall: material("arenaWall", "#6e2a35"),
     door: material("door", "#24356b"),
     dark: material("dark", "#120c10", 0),
     exit: material("exit", "#e8e4d0", 0.5),
+    cupboard: material("cupboard", "#8a5a34"),
+    cupboardDoor: material("cupboardDoor", "#b07a45"),
+    gold: material("gold", "#ffc93a", 0.5),
+    button: material("button", "#e8182e", 0.35),
   };
 
   const add = (mesh, look, { camera = true, cast = false } = {}) => {
@@ -932,15 +1505,38 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const x of [-8.5, -12, -17]) lamp(x, 1.4, 3);
   lamp(-11, 1.4, -3.5);
 
-  // 4. The stairwell: four flights up to the door at the top, floor -3 to ceiling 13.
-  box(-30.4, HALL_FLOOR, -6.4, -30, 13.4, 6.4, M.concrete);
-  box(-30, HALL_FLOOR, -6.4, -18, 13.4, -6, M.concrete);
-  box(-30, HALL_FLOOR, 6, -18, 13.4, 6.4, M.concrete);
+  // 4. The stairwell: four flights up to the door at the top, open all the way up to the cell
+  // block's roof, with the zipline ledge high on its far wall.
+  const ductTop = LEDGE_TOP + 2.1;
+  const [ledgeX0, ledgeX1, ledgeZ0, ledgeZ1] = ZIP_LEDGE;
+  const ventZ = [ZIP_FROM.z - DUCT_HALF, ZIP_FROM.z + DUCT_HALF];
+  box(-30.4, HALL_FLOOR, -6.4, -30, LEDGE_TOP, 6.4, M.concrete);
+  box(-30.4, ductTop, -6.4, -30, BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(-30.4, LEDGE_TOP, -6.4, -30, ductTop, ventZ[0], M.concrete);
+  box(-30.4, LEDGE_TOP, ventZ[1], -30, ductTop, 6.4, M.concrete);
+  box(-30, HALL_FLOOR, -6.4, -18, SPLIT_TOP, -6, M.concrete);
+  box(-30, HALL_FLOOR, 6, -18, SQUISHY_FLOOR, 6.4, M.concrete);
+  box(-30, SQUISHY_FLOOR, 6, LAVA_DOOR[0], BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(LAVA_DOOR[1], SQUISHY_FLOOR, 6, -18, BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(LAVA_DOOR[0], SQUISHY_FLOOR + 2.8, 6, LAVA_DOOR[1], BLOCK_TOP + 0.4, 6.4, M.concrete);
   box(-18, 1.4, -6.4, -17.6, 9, 6.4, M.concrete);
-  box(-18, 11.8, -6.4, -17.6, 13.4, 6.4, M.concrete);
+  box(-18, 11.8, -6.4, -17.6, 16.4, 6.4, M.concrete);
   box(-18, 9, -6.4, -17.6, 11.8, -2.5, M.concrete);
   box(-18, 9, 2.5, -17.6, 11.8, 6.4, M.concrete);
-  box(-30.4, 13, -6.4, -17.6, 13.4, 6.4, M.ceiling);
+  box(-30.4, BLOCK_TOP, BLOCK_B.z0 - 0.4, GOO_PIT.x1 + 0.4, BLOCK_TOP + 0.4, 6.4, M.ceiling);
+  // The zipline ledge, railed except where the cable leaves it to the south.
+  const edge = (x0, x1, z) => {
+    box(x0, LEDGE_TOP, z - 0.05, x1, LEDGE_TOP + 1.05, z + 0.05, null);
+    box(x0, LEDGE_TOP + 0.96, z - 0.05, x1, LEDGE_TOP + 1.04, z + 0.05, M.hazard, { solid: false, camera: false });
+  };
+  box(ledgeX0, LEDGE_TOP - 0.4, ledgeZ0, ledgeX1, LEDGE_TOP, ledgeZ1, M.steel, { cast: true });
+  for (const z of [ledgeZ0 + 0.5, ledgeZ1 - 0.5]) box(ledgeX0, LEDGE_TOP - 1.4, z - 0.15, ledgeX1 - 0.3, LEDGE_TOP - 0.4, z + 0.15, M.trim, { solid: false });
+  railing(ledgeZ0, ledgeZ1, ledgeX1, LEDGE_TOP);
+  edge(ledgeX0, ledgeX1, ledgeZ1);
+  edge(ledgeX0, ZIP_FROM.x - 0.8, ledgeZ0);
+  edge(ZIP_FROM.x + 0.8, ledgeX1, ledgeZ0);
+  box(ZIP_FROM.x - 0.8, LEDGE_TOP, ledgeZ0, ZIP_FROM.x + 0.8, LEDGE_TOP + 0.02, ledgeZ0 + 0.12, M.hazard, { solid: false, camera: false });
+  sign(t("prison.zipline"), -29.97, LEDGE_TOP + 3.2, ZIP_FROM.z, -Math.PI / 2, 3, 0.7, "#ffd23f", "#2b1405");
   for (const [x0, x1, top] of [
     [-30, -27, 0],
     [-21, -18, 3],
@@ -954,16 +1550,24 @@ function buildSite(scene, origin, { graphics, audio }) {
   flight(-27, 0, -21, 3, -6, -3.5, -3.5);
   flight(-21, 3, -27, 6, 3.5, 6, 3.5);
   flight(-27, 6, -21, 9, -6, -3.5, -3.5);
-  for (const z of [-4.5, 0, 4.5]) lamp(-24, 13, z, 2, 0.6);
+  for (const z of [-4.5, 0, 4.5]) lamp(-24, BLOCK_TOP, z, 2, 0.6);
 
   // The cell block in the middle of the stairwell: three floors of barred cells facing the flights,
-  // with inmates bouncing and pacing inside. The bars are solid both ways.
+  // with inmates bouncing and pacing inside. The bars are solid both ways, and its roof is bars
+  // too, so you see the top floor's inmates from the zipline.
   const cellInmates = [];
   box(-26.6, HALL_FLOOR, -3.2, -26.3, 9, 3.2, M.concrete);
   box(-21.7, HALL_FLOOR, -3.2, -21.4, 9, 3.2, M.concrete);
   box(-26.3, HALL_FLOOR, -0.15, -21.7, 9, 0.15, M.concrete);
-  box(-26.6, 8.7, -3.2, -21.4, 9, 3.2, M.concrete);
+  box(-26.6, 8.7, -3.2, -21.4, 9, 3.2, null);
   const cellBars = [];
+  for (let z = -3.05; z <= 3.06; z += 0.3) {
+    const bar = MeshBuilder.CreateCylinder("prisonCellRoofBar", { height: 5.2, diameter: 0.07, tessellation: 6 }, scene);
+    bar.rotation.z = Math.PI / 2;
+    bar.position.set(-24, 8.95, z);
+    cellBars.push(bar);
+  }
+  for (const x of [-26.45, -21.55]) box(x - 0.15, 8.7, -3.2, x + 0.15, 9, 3.2, M.concrete, { solid: false });
   for (let floor = 0; floor < 3; floor += 1) {
     const base = HALL_FLOOR + floor * 4;
     if (floor > 0) box(-26.3, base - 0.3, -3.2, -21.7, base, 3.2, M.floor);
@@ -982,46 +1586,165 @@ function buildSite(scene, origin, { graphics, audio }) {
       look.isPickable = false;
       look.position.set(-23.4, base, side * 1.7);
       look.rotation.y = side > 0 ? 0 : Math.PI;
-      cellInmates.push({ mesh: look, base, side, pace: (floor + (side > 0 ? 1 : 0)) % 2 === 0, phase: floor * 1.7 + side });
+      cellInmates.push({ mesh: look, base, pace: (floor + (side > 0 ? 1 : 0)) % 2 === 0, phase: floor * 1.7 + side, middle: -23.6, swing: 1.3 });
     }
+  }
+
+  // Cell Block B, south of the stairwell and the squishy wall and open to them above SPLIT_TOP:
+  // rows of two-floor barred cells with barred roofs, inmates inside and police pacing the aisles,
+  // all far below the zipline.
+  const patrols = [];
+  const { x0: bx0, x1: bx1, z0: bz0, z1: bz1 } = BLOCK_B;
+  box(bx0, HALL_FLOOR - 0.4, bz0, bx1, HALL_FLOOR, bz1, M.tile);
+  box(bx0 - 0.4, HALL_FLOOR, bz0 - 0.4, bx0, BLOCK_TOP + 0.4, bz1, M.concrete);
+  box(bx0, HALL_FLOOR, bz0 - 0.4, bx1 + 0.4, BLOCK_TOP + 0.4, bz0, M.concrete);
+  box(bx1, HALL_FLOOR, bz0 - 0.4, bx1 + 0.4, BLOCK_TOP + 0.4, -8.4, M.concrete);
+  box(bx0, SPLIT_TOP - 0.04, -6.44, bx1, SPLIT_TOP + 0.02, -5.96, M.hazard, { solid: false, camera: false });
+  sign(t("prison.cellBlockB"), (bx0 + bx1) / 2, 13, bz0 + 0.03, Math.PI, 7, 1.2, "#2f3640", "#ffd23f");
+  const [rowZ0, rowZ1] = CELL_ROW_Z;
+  const rowTop = HALL_FLOOR + 8;
+  for (const [row, cx] of CELL_ROWS.entries()) {
+    box(cx - 0.15, HALL_FLOOR, rowZ0, cx + 0.15, rowTop, rowZ1, M.concrete);
+    for (let z = rowZ0; z <= rowZ1 + 0.01; z += 4) box(cx - 2.5, HALL_FLOOR, z - 0.15, cx + 2.5, rowTop, z + 0.15, M.concrete);
+    box(cx - 2.5, rowTop - 0.3, rowZ0, cx + 2.5, rowTop, rowZ1, null);
+    for (const x of [cx - 2.4, cx + 2.4]) box(x - 0.1, rowTop - 0.3, rowZ0, x + 0.1, rowTop, rowZ1, M.concrete, { solid: false });
+    for (let x = cx - 2.1; x <= cx + 2.11; x += 0.35) {
+      const bar = MeshBuilder.CreateCylinder("prisonBlockRoofBar", { height: rowZ1 - rowZ0, diameter: 0.07, tessellation: 6 }, scene);
+      bar.rotation.x = Math.PI / 2;
+      bar.position.set(x, rowTop - 0.05, (rowZ0 + rowZ1) / 2);
+      cellBars.push(bar);
+    }
+    for (let floor = 0; floor < 2; floor += 1) {
+      const base = HALL_FLOOR + floor * 4;
+      if (floor > 0) box(cx - 2.5, base - 0.3, rowZ0, cx + 2.5, base, rowZ1, M.floor);
+      for (const side of [-1, 1]) {
+        const face = cx + side * 2.44;
+        box(face - 0.06, base, rowZ0, face + 0.06, base + 3.7, rowZ1, null);
+        for (let z = rowZ0 + 0.2; z < rowZ1 - 0.1; z += 0.4) {
+          const bar = MeshBuilder.CreateCylinder("prisonCellBar", { height: 3.7, diameter: 0.07, tessellation: 6 }, scene);
+          bar.position.set(face, base + 1.85, z);
+          cellBars.push(bar);
+        }
+        for (let cell = 0; cell * 4 < rowZ1 - rowZ0; cell += 1) {
+          const middle = rowZ0 + 2 + cell * 4;
+          box(cx + side * 0.15, base, middle - 1.7, cx + side * 1.05, base + 0.5, middle - 0.3, M.mattress, { camera: false });
+          const look = buildCapybara(scene, "inmate").createInstance(`prison-blockInmate${row}${floor}${side}${cell}`);
+          look.parent = root;
+          look.isPickable = false;
+          look.position.set(cx + side * 1.6, base, middle);
+          look.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+          const pace = (row + floor + cell + (side > 0 ? 1 : 0)) % 2 === 0;
+          cellInmates.push({ mesh: look, base, pace, phase: row * 2.3 + floor * 1.7 + cell * 0.9 + side, alongZ: true, middle, swing: 1.1 });
+        }
+      }
+    }
+  }
+  for (const [i, x] of [-20.3, -9.5, 2.2].entries()) {
+    const guard = buildCapybara(scene, "police").createInstance(`prison-blockGuard${i}`);
+    guard.parent = root;
+    guard.isPickable = false;
+    guard.scaling.setAll(1.3);
+    guard.position.set(x, HALL_FLOOR, -22);
+    patrols.push({ mesh: guard, middle: -22, swing: 12, speed: 0.22 + i * 0.04, phase: i * 2.1 });
+    for (const z of [-14, -24, -34]) lamp(x, BLOCK_TOP, z, 2, 0.6);
   }
   for (const bar of cellBars) add(bar, M.bars, { camera: false });
 
   // 5. The squishy wall room, floor 9. The squishies climb the far wall to the second vent.
   box(-17.6, SQUISHY_FLOOR - 0.4, -6.4, -3.6, SQUISHY_FLOOR, 6.4, M.floor);
-  box(-18, 13.4, -6.4, -17.6, 25.4, 6.4, M.concrete);
-  box(-17.6, SQUISHY_FLOOR, -6.4, -3.6, 25.4, -6, M.concrete);
-  box(-17.6, SQUISHY_FLOOR, 6, -3.6, 25.4, 6.4, M.concrete);
-  const ductTop = LEDGE_TOP + 2.1;
-  box(-4, SQUISHY_FLOOR, -6, -3.6, LEDGE_TOP, 6, M.trim);
-  box(-4, ductTop, -6, -3.6, 25.4, 6, M.trim);
-  box(-4, LEDGE_TOP, -6, -3.6, ductTop, 3.6, M.trim);
+  box(-18, HALL_FLOOR, -6.4, -3.6, SPLIT_TOP, -6, M.concrete);
+  box(-17.6, SQUISHY_FLOOR, 6, LAVA_EXIT[0], BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(LAVA_EXIT[1], SQUISHY_FLOOR, 6, -3.6, BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(LAVA_EXIT[0], SQUISHY_FLOOR + 2.8, 6, LAVA_EXIT[1], BLOCK_TOP + 0.4, 6.4, M.concrete);
+  // The wall the squishies end on: full height round the vent, and low enough on the zipline's side
+  // for the rider to pass over.
+  const ventWall = 2.6;
+  box(-4, GOO_PIT.top - 0.4, -6.4, -3.6, SQUISHY_FLOOR, 6.4, M.concrete);
+  box(-4, SQUISHY_FLOOR, -6, -3.6, EAST_WALL_TOP, -1.4, M.trim);
+  box(-4, SQUISHY_FLOOR, -1.4, -3.6, 17.8, ventWall, M.trim);
+  box(-4, SQUISHY_FLOOR, ventWall, -3.6, LEDGE_TOP, 6, M.trim);
+  box(-4, LEDGE_TOP, ventWall, -3.6, ductTop, 3.6, M.trim);
   box(-4, LEDGE_TOP, 5.4, -3.6, ductTop, 6, M.trim);
-  box(-17.6, 25, -6.4, -3.6, 25.4, 6.4, M.ceiling);
-  for (const x of [-15, -10]) for (const z of [-3, 3]) lamp(x, 25, z, 2, 0.6);
+  box(-4, ductTop, ventWall, -3.6, ductTop + 0.2, 6, M.trim);
+  box(-4, EAST_WALL_TOP - 0.02, -6, -3.6, EAST_WALL_TOP + 0.02, -1.4, M.hazard, { solid: false, camera: false });
+  for (const x of [-15, -10]) for (const z of [-3, 3]) lamp(x, BLOCK_TOP, z, 2, 0.6);
   box(-4.02, ductTop, 3.5, -3.96, ductTop + 0.1, 5.5, M.metal, { solid: false, camera: false });
 
-  // 6. The second vent, zig-zagging high over the cell and out onto the ledge in the killer capybara's room.
-  box(-3.6, LEDGE_TOP - 0.2, -6.8, 6.4, LEDGE_TOP, 5.8, M.metal);
-  box(-3.6, ductTop, -6.8, 6.4, ductTop + 0.2, 5.8, M.metal);
-  ductWalls(-3.6, 6, -6.8, 5.8, LEDGE_TOP, ductTop, VENT2_PATH);
-  for (const [x, z] of VENT2_PATH.slice(1, -1)) lamp(x, ductTop, z, 0.5, 0.3);
+  // 5b. The lava room, through the door at the top of the stairs: cupboards round its west end, the
+  // big red button by the lava, and the way out to the squishy room at its east end. The doors, the
+  // key, the button's padlock, and the cages it forms move, so `buildLavaRoom` makes them.
+  const { x0: lx0, x1: lx1, z0: lz0, z1: lz1, top: lavaTop } = LAVA_ROOM;
+  const S = SQUISHY_FLOOR;
+  box(lx0, S - 1.2, lz0, LAVA_POOL.x0, S, lz1, M.floor);
+  box(LAVA_POOL.x1, S - 1.2, lz0, lx1, S, lz1, M.floor);
+  box(LAVA_POOL.x0, S - 1.6, lz0, LAVA_POOL.x1, LAVA_POOL.y - 0.02, lz1, M.dark);
+  box(lx0 - 0.4, S - 1.2, lz0, lx0, lavaTop, lz1 + 0.4, M.concrete);
+  box(lx1, S - 1.2, lz0, lx1 + 0.4, lavaTop, lz1 + 0.4, M.concrete);
+  box(lx0, S - 1.2, lz1, lx1, lavaTop, lz1 + 0.4, M.concrete);
+  box(lx0 - 0.4, lavaTop, lz0, lx1 + 0.4, lavaTop + 0.4, lz1 + 0.4, M.ceiling);
+  for (const x of [LAVA_POOL.x0 - 0.15, LAVA_POOL.x1]) box(x, S - 0.01, lz0, x + 0.15, S + 0.01, lz1, M.hazard, { solid: false, camera: false });
+  for (const x of [-25, -19, -12, -6]) lamp(x, lavaTop, 12.4, 2, 0.6);
+  // The top floor at the end of the cage stairs, the elevator's call panels on the east wall, and its sign.
+  box(LANDING.x0, S, LANDING.z0, lx1, LANDING.top, lz1, M.concrete);
+  box(LANDING.x0, LANDING.top - 0.01, LANDING.z0, LANDING.x0 + 0.12, LANDING.top + 0.01, lz1, M.hazard, { solid: false, camera: false });
+  for (const [z, y] of [
+    [LIFT_PANELS.top, LANDING.top],
+    [LIFT_PANELS.bottom, S],
+  ]) {
+    box(lx1 - 0.05, y + 0.9, z - 0.18, lx1, y + 1.4, z + 0.18, M.steel, { solid: false, camera: false });
+    box(lx1 - 0.09, y + 1.08, z - 0.07, lx1 - 0.05, y + 1.22, z + 0.07, M.button, { solid: false, camera: false });
+  }
+  sign(t("prison.lift"), lx1 - 0.03, LANDING.top + 2.45, (LIFT.z0 + LIFT.z1) / 2, Math.PI / 2, 1.8, 0.45, "#2f3640", "#ffd84a");
+  for (const spec of CUPBOARDS) {
+    const across = Math.abs(Math.sin(spec.yaw)) > 0.5;
+    const [hw, hd] = across ? [0.3, 0.7] : [0.7, 0.3];
+    box(spec.x - hw, S, spec.z - hd, spec.x + hw, S + 2, spec.z + hd, M.cupboard, { cast: true });
+    // The dark inside you see once the doors swing open.
+    const ix = spec.x + Math.sin(spec.yaw) * hw;
+    const iz = spec.z + Math.cos(spec.yaw) * hd;
+    const [iw, id] = across ? [0.01, 0.62] : [0.62, 0.01];
+    box(ix - iw, S + 0.08, iz - id, ix + iw, S + 1.92, iz + id, M.dark, { solid: false, camera: false });
+  }
+  box(BUTTON.x - 0.3, S, BUTTON.z - 0.3, BUTTON.x + 0.3, S + 1, BUTTON.z + 0.3, M.steel, { cast: true });
+  box(BUTTON.x - 0.32, S + 0.98, BUTTON.z - 0.32, BUTTON.x + 0.32, S + 1.02, BUTTON.z + 0.32, M.hazard, { solid: false, camera: false });
+  sign(t("prison.lavaRoom"), (LAVA_DOOR[0] + LAVA_DOOR[1]) / 2, S + 3.4, 5.97, 0, 2.6, 0.6, "#ff7a1a", "#2b1405");
+  sign(t("prison.exit"), (LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S + 3.3, 6.43, Math.PI, 1.6, 0.5, "#2f8f46", "#ffffff");
+  marker(LAVA_LEVEL, SPAWNS[LAVA_LEVEL].x, S, SPAWNS[LAVA_LEVEL].z);
+  // Goo over your own cell, between the squishy wall and the killer capybara's floor.
+  box(GOO_PIT.x0, GOO_PIT.top - 0.4, -6, GOO_PIT.x1, GOO_PIT.top, 6, M.goo);
+  box(GOO_PIT.x0, HALL_FLOOR, -6.4, GOO_PIT.x1 + 0.4, SPLIT_TOP, -6, M.concrete);
+  box(-1, GOO_PIT.top - 0.4, 6, GOO_PIT.x1 + 0.4, BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(GOO_PIT.x0, GOO_PIT.top - 0.4, 6, -1, LEDGE_TOP - 0.2, 6.4, M.concrete);
+  box(GOO_PIT.x0, ductTop + 0.2, 6, -1, BLOCK_TOP + 0.4, 6.4, M.concrete);
+  box(GOO_PIT.x1, GOO_PIT.top - 0.4, -6, GOO_PIT.x1 + 0.4, KILLER_FLOOR, 6, M.concrete);
+  for (const z of [-3, 3]) lamp(1.2, BLOCK_TOP, z, 2, 0.6);
 
-  // 7. The killer capybara's room: the ledge and zipline, its floor, the goo pit, the obby, and the
-  // ledge on the far side with the door to the vending room.
-  box(6, 9, -8.4, 6.4, LEDGE_TOP, 8.4, M.concrete);
-  box(6, ductTop, -8.4, 6.4, 30.4, 8.4, M.concrete);
-  box(6, LEDGE_TOP, -8.4, 6.4, ductTop, -6.4, M.concrete);
-  box(6, LEDGE_TOP, -4.6, 6.4, ductTop, 8.4, M.concrete);
-  box(6.4, LEDGE_TOP - 0.4, -8, 9.4, LEDGE_TOP, -4.2, M.steel, { cast: true });
-  box(6.4, LEDGE_TOP, -4.32, 9.4, LEDGE_TOP + 0.02, -4.2, M.hazard, { solid: false, camera: false });
-  box(9.28, LEDGE_TOP, -8, 9.4, LEDGE_TOP + 0.02, -4.2, M.hazard, { solid: false, camera: false });
-  for (const z of [-7.8, -4.4]) box(9.2, KILLER_FLOOR, z - 0.1, 9.4, LEDGE_TOP - 0.4, z + 0.1, M.trim, { solid: false, camera: false });
+  // 6. The second vent: out of the squishy wall's top, through the north wall, zig-zagging west
+  // outside the cell block, and in through the stairwell's far wall onto the zipline ledge.
+  const ventRooms = [
+    [GOO_PIT.x0, -1, 3.4, 6.4],
+    [-33.4, -1, 6.4, 12.6],
+    [-33.4, -30.4, ventZ[0] - 0.3, 6.4],
+  ];
+  for (const [x0, x1, z0, z1] of ventRooms) {
+    box(x0, LEDGE_TOP - 0.2, z0, x1, LEDGE_TOP, z1, M.metal);
+    box(x0, ductTop, z0, x1, ductTop + 0.2, z1, M.metal);
+    ductWalls(x0, x1, z0, z1, LEDGE_TOP, ductTop, VENT2_PATH);
+  }
+  for (const [x, z] of VENT2_PATH.slice(1, -1)) lamp(x, ductTop, z, 0.5, 0.3);
+  box(ledgeX0 - 0.05, LEDGE_TOP, ventZ[0], ledgeX0 + 0.05, LEDGE_TOP + 0.02, ventZ[1], M.hazard, { solid: false, camera: false });
+
+  // 7. The zipline over the cell block, and the killer capybara's room, open to the cell block above
+  // its floor: the floor, the goo pit, the obby, and the ledge on the far side with the door to the
+  // vending room.
   const zip = buildZipline(scene, root, add, M);
   box(6.4, 9, -8, PIT_EDGE, KILLER_FLOOR, 8, M.floor);
+  box(6.4, KILLER_FLOOR, -6, 6.8, KILLER_FLOOR + 0.02, 6, M.hazard, { solid: false, camera: false });
   box(PIT_EDGE - 0.4, KILLER_FLOOR, -8, PIT_EDGE, KILLER_FLOOR + 0.02, 8, M.hazard, { solid: false, camera: false });
   box(PIT_EDGE, 8.6, -8, 40, 9, 8, M.goo);
   box(40, 9, -8, 44, ARENA_FLOOR, 8, M.steel);
+  box(6, HALL_FLOOR, -8.4, 6.4, BLOCK_TOP + 0.4, -6.4, M.concrete);
+  box(6, 9, 6.4, 6.4, BLOCK_TOP + 0.4, 8.4, M.concrete);
   box(6, 9, -8.4, 44.4, 30.4, -8, M.concrete);
   box(6, 9, 8, 40.6, 30.4, 8.4, M.concrete);
   box(43.4, 9, 8, 44.4, 30.4, 8.4, M.concrete);
@@ -1038,50 +1761,90 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const x of [10, 20, 30, 40]) lamp(x, 30, 0, 2.4, 0.8);
   marker(KILLER_LEVEL, SPAWNS[KILLER_LEVEL].x, KILLER_FLOOR, SPAWNS[KILLER_LEVEL].z);
 
-  // 8. The vending room through the door off the far ledge, and the kitchen corridor that runs
-  // along the arena's wall to its side door. Floor at ARENA_FLOOR, ceiling 4.2 above.
-  const roomTop = ARENA_FLOOR + 4.2;
-  box(34, ARENA_FLOOR - 0.4, 8.4, 44, ARENA_FLOOR, 16.4, M.tile);
-  box(44, ARENA_FLOOR - 0.4, 12.4, 64.4, ARENA_FLOOR, 16.4, M.tile);
-  box(33.6, ARENA_FLOOR, 8.4, 34, roomTop, 16.4, M.kitchen);
-  box(33.6, ARENA_FLOOR, 16.4, 64.4, roomTop, 16.8, M.kitchen);
-  box(64, ARENA_FLOOR, 12.4, 64.4, roomTop, 16.4, M.kitchen);
-  box(33.6, roomTop, 8.4, 44, roomTop + 0.4, 16.8, M.ceiling);
-  box(44, roomTop, 12.4, 64.4, roomTop + 0.4, 16.8, M.ceiling);
+  // 8. The vending room through the door off the far ledge (floor at ARENA_FLOOR, ceiling 4.2
+  // above), then the chef chase: up the kitchen, across the pantry, down the freezer, and up and
+  // back down the dining hall to the arena's side door.
+  const AF = ARENA_FLOOR;
+  const roomTop = AF + 4.2;
+  const chaseTop = AF + CHASE_HEIGHT;
+  const [doorX0, doorX1] = KITCHEN_DOOR;
+  box(34, AF - 0.4, 8.4, 44, AF, 16.4, M.tile);
+  box(33.6, AF, 8.4, 34, roomTop, 16.4, M.kitchen);
+  box(33.6, roomTop, 8.4, 44, roomTop + 0.4, 16.4, M.ceiling);
+  box(33.6, AF, 16.4, doorX0, chaseTop, 16.8, M.kitchen);
+  box(doorX1, AF, 16.4, 44.4, chaseTop, 16.8, M.kitchen);
+  box(doorX0, AF + 2.8, 16.4, doorX1, chaseTop, 16.8, M.kitchen);
+  box(doorX0, AF, 16.32, doorX1, AF + 0.02, 16.4, M.hazard, { solid: false, camera: false });
+  sign(t("prison.kitchen"), (doorX0 + doorX1) / 2, AF + 3.4, 16.37, 0, 3, 0.6, "#2f3640", "#ffffff");
   // The vending machine against the west wall, its lit front full of cans facing the room.
-  box(34, ARENA_FLOOR, 9.5, 35.1, ARENA_FLOOR + 2.2, 11.3, M.vend, { cast: true });
-  box(35.1, ARENA_FLOOR + 0.85, 9.7, 35.13, ARENA_FLOOR + 2.0, 11.1, M.vendGlow, { solid: false, camera: false });
-  box(35.1, ARENA_FLOOR + 0.25, 9.9, 35.16, ARENA_FLOOR + 0.55, 10.9, M.dark, { solid: false, camera: false });
+  box(34, AF, 11.5, 35.1, AF + 2.2, 13.3, M.vend, { cast: true });
+  box(35.1, AF + 0.85, 11.7, 35.13, AF + 2.0, 13.1, M.vendGlow, { solid: false, camera: false });
+  box(35.1, AF + 0.25, 11.9, 35.16, AF + 0.55, 12.9, M.dark, { solid: false, camera: false });
   for (let row = 0; row < 3; row += 1) {
     for (let col = 0; col < 4; col += 1) {
       const can = MeshBuilder.CreateCylinder("prisonCan", { height: 0.22, diameter: 0.13, tessellation: 10 }, scene);
-      can.position.set(35.2, ARENA_FLOOR + 1.07 + row * 0.33, 9.95 + col * 0.3);
+      can.position.set(35.2, AF + 1.07 + row * 0.33, 11.95 + col * 0.3);
       add(can, M.cans[(row + col) % M.cans.length], { camera: false });
     }
   }
-  sign(t("prison.soda"), 35.17, ARENA_FLOOR + 2.45, 10.4, -Math.PI / 2, 1.7, 0.4, "#ff2d6f", "#ffffff");
-  // The chef's door in the corner, and the kitchen: counters, stoves, and the arena's side door.
-  box(33.96, ARENA_FLOOR, 13.6, 34.02, ARENA_FLOOR + 2.6, 15.6, M.dark, { solid: false });
-  sign(t("prison.kitchen"), 50, ARENA_FLOOR + 3.2, 16.37, 0, 3, 0.6, "#2f3640", "#ffffff");
-  for (const [x0, x1, z0, z1] of COUNTERS) {
-    box(x0, ARENA_FLOOR, z0, x1, ARENA_FLOOR + 0.75, z1, M.steel, { cast: true });
-    box(x0 + 0.15, ARENA_FLOOR + 0.75, z0 + 0.3, x1 - 0.15, ARENA_FLOOR + 0.78, z0 + 1, M.dark, { solid: false, camera: false });
+  sign(t("prison.soda"), 35.17, AF + 2.45, 12.4, -Math.PI / 2, 1.7, 0.4, "#ff2d6f", "#ffffff");
+  // The chef's own door in the corner, where it bursts out from.
+  box(33.96, AF, 8.8, 34.02, AF + 2.6, 10.8, M.dark, { solid: false });
+  lamp(39, roomTop, 12.4, 2, 0.6);
+  marker(VENDING_LEVEL, SPAWNS[VENDING_LEVEL].x, AF, SPAWNS[VENDING_LEVEL].z);
+
+  // The chase rooms' floors, walls, and ceiling.
+  const rooms = CHASE_ROOMS;
+  box(rooms.kitchen.x0, AF - 0.4, 16.4, rooms.kitchen.x1, AF, rooms.kitchen.z1, M.tile);
+  box(rooms.kitchen.x1, AF - 0.4, rooms.pantry.z0 - 0.4, rooms.pantry.x1, AF, rooms.pantry.z1, M.wood);
+  box(rooms.freezer.x0 - 0.4, AF - 0.4, rooms.freezer.z0, rooms.freezer.x1, AF, rooms.pantry.z0 - 0.4, M.frost);
+  box(rooms.dining.x0, AF - 0.4, rooms.dining.z0, rooms.freezer.x0 - 0.4, AF, rooms.pantry.z0 - 0.4, M.carpet);
+  box(33.6, AF, 16.4, 34, chaseTop, CHASE_END + 0.4, M.kitchen);
+  box(33.6, AF, CHASE_END, 74.4, chaseTop, CHASE_END + 0.4, M.kitchen);
+  box(44, AF, 12.4, 44.4, chaseTop, PANTRY_Z0, M.kitchen);
+  box(44.4, AF, PANTRY_Z0 - 0.4, 64.4, chaseTop, PANTRY_Z0, M.dining);
+  box(64, AF, 22, 64.4, chaseTop, PANTRY_Z0, M.frost);
+  box(74, AF, 12.4, 74.4, chaseTop, CHASE_END + 0.4, M.frost);
+  box(DINING_SPLIT.x, AF, 12.4, DINING_SPLIT.x + 0.4, chaseTop, DINING_SPLIT.z1, M.dining);
+  box(33.6, chaseTop, 16.4, 74.4, chaseTop + 0.4, CHASE_END + 0.4, M.ceiling);
+  box(44.4, chaseTop, 12, 74.4, chaseTop + 0.4, 16.4, M.ceiling);
+  // Pantry shelves, too tall to jump, stacked with jars and boxes.
+  SHELVES.forEach(([x, z0, z1], index) => {
+    box(x - 0.3, AF, z0, x + 0.3, AF + 3.4, z1, M.shelf, { cast: true });
+    for (let level = 0; level < 3; level += 1) {
+      for (let item = 0; item < 4; item += 1) {
+        const z = z0 + 0.7 + item * ((z1 - z0 - 1.4) / 3);
+        const look = M.cans[(index + level + item) % M.cans.length];
+        const side = item % 2 ? 0.34 : -0.34;
+        box(x + side - 0.06, AF + 0.6 + level * 1, z - 0.2, x + side + 0.06, AF + 0.95 + level * 1, z + 0.2, look, { solid: false, camera: false });
+      }
+    }
+  });
+  // Counters, ice blocks, and tables to jump over.
+  for (const [x0, x1, z0, z1, height, kind] of OBSTACLES) {
+    const look = { counter: M.steel, ice: M.ice, table: M.wood }[kind];
+    box(x0, AF, z0, x1, AF + height, z1, look, { cast: true });
+    if (kind === "counter") box(x0 + 0.15, AF + height, z0 + 0.25, x1 - 0.15, AF + height + 0.03, z1 - 0.25, M.dark, { solid: false, camera: false });
+    if (kind === "table") box(x0 - 0.05, AF + height, z0 - 0.05, x1 + 0.05, AF + height + 0.03, z1 + 0.05, M.cloth, { solid: false, camera: false });
   }
-  box(59, ARENA_FLOOR, 12.36, 62.5, ARENA_FLOOR + 0.02, 12.6, M.hazard, { solid: false, camera: false });
-  for (const [x, z] of [
-    [39, 12.4],
-    [48, 14.4],
-    [55, 14.4],
-    [61, 14.4],
-  ]) lamp(x, roomTop, z, 2, 0.6);
-  marker(VENDING_LEVEL, SPAWNS[VENDING_LEVEL].x, ARENA_FLOOR, SPAWNS[VENDING_LEVEL].z);
+  sign(t("prison.pantry"), 50, AF + 3.9, CHASE_END - 0.03, Math.PI, 3, 0.6, "#5b3a1e", "#ffffff");
+  sign(t("prison.freezer"), 69.2, AF + 3.9, CHASE_END - 0.03, Math.PI, 3, 0.6, "#2f6f9f", "#ffffff");
+  sign(t("prison.dining"), 63.97, AF + 3.9, 26, Math.PI / 2, 3.4, 0.6, "#7a2232", "#ffffff");
+  for (let z = 22; z < CHASE_END - 1; z += 10) lamp(39, chaseTop, z, 2, 0.6);
+  for (const x of [50, 58, 66]) lamp(x, chaseTop, CHASE_END - 4.8, 2, 0.6);
+  for (let z = 18; z < PANTRY_Z0 - 1; z += 12) {
+    lamp(69.2, chaseTop, z, 2, 0.6);
+    lamp(49.2, chaseTop, z, 2, 0.6);
+    lamp(59.2, chaseTop, z, 2, 0.6);
+  }
 
   // 9. The warden's arena: a stage for the giant capybara, crates for cover, and the exit gate.
   box(44.4, ARENA_FLOOR - 0.4, -12.4, 78.4, ARENA_FLOOR, 12.4, M.arena);
   box(44.4, ARENA_FLOOR, -12.4, 78, 34.4, -12, M.arenaWall);
-  box(44.4, ARENA_FLOOR, 12, 59, 34.4, 12.4, M.arenaWall);
-  box(62.5, ARENA_FLOOR, 12, 78, 34.4, 12.4, M.arenaWall);
-  box(59, ARENA_FLOOR + 3, 12, 62.5, 34.4, 12.4, M.arenaWall);
+  box(44.4, ARENA_FLOOR, 12, ARENA_DOOR[0], 34.4, 12.4, M.arenaWall);
+  box(ARENA_DOOR[1], ARENA_FLOOR, 12, 78, 34.4, 12.4, M.arenaWall);
+  box(ARENA_DOOR[0], ARENA_FLOOR + 3, 12, ARENA_DOOR[1], 34.4, 12.4, M.arenaWall);
+  box(ARENA_DOOR[0], ARENA_FLOOR, 12.4, ARENA_DOOR[1], ARENA_FLOOR + 0.02, 12.64, M.hazard, { solid: false, camera: false });
   box(44, ARENA_FLOOR, -12.4, 44.4, 34.4, -8, M.arenaWall);
   box(44, ARENA_FLOOR, 8, 44.4, 34.4, 12.4, M.arenaWall);
   box(44, 30.4, -8, 44.4, 34.4, 8, M.arenaWall);
@@ -1133,9 +1896,21 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const grate of grates) grate.close();
   const police = [0, 1].map((index) => createActor(scene, root, "police", POLICE_SIZE, `prisonPolice${index}`));
   const killer = createActor(scene, root, "killer", KILLER_SIZE, "killerCapybara");
-  const chef = createActor(scene, root, "chef", CHEF_SIZE, "chefCapybara");
+  const chef = createActor(scene, root, "chef", CHEF_SIZE, "chefCapybara", obstacleHop);
+  const escapee = createActor(scene, root, "inmate", ESCAPEE_SIZE, "escapeeCapybara");
+  escapee.route = createRoute(POLICE_ROUTE);
+  const kitchenDoor = buildSlideDoor(scene, root, M.steel, KITCHEN_DOOR[0], KITCHEN_DOOR[1], ARENA_FLOOR, 16.6);
+  casters.push(kitchenDoor.mesh);
+  // The side door at the top of the stairs into the squishy room, shut until you're out of the lava room.
+  const sideDoor = buildSlideDoor(scene, root, M.steel, -2.5, 2.5, SQUISHY_FLOOR, -17.8, { alongZ: true });
+  const lava = buildLavaRoom(scene, root, M);
+  owned.push(lava);
+  casters.push(...lava.casters);
+  const lift = buildLift(scene, root, M);
+  owned.push(lift);
+  casters.push(...lift.casters);
   const boss = createBoss(scene, root);
-  casters.push(...police.map((officer) => officer.body), killer.body, chef.body, boss.body, zip.trolley);
+  casters.push(...police.map((officer) => officer.body), killer.body, chef.body, escapee.body, boss.body, zip.trolley);
   for (const mesh of casters) graphics.shadow.addShadowCaster(mesh, true);
   const sirens = [new Color3(1, 0.08, 0.06), new Color3(0.1, 0.35, 1)].map((color, index) => {
     const look = new StandardMaterial(`prisonSiren${index}`, scene);
@@ -1155,11 +1930,20 @@ function buildSite(scene, origin, { graphics, audio }) {
     });
     officer.route = createRoute(POLICE_ROUTE);
   }
+  const sideRoute = createRoute(SIDE_ROUTE);
+  // Where the police stand stamping outside the lava room's door.
+  const lavaWait = [
+    [-19.2, 4.6],
+    [-20, 3.4],
+  ].map(([x, z]) => {
+    const spot = police[0].route.project(x, SQUISHY_FLOOR, z);
+    return { s: spot.s, side: spot.side, x, y: SQUISHY_FLOOR, z, facing: 0 };
+  });
   killer.route = createRoute(KILLER_ROUTE);
   const door = killer.route.project(11, KILLER_FLOOR, 7.6);
   killer.door = { s: door.s, side: door.side, facing: Math.PI };
   chef.route = createRoute(CHEF_ROUTE);
-  const chefDoor = chef.route.project(34.6, ARENA_FLOOR, 14.6);
+  const chefDoor = chef.route.project(34.6, ARENA_FLOOR, 9.8);
   chef.door = { s: chefDoor.s, side: chefDoor.side, facing: Math.PI / 2 };
   const shots = createShots(scene, root, boss);
   owned.push(shots);
@@ -1171,11 +1955,19 @@ function buildSite(scene, origin, { graphics, audio }) {
     police,
     killer,
     chef,
+    escapee,
+    escapeeRoute: escapee.route,
     boss,
     gate,
     grates,
     zip,
+    kitchenDoor,
+    sideDoor,
+    lava,
+    lift,
+    lavaWait,
     policeRoute: police[0].route,
+    sideRoute,
     killerRoute: killer.route,
     chefRoute: chef.route,
     throwMandarin: shots.throwMandarin,
@@ -1194,7 +1986,7 @@ function buildSite(scene, origin, { graphics, audio }) {
       const blocks = (mesh) =>
         mesh.metadata?.blocksCamera === true || mesh.name === "prison-prison-bars" || squishies.some((pad) => pad.mesh === mesh);
       if (scene.pickWithRay(new Ray(from, way, length), blocks)?.hit) return false;
-      for (const other of [...police, killer, chef]) {
+      for (const other of [...police, killer, chef, escapee]) {
         if (other === actor || !other.body.isEnabled()) continue;
         const middle = other.position.add(new Vector3(0, 0.5 * other.size, 0));
         const along = Math.max(0, Math.min(length, Vector3.Dot(middle.subtract(target), way)));
@@ -1217,14 +2009,30 @@ function buildSite(scene, origin, { graphics, audio }) {
       for (const inmate of cellInmates) {
         const t = time + inmate.phase;
         if (inmate.pace) {
-          inmate.mesh.position.x = -23.6 + Math.sin(t * 0.9) * 1.3;
+          const ahead = Math.cos(t * 0.9) > 0;
+          if (inmate.alongZ) {
+            inmate.mesh.position.z = inmate.middle + Math.sin(t * 0.9) * inmate.swing;
+            inmate.mesh.rotation.y = ahead ? 0 : Math.PI;
+          } else {
+            inmate.mesh.position.x = inmate.middle + Math.sin(t * 0.9) * inmate.swing;
+            inmate.mesh.rotation.y = ahead ? Math.PI / 2 : -Math.PI / 2;
+          }
           inmate.mesh.position.y = inmate.base + Math.abs(Math.sin(t * 7)) * 0.05;
-          inmate.mesh.rotation.y = Math.cos(t * 0.9) > 0 ? Math.PI / 2 : -Math.PI / 2;
         } else {
           inmate.mesh.position.y = inmate.base + Math.abs(Math.sin(t * 4.5)) * 0.3;
         }
       }
+      for (const guard of patrols) {
+        const t = time * guard.speed + guard.phase;
+        guard.mesh.position.z = guard.middle + Math.sin(t) * guard.swing;
+        guard.mesh.position.y = HALL_FLOOR + Math.abs(Math.sin(time * 8)) * 0.06;
+        guard.mesh.rotation.y = Math.cos(t) > 0 ? 0 : Math.PI;
+      }
       gate.update(dt);
+      kitchenDoor.update(dt);
+      sideDoor.update(dt);
+      lava.update(dt, time);
+      lift.update(dt);
       for (const grate of grates) grate.update(dt);
       boss.animate(dt);
       shots.spin(dt);
@@ -1236,6 +2044,8 @@ function buildSite(scene, origin, { graphics, audio }) {
         discardPad(pad);
       }
       gate.dispose();
+      kitchenDoor.dispose();
+      sideDoor.dispose();
       for (const grate of grates) grate.dispose();
       for (const item of owned.reverse()) item.dispose();
       root.dispose(false, false);
@@ -1245,9 +2055,10 @@ function buildSite(scene, origin, { graphics, audio }) {
 
 /**
  * A capybara that runs after you along a route (see `createRoute`). It waits out of sight until
- * released, then keeps to the route's lane and heads for the spot nearest you.
+ * released, then keeps to the route's lane and heads for the spot nearest you. `hop(x, z)` lifts it
+ * over anything in its way.
  */
-function createActor(scene, root, look, size, name) {
+function createActor(scene, root, look, size, name, hop = null) {
   const node = new TransformNode(name, scene);
   node.parent = root;
   const body = buildCapybara(scene, look).clone(`${name}Body`, node);
@@ -1330,15 +2141,26 @@ function createActor(scene, root, look, size, name) {
       const dz = goal.z - node.position.z;
       node.position.x += dx * Math.min(1, dt * 14);
       node.position.z += dz * Math.min(1, dt * 14);
-      node.position.y = goal.y;
+      const lift = hop ? hop(node.position.x, node.position.z) : 0;
+      node.position.y = goal.y + lift;
       if (Math.hypot(dx, dz) > 0.01) {
         const want = Math.atan2(dx, dz);
         node.rotation.y += wrap(want - node.rotation.y) * Math.min(1, dt * 10);
       }
-      body.position.y = moving ? Math.abs(Math.sin(clock * 14)) * 0.08 * size : Math.abs(Math.sin(clock * 6)) * 0.05;
-      body.rotation.z = moving ? Math.sin(clock * 14) * 0.07 : 0;
+      const bounce = moving && lift < 0.05;
+      body.position.y = bounce ? Math.abs(Math.sin(clock * 14)) * 0.08 * size : Math.abs(Math.sin(clock * 6)) * 0.05;
+      body.rotation.z = bounce ? Math.sin(clock * 14) * 0.07 : 0;
       const near = Math.hypot(target.x - node.position.x, target.z - node.position.z) < reach + 0.3;
-      return near && Math.abs(target.y - node.position.y) < 0.8;
+      // Along the route too, so a wall between two lanes never counts as close.
+      return near && Math.abs(target.s - s) < 3 && Math.abs(target.y - goal.y) < 0.8;
+    },
+    /** Once it has stopped, stamps about facing `yaw`, cross that it can't get at you. */
+    stomp(dt, yaw) {
+      if (!this.out || delay > 0 || moving) return;
+      clock += dt;
+      node.rotation.y += wrap(yaw - node.rotation.y) * Math.min(1, dt * 6);
+      body.position.y = Math.abs(Math.sin(clock * 8)) * 0.16 * size;
+      body.rotation.z = Math.sin(clock * 16) * 0.12;
     },
   };
 }
@@ -1366,6 +2188,7 @@ function createRoute(points) {
   const spot = { s: 0, side: 0, x: 0, y: 0, z: 0 };
   return {
     start: { s: 0, side: 0, facing: Math.atan2(first.dx, first.dz) },
+    length: total,
     project(x, y, z) {
       let best = Infinity;
       for (const segment of segments) {
@@ -1527,29 +2350,663 @@ function buildGate(scene, root, look) {
 }
 
 /**
- * The zipline: a cable from ZIP_FROM past ZIP_TO to its post on the floor, and the handle that rides
+ * The lava room's moving parts, in prison space: the glowing lava, the cupboards' doors (the key is
+ * in one cupboard), the big red button with its padlock, and the cage stairs the key makes form on
+ * the wall over the lava one by one. Until then there's nothing of the cages to see or stand on.
+ * `reset` hides the key in a new cupboard and puts everything back.
+ */
+function buildLavaRoom(scene, root, M) {
+  const S = SQUISHY_FLOOR;
+  const owned = [];
+  const casters = [];
+  const part = (mesh, look, parent = root) => {
+    mesh.material = look;
+    mesh.parent = parent;
+    mesh.isPickable = false;
+    owned.push(mesh);
+    return mesh;
+  };
+
+  // The lava: crust plates drifting over glowing cracks, like the sea round the obby.
+  const width = LAVA_POOL.x1 - LAVA_POOL.x0;
+  const depth = LAVA_ROOM.z1 - LAVA_ROOM.z0;
+  const glow = lavaTexture(scene, "prisonLavaGlow", 256, 4, [40, 4, 2], [255, 190, 70]);
+  glow.uScale = width / 7;
+  glow.vScale = depth / 7;
+  const crust = lavaTexture(scene, "prisonLavaCrust", 128, 9, [70, 12, 6], [255, 90, 30]);
+  crust.uScale = width / 16;
+  crust.vScale = depth / 16;
+  const lavaLook = new StandardMaterial("prisonLavaMat", scene);
+  lavaLook.emissiveTexture = glow;
+  lavaLook.diffuseTexture = crust;
+  lavaLook.specularColor = new Color3(0.25, 0.12, 0.05);
+  lavaLook.specularPower = 12;
+  owned.push(glow, crust, lavaLook);
+  const pool = part(MeshBuilder.CreateGround("prisonLava", { width, height: depth }, scene), lavaLook);
+  pool.position.set((LAVA_POOL.x0 + LAVA_POOL.x1) / 2, LAVA_POOL.y, (LAVA_ROOM.z0 + LAVA_ROOM.z1) / 2);
+
+  // Two doors on each cupboard, hinged at its outer edges, a little out from its front.
+  const cupboards = CUPBOARDS.map((spec, index) => {
+    const fx = Math.sin(spec.yaw);
+    const fz = Math.cos(spec.yaw);
+    const face = { x: spec.x + fx * 0.3, z: spec.z + fz * 0.3 };
+    const doors = [-1, 1].map((hand) => {
+      const hinge = new TransformNode(`prisonCupboardHinge${index}`, scene);
+      hinge.parent = root;
+      hinge.position.set(face.x + Math.cos(spec.yaw) * 0.7 * hand + fx * 0.12, S + 1.01, face.z - Math.sin(spec.yaw) * 0.7 * hand + fz * 0.12);
+      owned.push(hinge);
+      const door = part(MeshBuilder.CreateBox("prisonCupboardDoor", { width: 0.68, height: 1.9, depth: 0.05 }, scene), M.cupboardDoor, hinge);
+      door.position.x = -hand * 0.34;
+      const knob = part(MeshBuilder.CreateSphere("prisonCupboardKnob", { diameter: 0.07, segments: 8 }, scene), M.gold, hinge);
+      knob.position.set(-hand * 0.6, 0, 0.05);
+      casters.push(door);
+      return { hinge, hand };
+    });
+    return { index, spec, face, doors, front: { x: spec.x + fx * 0.9, z: spec.z + fz * 0.9 }, opened: false, peek: 0, swing: 0 };
+  });
+  const pose = (cupboard) => {
+    for (const { hinge, hand } of cupboard.doors) hinge.rotation.y = cupboard.spec.yaw + hand * cupboard.swing * 1.9;
+  };
+
+  // A shiny gold key, standing just inside its cupboard's doors.
+  const key = new TransformNode("prisonKey", scene);
+  key.parent = root;
+  owned.push(key);
+  const ring = part(MeshBuilder.CreateTorus("prisonKeyRing", { diameter: 0.16, thickness: 0.045, tessellation: 20 }, scene), M.gold, key);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.14;
+  part(MeshBuilder.CreateBox("prisonKeyShaft", { width: 0.04, height: 0.24, depth: 0.03 }, scene), M.gold, key).position.y = -0.04;
+  for (const [y, w] of [
+    [-0.12, 0.08],
+    [-0.06, 0.06],
+  ]) {
+    part(MeshBuilder.CreateBox("prisonKeyTooth", { width: w, height: 0.035, depth: 0.03 }, scene), M.gold, key).position.set(w / 2 + 0.02, y, 0);
+  }
+
+  const cap = part(MeshBuilder.CreateCylinder("prisonButton", { diameter: 0.42, height: 0.14, tessellation: 24 }, scene), M.button);
+  cap.position.set(BUTTON.x, S + 1.09, BUTTON.z);
+
+  // A gold padlock on the cap, facing the door. The key pops its shackle and it spins away.
+  const lock = new TransformNode("prisonPadlock", scene);
+  lock.parent = root;
+  lock.position.set(BUTTON.x, S + 1.3, BUTTON.z);
+  owned.push(lock);
+  part(MeshBuilder.CreateBox("prisonPadlockBody", { width: 0.26, height: 0.22, depth: 0.1 }, scene), M.gold, lock);
+  part(MeshBuilder.CreateBox("prisonPadlockHole", { width: 0.04, height: 0.07, depth: 0.01 }, scene), M.dark, lock).position.set(0, -0.02, 0.052);
+  const shackle = part(MeshBuilder.CreateTorus("prisonPadlockShackle", { diameter: 0.16, thickness: 0.035, tessellation: 16 }, scene), M.steel, lock);
+  shackle.rotation.x = Math.PI / 2;
+
+  // Each cage hangs off the wall from its anchor, at the middle of its top against the wall: a
+  // backplate, a top to stand on, corner posts, and bottom rails, with bars hanging from the top
+  // on the three open sides. It forms by sliding out of the wall, then its bars drop down.
+  const half = CAGE_SIZE / 2;
+  const merged = (name, specs) => {
+    const pieces = specs.map(([w, h, d, x, y, z]) => {
+      const piece = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+      piece.position.set(x, y, z);
+      return piece;
+    });
+    return Mesh.MergeMeshes(pieces, true, true);
+  };
+  const barSpots = [
+    ...[-0.39, -0.13, 0.13, 0.39].map((x) => [x, -(CAGE_SIZE - 0.04)]),
+    ...[-0.33, -0.65, -0.97].flatMap((z) => [[-(half - 0.04), z], [half - 0.04, z]]),
+  ];
+  const barLength = CAGE_TALL - 0.12;
+  const cages = CAGES.map(([x, top], index) => {
+    const anchor = new TransformNode(`prisonCage${index}`, scene);
+    anchor.parent = root;
+    anchor.position.set(x, top, LAVA_ROOM.z1);
+    owned.push(anchor);
+    const frame = part(
+      merged("prisonCageFrame", [
+        [CAGE_SIZE, 0.12, CAGE_SIZE, 0, -0.06, -half],
+        [CAGE_SIZE, CAGE_TALL, 0.06, 0, -CAGE_TALL / 2, -0.03],
+        ...[-1, 1].map((side) => [0.08, CAGE_TALL, 0.08, side * (half - 0.04), -CAGE_TALL / 2, -(CAGE_SIZE - 0.04)]),
+        [CAGE_SIZE, 0.06, 0.06, 0, 0.03 - CAGE_TALL, -(CAGE_SIZE - 0.03)],
+        ...[-1, 1].map((side) => [0.06, 0.06, CAGE_SIZE, side * (half - 0.03), 0.03 - CAGE_TALL, -half]),
+      ]),
+      M.steel,
+      anchor,
+    );
+    const hang = new TransformNode(`prisonCageBars${index}`, scene);
+    hang.parent = anchor;
+    hang.position.y = -0.12;
+    owned.push(hang);
+    const bars = part(merged("prisonCageBars", barSpots.map(([bx, bz]) => [0.04, barLength, 0.04, bx, -barLength / 2, bz])), M.bars, hang);
+    casters.push(frame, bars);
+    anchor.setEnabled(false);
+    return { anchor, hang, form: 0, wait: 0, body: null };
+  });
+  const free = (cage) => {
+    cage.body?.shape?.dispose();
+    cage.body?.dispose();
+    cage.body = null;
+  };
+  /** Eases 0 to 1 with a little springy overshoot at the end, like metal snapping into place. */
+  const snap = (k) => 1 + 2.70158 * (k - 1) ** 3 + 1.70158 * (k - 1) ** 2;
+
+  let keyIndex = 0;
+  let hasKey = false;
+  let unlocked = false;
+  let opening = 0;
+  let borrowed = 0;
+  let up = false;
+  let showing = 0;
+  let clank = false;
+
+  const room = {
+    cupboards,
+    casters,
+    get keyIndex() {
+      return keyIndex;
+    },
+    get hasKey() {
+      return hasKey;
+    },
+    get unlocked() {
+      return unlocked;
+    },
+    /** Opens `cupboard` for good. True when the key was in it. */
+    open(cupboard) {
+      cupboard.opened = true;
+      if (cupboard.index !== keyIndex || hasKey) return false;
+      hasKey = true;
+      showing = 1.1;
+      return true;
+    },
+    /** A bot opens cupboard `index` for a look and lets it swing shut again. */
+    peek(index) {
+      cupboards[index].peek = 2.5;
+    },
+    /** With the key: the padlock comes off and the cages form for good. */
+    unlock() {
+      unlocked = true;
+    },
+    /** A bot unlocked it: the cages form for `seconds`, then fold back into the wall. */
+    borrow(seconds) {
+      borrowed = Math.max(borrowed, seconds);
+    },
+    /** True once after each cage finishes forming, for its clank. */
+    takeClank() {
+      const was = clank;
+      clank = false;
+      return was;
+    },
+    reset() {
+      keyIndex = Math.floor(Math.random() * cupboards.length);
+      hasKey = false;
+      unlocked = false;
+      opening = 0;
+      borrowed = 0;
+      showing = 0;
+      up = false;
+      clank = false;
+      lock.setEnabled(true);
+      lock.scaling.setAll(1);
+      lock.rotation.set(0, Math.PI, 0);
+      shackle.position.y = 0.12;
+      for (const cupboard of cupboards) {
+        cupboard.opened = false;
+        cupboard.peek = 0;
+        cupboard.swing = 0;
+        pose(cupboard);
+      }
+      for (const cage of cages) {
+        free(cage);
+        cage.form = 0;
+        cage.wait = 0;
+        cage.anchor.setEnabled(false);
+      }
+      const { face, spec } = cupboards[keyIndex];
+      key.position.set(face.x + Math.sin(spec.yaw) * 0.05, S + 1.1, face.z + Math.cos(spec.yaw) * 0.05);
+      key.rotation.set(0, spec.yaw, 0);
+      key.setEnabled(false);
+    },
+    update(dt, time) {
+      glow.uOffset = time * 0.02;
+      glow.vOffset = Math.sin(time * 0.3) * 0.05;
+      crust.uOffset = -time * 0.012;
+      crust.vOffset = time * 0.01;
+      glow.level = 1 + Math.sin(time * 1.3) * 0.12 + Math.sin(time * 3.1) * 0.05;
+      for (const cupboard of cupboards) {
+        cupboard.peek = Math.max(0, cupboard.peek - dt);
+        const want = cupboard.opened || cupboard.peek > 0 ? 1 : 0;
+        if (cupboard.swing === want) continue;
+        cupboard.swing = want > cupboard.swing ? Math.min(1, cupboard.swing + dt * 3) : Math.max(0, cupboard.swing - dt * 2);
+        pose(cupboard);
+      }
+      if (showing > 0) {
+        showing -= dt;
+        key.position.y += dt * 0.7;
+        key.rotation.y += dt * 9;
+      }
+      key.setEnabled(showing > 0 || (!hasKey && cupboards[keyIndex].swing > 0.2));
+      cap.position.y = S + (unlocked ? 1.04 : 1.09);
+      const pulse = hasKey && !unlocked ? 1 + Math.abs(Math.sin(time * 5)) * 0.12 : 1;
+      cap.scaling.set(pulse, 1, pulse);
+      if (unlocked && opening < 1) {
+        opening = Math.min(1, opening + dt / 0.8);
+        shackle.position.y = 0.12 + Math.min(1, opening * 3) * 0.08;
+        const away = Math.max(0, (opening - 0.4) / 0.6);
+        lock.rotation.y = Math.PI + away * 9;
+        lock.position.y = S + 1.3 + away * 0.4;
+        lock.scaling.setAll(Math.max(0.001, 1 - away));
+        lock.setEnabled(opening < 1);
+      }
+      borrowed = Math.max(0, borrowed - dt);
+      const want = unlocked || borrowed > 0;
+      if (want && !up) cages.forEach((cage, index) => (cage.wait = 0.4 + index * 0.45));
+      up = want;
+      for (const cage of cages) {
+        if (up && cage.wait > 0) {
+          cage.wait -= dt;
+          continue;
+        }
+        const was = cage.form;
+        cage.form = up ? Math.min(1, cage.form + dt / 0.7) : Math.max(0, cage.form - dt / 0.5);
+        if (!up && cage.body) free(cage);
+        cage.anchor.setEnabled(cage.form > 0);
+        if (cage.form === was) continue;
+        cage.anchor.scaling.z = Math.max(0.02, snap(Math.min(1, cage.form / 0.55)));
+        cage.hang.scaling.y = Math.max(0.01, snap(Math.max(0, (cage.form - 0.45) / 0.55)));
+        if (cage.form >= 1 && !cage.body) {
+          clank = true;
+          cage.anchor.computeWorldMatrix(true);
+          cage.body = new PhysicsBody(cage.anchor, PhysicsMotionType.STATIC, false, scene);
+          cage.body.shape = new PhysicsShapeBox(new Vector3(0, -CAGE_TALL / 2, -half), Quaternion.Identity(), new Vector3(CAGE_SIZE, CAGE_TALL, CAGE_SIZE), scene);
+        }
+      }
+    },
+    dispose() {
+      for (const cage of cages) free(cage);
+      for (const item of owned.reverse()) item.dispose();
+    },
+  };
+  room.reset();
+  return room;
+}
+
+/**
+ * The lava room's elevator, in prison space: an open cage car with barred sides that rides between
+ * the top floor and the floor by the exit door. Its gates slide aside, the north one at the top
+ * (onto the top floor) and the south one at the bottom (toward the door). A barrier closes the top
+ * floor's edge whenever the car isn't up there, so nobody steps into the empty shaft. The car only
+ * has colliders while it's parked; whoever rides it is carried (see `ride`).
+ */
+function buildLift(scene, root, M) {
+  const width = LIFT.x1 - LIFT.x0;
+  const depth = LIFT.z1 - LIFT.z0;
+  const hw = width / 2;
+  const hd = depth / 2;
+  const top = LANDING.top;
+  const bottom = SQUISHY_FLOOR;
+  const owned = [];
+  const casters = [];
+  const merged = (name, look, parent, specs) => {
+    const pieces = specs.map(([w, h, d, x, y, z]) => {
+      const piece = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+      piece.position.set(x, y, z);
+      return piece;
+    });
+    const mesh = Mesh.MergeMeshes(pieces, true, true);
+    mesh.name = name;
+    mesh.material = look;
+    mesh.parent = parent;
+    mesh.isPickable = false;
+    owned.push(mesh);
+    casters.push(mesh);
+    return mesh;
+  };
+  const node = (name, parent) => {
+    const each = new TransformNode(name, scene);
+    each.parent = parent;
+    owned.push(each);
+    return each;
+  };
+
+  const car = node("prisonLift", root);
+  car.position.set((LIFT.x0 + LIFT.x1) / 2, top, (LIFT.z0 + LIFT.z1) / 2);
+  merged("prisonLiftFrame", M.steel, car, [
+    [width, 0.15, depth, 0, -0.075, 0],
+    ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => [0.1, LIFT_TALL, 0.1, sx * (hw - 0.05), LIFT_TALL / 2, sz * (hd - 0.05)])),
+    ...[-1, 1].map((sz) => [width, 0.08, 0.08, 0, LIFT_TALL, sz * (hd - 0.04)]),
+    ...[-1, 1].map((sx) => [0.08, 0.08, depth, sx * (hw - 0.04), LIFT_TALL, 0]),
+  ]);
+  const bars = [];
+  for (const sx of [-1, 1]) {
+    for (let i = 1; i < 7; i += 1) bars.push([0.05, LIFT_TALL, 0.05, sx * (hw - 0.04), LIFT_TALL / 2, -hd + (depth * i) / 7]);
+    bars.push([0.06, 0.06, depth, sx * (hw - 0.04), 1.1, 0]);
+  }
+  merged("prisonLiftBars", M.bars, car, bars);
+  merged("prisonLiftButtons", M.button, car, [[0.04, 0.3, 0.2, hw - 0.1, 1.2, 0]]);
+  // North gate first, then south. Each slides west, out over the lava side.
+  const gates = [1, -1].map((sz) => {
+    const holder = node("prisonLiftGate", car);
+    holder.position.z = sz * (hd - 0.1);
+    const specs = [0.1, 1.1, LIFT_TALL - 0.1].map((y) => [width - 0.1, 0.06, 0.05, 0, y, 0]);
+    for (let i = 1; i < 9; i += 1) specs.push([0.04, LIFT_TALL - 0.2, 0.04, -hw + (width * i) / 9, LIFT_TALL / 2, 0]);
+    merged("prisonLiftGate", M.metal, holder, specs);
+    return { holder, open: 0 };
+  });
+  const barrier = node("prisonLiftBarrier", root);
+  barrier.position.set(car.position.x, top + 0.55, LANDING.z0 + 0.1);
+  merged("prisonLiftBarrierBars", M.hazard, barrier, [
+    [width - 0.1, 0.1, 0.08, 0, 0.45, 0],
+    [width - 0.1, 0.08, 0.06, 0, 0, 0],
+  ]);
+
+  let body = null;
+  const shapes = [];
+  let fence = null;
+  const freeBody = () => {
+    body?.dispose();
+    body = null;
+    for (const shape of shapes) shape.dispose();
+    shapes.length = 0;
+  };
+  /** The floor, both barred sides, and the gate that stays shut: south at the top, north at the bottom. */
+  const park = () => {
+    car.computeWorldMatrix(true);
+    const container = new PhysicsShapeContainer(scene);
+    const piece = (x, y, z, w, h, d) => {
+      const shape = new PhysicsShapeBox(new Vector3(x, y, z), Quaternion.Identity(), new Vector3(w, h, d), scene);
+      container.addChild(shape);
+      shapes.push(shape);
+    };
+    piece(0, -0.075, 0, width, 0.15, depth);
+    for (const sx of [-1, 1]) piece(sx * (hw - 0.04), LIFT_TALL / 2, 0, 0.08, LIFT_TALL, depth);
+    piece(0, LIFT_TALL / 2, (atTop ? -1 : 1) * (hd - 0.04), width, LIFT_TALL, 0.08);
+    shapes.push(container);
+    body = new PhysicsBody(car, PhysicsMotionType.STATIC, false, scene);
+    body.shape = container;
+  };
+  const setFence = (on) => {
+    barrier.setEnabled(on);
+    if (on && !fence) {
+      barrier.computeWorldMatrix(true);
+      fence = new PhysicsBody(barrier, PhysicsMotionType.STATIC, false, scene);
+      fence.shape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(width, 1.1, 0.12), scene);
+    } else if (!on && fence) {
+      fence.shape?.dispose();
+      fence.dispose();
+      fence = null;
+    }
+  };
+  const ease = (k) => k * k * (3 - 2 * k);
+  const pose = () => {
+    for (const gate of gates) gate.holder.position.x = -(width - 0.15) * ease(gate.open);
+  };
+
+  let atTop = true;
+  /** "parked", "closing" its open gate, "moving", or "opening" the gate at the other floor. */
+  let mode = "parked";
+  let time = 0;
+  let idle = 0;
+  let ding = false;
+  const lift = {
+    casters,
+    /** The car floor's height. */
+    get y() {
+      return car.position.y;
+    },
+    get parked() {
+      return mode === "parked";
+    },
+    get atTop() {
+      return atTop;
+    },
+    /** Seconds it has sat parked at the bottom. */
+    get idle() {
+      return idle;
+    },
+    /** True once when it reaches a floor, for the ding. */
+    takeDing() {
+      const was = ding;
+      ding = false;
+      return was;
+    },
+    /** Shuts the open gate and rides to the other floor. False if it's already on its way. */
+    go() {
+      if (mode !== "parked") return false;
+      mode = "closing";
+      time = 0;
+      idle = 0;
+      freeBody();
+      setFence(true);
+      return true;
+    },
+    /** Parked at the top with its north gate open. */
+    reset() {
+      freeBody();
+      atTop = true;
+      mode = "parked";
+      time = 0;
+      idle = 0;
+      ding = false;
+      car.position.y = top;
+      gates[0].open = 1;
+      gates[1].open = 0;
+      pose();
+      setFence(false);
+      park();
+    },
+    update(dt) {
+      if (mode === "parked") {
+        if (!atTop) idle += dt;
+        return;
+      }
+      time += dt;
+      if (mode === "closing") {
+        gates[atTop ? 0 : 1].open = Math.max(0, 1 - time / LIFT_GATE_SECONDS);
+        if (time >= LIFT_GATE_SECONDS) {
+          mode = "moving";
+          time = 0;
+        }
+      } else if (mode === "moving") {
+        const k = ease(Math.min(1, time / LIFT_SECONDS));
+        car.position.y = atTop ? top + (bottom - top) * k : bottom + (top - bottom) * k;
+        if (time >= LIFT_SECONDS) {
+          atTop = !atTop;
+          mode = "opening";
+          time = 0;
+          ding = true;
+        }
+      } else {
+        gates[atTop ? 0 : 1].open = Math.min(1, time / LIFT_GATE_SECONDS);
+        if (time >= LIFT_GATE_SECONDS) {
+          mode = "parked";
+          idle = 0;
+          if (atTop) setFence(false);
+          park();
+        }
+      }
+      pose();
+    },
+    dispose() {
+      freeBody();
+      setFence(false);
+      for (const item of owned.reverse()) item.dispose();
+    },
+  };
+  lift.reset();
+  return lift;
+}
+
+/**
+ * A door that slides up into the wall to open: from x `from` to `to` in a wall at z `at`, or along z
+ * in a wall at x `at` when `alongZ`.
+ */
+function buildSlideDoor(scene, root, look, from, to, floor, at, { alongZ = false } = {}) {
+  const height = 2.8;
+  const width = to - from;
+  const mesh = MeshBuilder.CreateBox("prisonSlideDoor", { width, height, depth: 0.14 }, scene);
+  mesh.material = look;
+  mesh.parent = root;
+  mesh.isPickable = false;
+  if (alongZ) mesh.rotation.y = Math.PI / 2;
+  const middle = (from + to) / 2;
+  const rest = alongZ ? new Vector3(at, floor + height / 2, middle) : new Vector3(middle, floor + height / 2, at);
+  mesh.position.copyFrom(rest);
+  let body = null;
+  let lifting = false;
+  const free = () => {
+    body?.shape?.dispose();
+    body?.dispose();
+    body = null;
+  };
+  return {
+    mesh,
+    close() {
+      lifting = false;
+      mesh.position.copyFrom(rest);
+      if (body) return;
+      mesh.computeWorldMatrix(true);
+      body = new PhysicsBody(mesh, PhysicsMotionType.STATIC, false, scene);
+      body.shape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(width, height, 0.3), scene);
+    },
+    open() {
+      free();
+      lifting = true;
+    },
+    update(dt) {
+      if (lifting && mesh.position.y < rest.y + height - 0.1) mesh.position.y = Math.min(rest.y + height - 0.1, mesh.position.y + dt * 3.5);
+    },
+    dispose() {
+      free();
+      mesh.dispose();
+    },
+  };
+}
+
+/** Whether (x, z), prison space, is over the elevator car's footprint, grown by `margin`. */
+function insideLift(x, z, margin = 0) {
+  return x > LIFT.x0 - margin && x < LIFT.x1 + margin && z > LIFT.z0 - margin && z < LIFT.z1 + margin;
+}
+
+/**
+ * Up to how high anything running along the chef chase has to be at (x, z), prison space, to clear
+ * the counters, ice, and tables: an arc over each one.
+ */
+export function obstacleHop(x, z) {
+  let lift = 0;
+  for (const [x0, x1, z0, z1, height] of OBSTACLES) {
+    if (x < x0 - 0.4 || x > x1 + 0.4) continue;
+    const middle = (z0 + z1) / 2;
+    const reach = (z1 - z0) / 2 + 1.1;
+    const k = 1 - ((z - middle) / reach) ** 2;
+    if (k > 0) lift = Math.max(lift, (height + 0.4) * Math.sqrt(k));
+  }
+  return lift;
+}
+
+/**
+ * The zipline's line in prison space (see ZIP_LEGS): points every half metre or so round the turns,
+ * each with how far along it is (`s`) and whether it is on a turn (`slow`). Heights fall evenly from
+ * ZIP_FROM to ZIP_TO. `at(s, out)` puts the point `s` along it into `out` and returns the heading
+ * there; `slowAt(s)` says whether the handle should be slowing for a turn.
+ */
+export function createZipPath() {
+  const points = [];
+  const push = (x, z, slow = false) => points.push({ x, y: 0, z, s: 0, slow });
+  const arc = (cx, cz, r, from, to) => {
+    const steps = Math.max(6, Math.ceil((Math.abs(to - from) * r) / 0.4));
+    for (let i = 1; i <= steps; i += 1) {
+      const angle = from + ((to - from) * i) / steps;
+      push(cx + r * Math.cos(angle), cz + r * Math.sin(angle), true);
+    }
+  };
+  push(ZIP_FROM.x, ZIP_FROM.z);
+  ZIP_LEGS.forEach((x, index) => {
+    const next = ZIP_LEGS[index + 1];
+    if (next === undefined) return;
+    const south = index % 2 === 0;
+    const end = south ? ZIP_SOUTH : ZIP_NORTH;
+    push(x, end);
+    const r = (next - x) / 2;
+    arc(x + r, end, r, Math.PI, south ? 2 * Math.PI : 0);
+  });
+  const last = ZIP_LEGS[ZIP_LEGS.length - 1];
+  push(last, ZIP_TO.z - ZIP_BEND);
+  arc(last + ZIP_BEND, ZIP_TO.z - ZIP_BEND, ZIP_BEND, Math.PI, Math.PI / 2);
+  push(ZIP_TO.x, ZIP_TO.z);
+  for (let i = 1; i < points.length; i += 1) {
+    points[i].s = points[i - 1].s + Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
+  }
+  const length = points[points.length - 1].s;
+  for (const point of points) point.y = ZIP_FROM.y + ((ZIP_TO.y - ZIP_FROM.y) * point.s) / length;
+  const find = (s) => {
+    let low = 0;
+    let high = points.length - 2;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (points[mid].s <= s) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+  return {
+    points,
+    length,
+    at(s, out) {
+      const k = find(Math.max(0, Math.min(length, s)));
+      const a = points[k];
+      const b = points[k + 1];
+      const f = Math.max(0, Math.min(1, (s - a.s) / Math.max(1e-6, b.s - a.s)));
+      out.x = a.x + (b.x - a.x) * f;
+      out.y = a.y + (b.y - a.y) * f;
+      out.z = a.z + (b.z - a.z) * f;
+      return Math.atan2(b.x - a.x, b.z - a.z);
+    },
+    slowAt(s) {
+      if (s >= length) return false;
+      const k = find(Math.max(0, s));
+      return points[k].slow || points[k + 1].slow;
+    },
+    /** The middle of each half-circle turn, and which way out of it a wall lies (+1 north, -1 south). */
+    get turns() {
+      const middles = [];
+      ZIP_LEGS.forEach((x, index) => {
+        const next = ZIP_LEGS[index + 1];
+        if (next === undefined) return;
+        const south = index % 2 === 0;
+        const r = (next - x) / 2;
+        const z = (south ? ZIP_SOUTH : ZIP_NORTH) + (south ? -r : r);
+        middles.push({ x: x + r, z, side: south ? -1 : 1 });
+      });
+      return middles;
+    },
+  };
+}
+
+/** The speed the handle heads for at `s` along `path`: slow round the turns, fast on the straights. */
+export function zipTarget(path, s) {
+  return path.slowAt(s) || path.slowAt(s + ZIP_LOOKAHEAD) ? ZIP_TURN_SPEED : ZIP_SPEED;
+}
+
+/**
+ * The zipline: a cable along `createZipPath`, held by brackets from the walls, and the handle that rides
  * it. `place(s)` puts the handle `s` along the cable and returns that cable point, in prison space.
  */
 function buildZipline(scene, root, add, M) {
-  const from = new Vector3(ZIP_FROM.x, ZIP_FROM.y, ZIP_FROM.z);
-  const to = new Vector3(ZIP_TO.x, ZIP_TO.y, ZIP_TO.z);
-  const way = to.subtract(from);
-  const length = way.length();
-  way.normalize();
-  const end = to.add(way.scale(1.2));
-  const cable = MeshBuilder.CreateCylinder("prisonZipCable", { height: Vector3.Distance(from, end) + 0.4, diameter: 0.05, tessellation: 6 }, scene);
-  cable.position.copyFrom(from.add(end).scaleInPlace(0.5));
-  cable.rotationQuaternion = new Quaternion();
-  Quaternion.FromUnitVectorsToRef(Vector3.Up(), way, cable.rotationQuaternion);
+  const path = createZipPath();
+  const line = path.points.map((point) => new Vector3(point.x, point.y, point.z));
+  const end = line[line.length - 1].add(new Vector3(1.2, 0, 0));
+  const cable = MeshBuilder.CreateTube("prisonZipCable", { path: [...line, end], radius: 0.025, tessellation: 6 }, scene);
   add(cable, M.bars, { camera: false });
-  // A bracket out of the wall holds the top end, so nothing stands between the camera and you at the start.
-  const back = from.subtract(way.scale(0.2));
-  const bracket = MeshBuilder.CreateBox("prisonZipBracket", { width: back.x - 6.4, height: 0.12, depth: 0.12 }, scene);
-  bracket.position.set((back.x + 6.4) / 2, back.y + 0.06, back.z);
-  add(bracket, M.trim, { camera: false });
-  const post = MeshBuilder.CreateBox("prisonZipPost", { width: 0.14, height: end.y + 0.3 - KILLER_FLOOR, depth: 0.14 }, scene);
-  post.position.set(end.x, (end.y + 0.3 + KILLER_FLOOR) / 2, end.z);
-  add(post, M.trim, { camera: false });
+  // Thin brackets out of the walls, level with the cable, hold it at its ends and the outside of
+  // each turn; nothing stands under it or behind you to get in the camera's way.
+  const bracket = (x0, z0, x1, z1, y) => {
+    const mesh = MeshBuilder.CreateBox("prisonZipBracket", { width: Math.max(0.08, Math.abs(x1 - x0)), height: 0.08, depth: Math.max(0.08, Math.abs(z1 - z0)) }, scene);
+    mesh.position.set((x0 + x1) / 2, y + 0.06, (z0 + z1) / 2);
+    add(mesh, M.trim, { camera: false });
+  };
+  bracket(-30, ZIP_FROM.z, ZIP_FROM.x - 0.1, ZIP_FROM.z, ZIP_FROM.y);
+  for (const turn of path.turns) {
+    const near = path.points.reduce((best, point) => (Math.hypot(point.x - turn.x, point.z - turn.z) < Math.hypot(best.x - turn.x, best.z - turn.z) ? point : best));
+    bracket(turn.x, turn.z + turn.side * 0.1, turn.x, turn.side > 0 ? 6 : BLOCK_B.z0, near.y);
+  }
+  bracket(end.x, end.z, end.x, -8, end.y);
 
   const parts = [];
   const piece = (mesh, y) => {
@@ -1565,19 +3022,25 @@ function buildZipline(scene, root, add, M) {
   trolley.material = M.hazard;
   trolley.parent = root;
   trolley.isPickable = false;
-  const heading = Math.atan2(way.x, way.z);
-  trolley.rotation.y = heading;
   const point = new Vector3();
-  return {
-    length,
-    heading,
+  let heading = 0;
+  const zip = {
+    path,
+    length: path.length,
     trolley,
+    get heading() {
+      return heading;
+    },
+    /** Puts the handle `s` along the cable and returns that cable point. */
     place(s) {
-      point.copyFrom(way).scaleInPlace(Math.max(0, Math.min(length, s))).addInPlace(from);
+      heading = path.at(s, point);
       trolley.position.copyFrom(point);
+      trolley.rotation.y = heading;
       return point;
     },
   };
+  zip.place(0);
+  return zip;
 }
 
 /**
