@@ -113,33 +113,45 @@ const LAVA_POOL = { x0: -17, x1: -6.6, y: 8.4 };
 const LAVA_DOOR = [-20.6, -18.4];
 const LAVA_EXIT = [-6.2, -4.4];
 /**
- * The little cages the key makes form on the north wall over the lava: each one's middle (x) and
- * top, climbing like stairs from the west floor's edge toward the exit end, CAGE_SIZE square and
- * CAGE_TALL deep with gaps like the obby's. You drop off the last one onto the east floor.
+ * Over the north side of the lava room the ceiling goes up to BAY.top: a tall bay from x0 to the
+ * east wall and from z0 to the north wall, closed off on the south above the room's ceiling by a
+ * wall that hangs down to PARTITION_BOTTOM over the lava. The second vent runs through solid metal
+ * over the rest of the room, so the bay can't reach further south.
  */
+const BAY = { x0: -17, z0: 13.4, top: 24 };
+const PARTITION_BOTTOM = 11;
+/**
+ * The little cages the key makes form over the lava: each one's middle (x), top, and the wall it
+ * sticks out of (1 the north wall, -1 the bay's hanging wall facing it). They climb like stairs in
+ * three flights, east along the north wall, back west along the hanging wall, and east along the
+ * north wall again high above the first, CAGE_RISE a step with gaps like the obby's, CAGE_SIZE
+ * square and CAGE_TALL deep. The last one is a step below the top floor.
+ */
+const CAGE_RISE = 0.7;
+const CAGE_XS = [-15.7, -13.6, -11.5, -9.4, -7.3];
 const CAGES = [
-  [-15.7, 9.6],
-  [-13.6, 10.2],
-  [-11.5, 10.8],
-  [-9.4, 11.4],
-  [-7.3, 12],
-];
+  ...CAGE_XS.map((x) => [x, 1]),
+  ...[...CAGE_XS].reverse().map((x) => [x, -1]),
+  ...CAGE_XS.map((x) => [x, 1]),
+].map(([x, wall], index) => [x, SQUISHY_FLOOR + CAGE_RISE * (index + 1), wall]);
 const CAGE_SIZE = 1.3;
 const CAGE_TALL = 1;
-const CAGE_Z = LAVA_ROOM.z1 - CAGE_SIZE / 2;
+/** The middle (z) of a cage on `wall` (see CAGES). */
+const cageZ = (wall) => (wall > 0 ? LAVA_ROOM.z1 - CAGE_SIZE / 2 : BAY.z0 + CAGE_SIZE / 2);
 /**
- * The top floor the cage stairs climb to, at the lava room's east end from x0 and z0 to the walls,
- * and the elevator just south of its edge that takes you down to the floor by the exit door. LIFT
- * is the car's footprint (x0, x1, z0, z1). It rides for LIFT_SECONDS; its gates take
- * LIFT_GATE_SECONDS to slide shut or open. Call panels are on the east wall at LIFT_PANELS (z) on
- * each floor. With nobody in it, it goes back up LIFT_RETURN_SECONDS after reaching the bottom.
+ * The top floor the cage stairs climb to, high in the bay at the lava room's east end from x0 and
+ * z0 to the walls, and the elevator in the tall shaft just south of its edge that takes you all the
+ * way down to the floor by the exit door. LIFT is the car's footprint (x0, x1, z0, z1). It rides for
+ * LIFT_SECONDS; its gates take LIFT_GATE_SECONDS to slide shut or open. Call panels are on the east
+ * wall at LIFT_PANELS (z) on each floor. With nobody in it, it goes back up LIFT_RETURN_SECONDS
+ * after reaching the bottom.
  */
-const LANDING = { x0: LAVA_POOL.x1, z0: 11.6, top: 12.6 };
-const LIFT = { x0: -6.5, x1: -4.1, z0: 9.4, z1: 11.6 };
+const LANDING = { x0: LAVA_POOL.x1, z0: 15.6, top: SQUISHY_FLOOR + CAGE_RISE * (CAGES.length + 1) };
+const LIFT = { x0: -6.5, x1: -4.1, z0: BAY.z0, z1: 15.6 };
 const LIFT_TALL = 2.3;
-const LIFT_SECONDS = 3.2;
+const LIFT_SECONDS = 10;
 const LIFT_GATE_SECONDS = 0.5;
-const LIFT_PANELS = { top: 12.3, bottom: 8.8 };
+const LIFT_PANELS = { top: 16.3, bottom: 12.8 };
 const LIFT_REACH = 1.3;
 const LIFT_RETURN_SECONDS = 4;
 /** Cupboards round the west end: where each stands against the wall, and the way its doors face. */
@@ -156,7 +168,7 @@ const CUPBOARD_REACH = 1.4;
 const BUTTON = { x: -18.3, z: 16.6 };
 const BUTTON_REACH = 1.5;
 /** How long the cages stay formed for a bot that unlocks them: long enough for it to climb across. */
-const BOT_CAGE_SECONDS = 10;
+const BOT_CAGE_SECONDS = 22;
 /**
  * The zipline: from the ledge it zig-zags south and north over the cell blocks along ZIP_LEGS (x),
  * turning in smooth half circles round ZIP_SOUTH and ZIP_NORTH (z) so every northern turn swings
@@ -1157,10 +1169,10 @@ function botRoute(keyIndex) {
     at(-20.6, S, 9.4, "run", { section: { level: LAVA_LEVEL, lava: true, say: "prisonLava" } }),
     at(cupboard.x + Math.sin(cupboard.yaw) * 0.9, S, cupboard.z + Math.cos(cupboard.yaw) * 0.9, "run", { pause: 1.2, open: keyIndex, say: "prisonKey" }),
     at(BUTTON.x - 0.6, S, BUTTON.z - 0.9, "run", { pause: 2.2, unlock: true, say: "prisonUnlock" }),
-    at(LAVA_POOL.x0 - 0.5, S, CAGE_Z),
-    ...CAGES.map(([x, top]) => at(x, top, CAGE_Z, "hop", { risky: true })),
-    at(-5.3, LANDING.top, 16.4, "hop"),
-    at(-5.3, LANDING.top, 12.4),
+    at(LAVA_POOL.x0 - 0.5, S, cageZ(1)),
+    ...CAGES.map(([x, top, wall]) => at(x, top, cageZ(wall), "hop", { risky: true })),
+    at(-5.3, LANDING.top, 17.4, "hop"),
+    at(-5.3, LANDING.top, LANDING.z0 + 0.6),
     at((LIFT.x0 + LIFT.x1) / 2, LANDING.top, (LIFT.z0 + LIFT.z1) / 2, "run", { pause: 0.4, lift: true, say: "prisonLift" }),
     at((LIFT.x0 + LIFT.x1) / 2, S, (LIFT.z0 + LIFT.z1) / 2, "lift"),
     at((LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S, 7.6),
@@ -1681,9 +1693,19 @@ function buildSite(scene, origin, { graphics, audio }) {
   box(lx0 - 0.4, S - 1.2, lz0, lx0, lavaTop, lz1 + 0.4, M.concrete);
   box(lx1, S - 1.2, lz0, lx1 + 0.4, lavaTop, lz1 + 0.4, M.concrete);
   box(lx0, S - 1.2, lz1, lx1, lavaTop, lz1 + 0.4, M.concrete);
-  box(lx0 - 0.4, lavaTop, lz0, lx1 + 0.4, lavaTop + 0.4, lz1 + 0.4, M.ceiling);
+  box(lx0 - 0.4, lavaTop, lz0, lx1 + 0.4, lavaTop + 0.4, BAY.z0 - 0.4, M.ceiling);
+  box(lx0 - 0.4, lavaTop, BAY.z0 - 0.4, BAY.x0 - 0.4, lavaTop + 0.4, lz1 + 0.4, M.ceiling);
   for (const x of [LAVA_POOL.x0 - 0.15, LAVA_POOL.x1]) box(x, S - 0.01, lz0, x + 0.15, S + 0.01, lz1, M.hazard, { solid: false, camera: false });
   for (const x of [-25, -19, -12, -6]) lamp(x, lavaTop, 12.4, 2, 0.6);
+  // The tall bay over the cage stairs and the elevator shaft: its hanging wall over the lava, the
+  // walls carried on up, and its roof.
+  box(BAY.x0, PARTITION_BOTTOM, BAY.z0 - 0.4, LAVA_POOL.x1, lavaTop, BAY.z0, M.concrete);
+  box(BAY.x0 - 0.4, lavaTop, BAY.z0 - 0.4, lx1 + 0.4, BAY.top, BAY.z0, M.concrete);
+  box(BAY.x0 - 0.4, lavaTop, BAY.z0, BAY.x0, BAY.top, lz1, M.concrete);
+  box(BAY.x0 - 0.4, lavaTop, lz1, lx1 + 0.4, BAY.top, lz1 + 0.4, M.concrete);
+  box(lx1, lavaTop, BAY.z0, lx1 + 0.4, BAY.top, lz1, M.concrete);
+  box(BAY.x0 - 0.4, BAY.top, BAY.z0 - 0.4, lx1 + 0.4, BAY.top + 0.4, lz1 + 0.4, M.ceiling);
+  for (const x of [-14, -9.5, -5.3]) lamp(x, BAY.top, 15.9, 2, 0.6);
   // The top floor at the end of the cage stairs, the elevator's call panels on the east wall, and its sign.
   box(LANDING.x0, S, LANDING.z0, lx1, LANDING.top, lz1, M.concrete);
   box(LANDING.x0, LANDING.top - 0.01, LANDING.z0, LANDING.x0 + 0.12, LANDING.top + 0.01, lz1, M.hazard, { solid: false, camera: false });
@@ -2453,10 +2475,12 @@ function buildLavaRoom(scene, root, M) {
     ...[-0.33, -0.65, -0.97].flatMap((z) => [[-(half - 0.04), z], [half - 0.04, z]]),
   ];
   const barLength = CAGE_TALL - 0.12;
-  const cages = CAGES.map(([x, top], index) => {
+  const cages = CAGES.map(([x, top, wall], index) => {
     const anchor = new TransformNode(`prisonCage${index}`, scene);
     anchor.parent = root;
-    anchor.position.set(x, top, LAVA_ROOM.z1);
+    // Local -z points out of the wall, so cages on the hanging wall are turned round to face north.
+    anchor.position.set(x, top, wall > 0 ? LAVA_ROOM.z1 : BAY.z0);
+    if (wall < 0) anchor.rotation.y = Math.PI;
     owned.push(anchor);
     const frame = part(
       merged("prisonCageFrame", [
@@ -2476,12 +2500,13 @@ function buildLavaRoom(scene, root, M) {
     const bars = part(merged("prisonCageBars", barSpots.map(([bx, bz]) => [0.04, barLength, 0.04, bx, -barLength / 2, bz])), M.bars, hang);
     casters.push(frame, bars);
     anchor.setEnabled(false);
-    return { anchor, hang, form: 0, wait: 0, body: null };
+    return { anchor, hang, frame, form: 0, wait: 0, body: null };
   });
   const free = (cage) => {
     cage.body?.shape?.dispose();
     cage.body?.dispose();
     cage.body = null;
+    cage.frame.metadata = null;
   };
   /** Eases 0 to 1 with a little springy overshoot at the end, like metal snapping into place. */
   const snap = (k) => 1 + 2.70158 * (k - 1) ** 3 + 1.70158 * (k - 1) ** 2;
@@ -2596,7 +2621,7 @@ function buildLavaRoom(scene, root, M) {
       }
       borrowed = Math.max(0, borrowed - dt);
       const want = unlocked || borrowed > 0;
-      if (want && !up) cages.forEach((cage, index) => (cage.wait = 0.4 + index * 0.45));
+      if (want && !up) cages.forEach((cage, index) => (cage.wait = 0.4 + index * 0.3));
       up = want;
       for (const cage of cages) {
         if (up && cage.wait > 0) {
@@ -2615,6 +2640,8 @@ function buildLavaRoom(scene, root, M) {
           cage.anchor.computeWorldMatrix(true);
           cage.body = new PhysicsBody(cage.anchor, PhysicsMotionType.STATIC, false, scene);
           cage.body.shape = new PhysicsShapeBox(new Vector3(0, -CAGE_TALL / 2, -half), Quaternion.Identity(), new Vector3(CAGE_SIZE, CAGE_TALL, CAGE_SIZE), scene);
+          // The camera pulls in in front of a formed cage instead of ending up inside it; hidden ones still count for picking.
+          cage.frame.metadata = { blocksCamera: true };
         }
       }
     },
