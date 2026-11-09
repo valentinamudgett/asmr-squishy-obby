@@ -20,6 +20,7 @@ import { createLavaPop } from "./boom.js";
 import { createBots } from "./bot.js";
 import { awardLevelCoin, createCoinPop, earnCoins, grantCoasterPurse, LEVEL_COINS, loadCoins, spendCoins } from "./coins.js";
 import { bindCoasterShop, COASTER_LEVEL, createCoaster, RIDE_PAY } from "./coaster.js";
+import { createCoasterRiders } from "./coasterRiders.js";
 import { bindCoasterUpgrades } from "./coasterUpgrades.js";
 import { bindCoasterSky } from "./coasterSky.js";
 import { buildAvatar, createPreview } from "./avatar.js";
@@ -66,6 +67,8 @@ const boot = document.querySelector("#boot");
 const bootStatus = document.querySelector("#boot-status");
 const bootBar = document.querySelector("#boot-bar");
 const bootFill = document.querySelector("#boot-fill");
+const bootPercent = document.querySelector("#boot-percent");
+const bootCursor = document.querySelector("#boot-cursor");
 const levelEl = document.querySelector("#level");
 const escapeStat = document.querySelector("#escape-stat");
 const escapeCount = document.querySelector("#escape-count");
@@ -157,8 +160,12 @@ function createBootProgress() {
   bootBar.setAttribute("aria-label", t("boot.title"));
 
   const paint = () => {
-    bootFill.style.width = `${(shown * 100).toFixed(2)}%`;
-    bootBar.setAttribute("aria-valuenow", String(Math.round(shown * 100)));
+    const width = `${(shown * 100).toFixed(2)}%`;
+    bootFill.style.width = width;
+    bootCursor.style.left = width;
+    const percent = Math.round(shown * 100);
+    bootBar.setAttribute("aria-valuenow", String(percent));
+    bootPercent.textContent = `${percent}%`;
   };
 
   // While waiting on a stage, ease a little past it (never near 100%) so the bar is never frozen.
@@ -309,6 +316,7 @@ async function bootGame() {
   coaster = createCoaster(scene);
   for (const pad of course.pads) coaster.mark(pad);
   const shopkeepers = createShopkeepers(scene, graphics, coaster);
+  const riders = createCoasterRiders(scene, graphics, coaster);
   const yardShop = bindCoasterShop(coaster, {
     coins,
     blip: (kind) => audio.blip(kind),
@@ -366,6 +374,7 @@ async function bootGame() {
     },
     onCount: (count, connected) => {
       bots.setEnabled(connected);
+      riders.setOnline(connected);
       showOnline(connected ? count + bots.count : count, connected);
       social?.refresh();
     },
@@ -688,7 +697,7 @@ async function bootGame() {
     const spot = coaster.enter();
     player.respawn(spot.position, spot.heading);
   }
-  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, escape, coaster, yardUpgrades, shopkeepers, enterEscape, enterCoaster: () => beginCoasterFade("enter") };
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, riders, graphics, seasons, prison, escape, coaster, yardUpgrades, shopkeepers, enterEscape, enterCoaster: () => beginCoasterFade("enter") };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -958,6 +967,15 @@ async function bootGame() {
         player.respawn(event.position, event.heading);
       }
     }
+    if (riders.update(dt, player.camera, clock)) {
+      earnCoins(coins, RIDE_PAY);
+      showCoins();
+      coinPop.burst(frame.position);
+      audio.blip("ding");
+      showToast(t("toast.coasterRider").replace("{n}", RIDE_PAY.toLocaleString("en-US")));
+      toastTimer = 1.8;
+      nextToast = null;
+    }
     shopkeepers.update(dt, frame.foot, clock);
     yardShop.tick();
     yardUpgrades.tick(dt, clock, ui.startOpen || ui.settingsOpen || yardShop.open);
@@ -1149,13 +1167,6 @@ function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onThem
     button.addEventListener("click", () => selectDifficulty(button.dataset.difficulty));
   });
   selectDifficulty(preferences.difficulty);
-
-  // Police is part of your saved look, so the Character studio's toggle makes the switch and marks these.
-  menu.querySelectorAll("[data-role]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if ((button.dataset.role === "police") !== look.police) document.querySelector("#police").click();
-    });
-  });
 
   const selectBackground = (background) => {
     preferences.background = background;
@@ -1654,9 +1665,6 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
     bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${coinCount(priceOf("extra:bow"))}`;
     policeButton.setAttribute("aria-pressed", String(look.police));
     policeButton.textContent = look.police ? t("studio.policeOn") : t("studio.policeOff");
-    document.querySelectorAll("#start-menu [data-role]").forEach((button) => {
-      button.setAttribute("aria-pressed", String((button.dataset.role === "police") === look.police));
-    });
     document.querySelectorAll("#quality button").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.quality === look.quality));
     });

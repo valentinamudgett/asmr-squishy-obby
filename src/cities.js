@@ -191,10 +191,16 @@ export function createCities(scene, lavaY, sky, ridge) {
     const scale = Math.max(viewWidth / NY_PLANE_WIDTH, viewHeight / NY_PLANE_HEIGHT) * 1.35;
     photo.scaling.set(scale, scale, 1);
     const planeH = NY_PLANE_HEIGHT * scale;
-    // The harbor sits where the sea meets the skyline ring, so it sinks below eye level as you climb.
-    const above = Math.max(0, camera.position.y - (rootPos.y + lavaY));
-    const horizon = camera.position.y - above * (dist / RING);
-    photo.position.y = horizon - (NY_WATER - 0.5) * planeH - rootPos.y;
+    if (photoDistance) {
+      // The follow camera looks down at the deck, so the open sky is above eye level.
+      // Shift the photo up until the buildings sit in that band. The harbor stays hidden behind the platform.
+      photo.position.y = camera.position.y + 0.08 * planeH - rootPos.y;
+    } else {
+      // The harbor sits where the sea meets the skyline ring, so it sinks below eye level as you climb.
+      const above = Math.max(0, camera.position.y - (rootPos.y + lavaY));
+      const horizon = camera.position.y - above * (dist / RING);
+      photo.position.y = horizon - (NY_WATER - 0.5) * planeH - rootPos.y;
+    }
     // The plane faces +Z. Turn that face back toward the camera.
     photo.rotation.y = Math.atan2(fx, fz) + Math.PI;
   }

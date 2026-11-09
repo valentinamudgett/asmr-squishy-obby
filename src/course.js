@@ -61,12 +61,12 @@ const LAVA_SPIN_BASE = 0.75;
 const LAVA_SPIN_SCALE = { easy: 1.2, medium: 1.5, hard: 1.85 };
 /**
  * Hazards per menu difficulty; easy has none. `chance` scales the hazard rolls and `pace` turns the
- * level ramp into hazard speed. Medium never puts two hard things back to back, and hard puts a
- * sweeping bar on every squishy between checkpoints.
+ * level ramp into hazard speed. `maxRun` is how many hazard pads can come in a row before a calm one.
+ * Hard puts a sweeping bar on every wide squishy, but never on a narrow one or a spring.
  */
 const HAZARD_TUNING = {
-  medium: { chance: 0.7, pace: (d) => 0.7 * d, spaced: true, everyPad: false },
-  hard: { chance: 1.15, pace: (d) => 0.4 + d, spaced: false, everyPad: true },
+  medium: { chance: 0.7, pace: (d) => 0.7 * d, maxRun: 1, everyWide: false },
+  hard: { chance: 1, pace: (d) => 0.2 + 0.8 * d, maxRun: 3, everyWide: true },
 };
 /** Pads between the level-50 and level-100 checkpoints are never built: that climb is the prison escape. */
 const PRISON_INDEX = (PRISON_LEVEL - 1) * PADS_PER_LEVEL;
@@ -162,7 +162,7 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
       stairAnchor = null;
     }
 
-    buildHazards(scene, pad, lava, options.hazards, Boolean(prev?.busy), hazardRandom(index));
+    buildHazards(scene, pad, lava, options.hazards, prev?.busyRun ?? 0, hazardRandom(index));
     pads.push(pad);
     chain = pad;
     hooks.onAdd?.(pad);
@@ -241,8 +241,8 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
       let last = null;
       for (const pad of pads) {
         for (const hazard of pad.hazards) hazard.dispose();
-        const prevBusy = last?.index === pad.index - 1 && last.busy;
-        buildHazards(scene, pad, lava, hazards, prevBusy, hazardRandom(pad.index));
+        const prevRun = last?.index === pad.index - 1 ? last.busyRun : 0;
+        buildHazards(scene, pad, lava, hazards, prevRun, hazardRandom(pad.index));
         hooks.onHazards?.(pad);
         last = pad;
       }
@@ -658,36 +658,31 @@ function rollHazards(pad, prev, random) {
   pad.hazardRoll = { roll, fireRoll, gap, peak };
 }
 
-/** `tuning` is null on easy. `prevBusy` is whether the pad just before already has a hazard. */
-function buildHazards(scene, pad, lava, tuning, prevBusy, own) {
+/** `tuning` is null on easy. `prevRun` is how many hazard pads in a row lead up to this one. */
+function buildHazards(scene, pad, lava, tuning, prevRun, own) {
   pad.hazards = [];
-  // On medium the pad after a hazard, and the one before a lava disc, are always calm.
-  const calm = !tuning || (tuning.spaced && (prevBusy || lavaDiscSlot(pad.index + 1)));
-  if (!calm && pad.role === "pad") {
+  // A calm pad breaks up every run of hazards, and the pad before a lava disc is always calm.
+  const calm = !tuning || prevRun >= tuning.maxRun || lavaDiscSlot(pad.index + 1);
+  const rolls = pad.hazardRoll;
+  if (!calm && rolls) {
     const d = difficultyFor(pad.level);
     const pace = tuning.pace(d);
-    const rolls = pad.hazardRoll;
     const print = pad.hazardFootprint ?? pad.footprint;
     const wide = print.type === "circle" || Math.min(print.hx, print.hz) > 1.1;
     const onTop = !pad.lavaDisc;
     const sweeper =
-      onTop && (tuning.everyPad || (rolls && pad.level >= 3 && wide && rolls.roll < (0.22 + 0.3 * d) * tuning.chance));
-    const spikes =
-      onTop &&
-      rolls &&
-      pad.level >= 5 &&
-      rolls.roll > 1 - (0.18 + 0.25 * d) * tuning.chance &&
-      (tuning.everyPad || !sweeper);
+      onTop && wide && (tuning.everyWide || (pad.level >= 3 && rolls.roll < (0.22 + 0.3 * d) * tuning.chance));
+    const spikes = onTop && !sweeper && pad.level >= 5 && rolls.roll > 1 - (0.18 + 0.25 * d) * tuning.chance;
     if (sweeper) pad.hazards.push(createSweeper(scene, pad, pace, own));
     if (spikes) pad.hazards.push(createSpikes(scene, pad, pace, own));
-    // Medium keeps it to one hard thing per pad, and the lava disc already is one.
-    const crowded = tuning.spaced && (pad.hazards.length > 0 || pad.lavaDisc);
-    if (rolls && !pad.afterStairs && !crowded && rolls.fireRoll < (0.2 + 0.3 * d) * tuning.chance) {
+    // One hard thing per pad, and the lava disc already is one.
+    const crowded = pad.hazards.length > 0 || pad.lavaDisc;
+    if (!pad.afterStairs && !crowded && rolls.fireRoll < (0.2 + 0.3 * d) * tuning.chance) {
       pad.hazards.push(createFireball(scene, pad.id, rolls.gap, lava, rolls.peak, pace, own));
     }
   }
   if (pad.lavaDisc) pad.hazards.push(createLavaLine(scene, pad));
-  pad.busy = pad.hazards.length > 0;
+  pad.busyRun = pad.hazards.length > 0 ? prevRun + 1 : 0;
 }
 
 function pick(list, random) {

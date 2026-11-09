@@ -261,24 +261,7 @@
             <button type="button" data-difficulty="hard" aria-pressed="false">
               <span class="difficulty-icon" aria-hidden="true">🔥</span>
               <strong data-i18n="difficulty.hard">Hard</strong>
-              <small data-i18n="difficulty.hardHint">Bars on every squishy</small>
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="difficulty-picker role-picker">
-          <legend data-i18n="start.roleLabel">Play as</legend>
-          <p class="picker-note" data-i18n="start.roleNote">Who will you be in Capybara Prison?</p>
-          <div class="difficulty-options">
-            <button type="button" data-role="prisoner" aria-pressed="true">
-              <span class="difficulty-icon" aria-hidden="true">🏃</span>
-              <strong data-i18n="role.prisoner">Prisoner</strong>
-              <small data-i18n="role.prisonerHint">Wear prison stripes</small>
-            </button>
-            <button type="button" data-role="police" aria-pressed="false">
-              <span class="difficulty-icon" aria-hidden="true">👮</span>
-              <strong data-i18n="role.police">Police</strong>
-              <small data-i18n="role.policeHint">Uniform and cap, all the time</small>
+              <small data-i18n="difficulty.hardHint">Bars on most squishies</small>
             </button>
           </div>
         </fieldset>
@@ -329,16 +312,25 @@
             <span data-i18n="start.avatar">Customize avatar</span>
           </button>
           <button id="start-play" class="play-action" type="button">
-            <span data-i18n="start.play">Start bouncing</span>
-            <span aria-hidden="true">→</span>
+            <img class="play-photo" src="/menu/game-obby.jpg" alt="" width="1280" height="720" />
+            <span class="play-label">
+              <span data-i18n="start.play">Start bouncing</span>
+              <span aria-hidden="true">→</span>
+            </span>
           </button>
           <button id="start-prison" class="play-action play-prison" type="button">
-            <span data-i18n="start.prison">Prison run</span>
-            <span aria-hidden="true">→</span>
+            <img class="play-photo" src="/menu/game-prison.jpg" alt="" width="1280" height="720" />
+            <span class="play-label">
+              <span data-i18n="start.prison">Prison run</span>
+              <span aria-hidden="true">→</span>
+            </span>
           </button>
           <button id="start-coaster" class="play-action play-coaster" type="button">
-            <span data-i18n="start.coaster">Roller coaster</span>
-            <span aria-hidden="true">→</span>
+            <img class="play-photo" src="/menu/game-coaster.jpg" alt="" width="1280" height="720" />
+            <span class="play-label">
+              <span data-i18n="start.coaster">Roller coaster</span>
+              <span aria-hidden="true">→</span>
+            </span>
           </button>
         </div>
       </section>
@@ -509,18 +501,44 @@
     </div>
 
     <div id="boot">
+      <div class="boot-doodles" aria-hidden="true">
+        <span class="boot-doodle boot-doodle-plus boot-doodle-a"></span>
+        <span class="boot-doodle boot-doodle-dot boot-doodle-b"></span>
+        <span class="boot-doodle boot-doodle-plus boot-doodle-c"></span>
+        <span class="boot-doodle boot-doodle-square boot-doodle-d"></span>
+      </div>
       <div class="boot-card">
-        <img class="boot-logo" src="/logos/logo-3-sky.svg" alt="" width="120" height="120" />
-        <p id="boot-status" class="boot-title" data-i18n="boot.title">Loading...</p>
-        <div
-          id="boot-bar"
-          class="boot-bar"
-          role="progressbar"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-valuenow="0"
-        >
-          <div id="boot-fill" class="boot-fill"></div>
+        <div class="boot-titlebar">
+          <span id="boot-percent" class="boot-percent">0%</span>
+          <span class="boot-glyphs" aria-hidden="true">
+            <span class="boot-glyph boot-glyph-min"></span>
+            <span class="boot-glyph boot-glyph-max"></span>
+            <span class="boot-glyph boot-glyph-close"></span>
+          </span>
+        </div>
+        <div class="boot-body">
+          <p id="boot-status" class="boot-title" data-i18n="boot.title">Loading...</p>
+          <div
+            id="boot-bar"
+            class="boot-bar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div id="boot-fill" class="boot-fill"></div>
+            <span id="boot-cursor" class="boot-cursor" aria-hidden="true">
+              <svg viewBox="0 0 22 26" width="26" height="30">
+                <path
+                  fill="#fffaf3"
+                  stroke="#3c2b24"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                  d="M3.2 2.2 3.2 19.4 8.2 14.8 12.4 22.6 15.5 21 11.3 13.2 17.8 13Z"
+                />
+              </svg>
+            </span>
+          </div>
         </div>
       </div>
     </div>

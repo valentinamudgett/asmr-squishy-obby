@@ -137,6 +137,8 @@ export function createCoaster(scene) {
   let walk = [];
   let dist = [0];
   let length = 0;
+  // Bumps whenever the rails are rebuilt, so a guest lap can tell the track moved under it.
+  let trackRev = 0;
   let spot = null;
   let lowest = 0;
   let walkKit = null;
@@ -163,6 +165,7 @@ export function createCoaster(scene) {
   rebuild(false);
 
   function rebuild(persist = true) {
+    trackRev += 1;
     for (const mesh of trackMeshes) mesh.dispose(false, false);
     trackMeshes.length = 0;
     const track = buildTrack(layout.map((piece) => piece.id));
@@ -198,6 +201,23 @@ export function createCoaster(scene) {
     cart.position.set(OX + pose.x, OY + pose.y + bob, OZ + pose.z);
     cart.rotationQuaternion = Quaternion.RotationYawPitchRoll(face, 0, 0);
     return pose;
+  }
+
+  function seatPose(distance, returning) {
+    const pose = sampleAt(distance);
+    const face = returning ? pose.heading + Math.PI : pose.heading;
+    const sin = Math.sin(face);
+    const cos = Math.cos(face);
+    return {
+      cartX: OX + pose.x,
+      cartY: OY + pose.y,
+      cartZ: OZ + pose.z,
+      footX: OX + pose.x - sin * SIT_BACK,
+      footY: OY + pose.y + (SIT_SEAT - FOOT_OFFSET),
+      footZ: OZ + pose.z - cos * SIT_BACK,
+      heading: face,
+      pitch: pose.pitch,
+    };
   }
 
   function sampleAt(distance) {
@@ -376,6 +396,46 @@ export function createCoaster(scene) {
     /** Rail points relative to the yard origin, with heading and pitch. */
     get track() {
       return points;
+    },
+    /** Meters along the rails. A ride needs at least a few. */
+    get trackLength() {
+      return length;
+    },
+    /** Changes when the track is rebuilt. A guest lap that sees a new value was interrupted. */
+    get trackRev() {
+      return trackRev;
+    },
+    /**
+     * World pose of a cart and a sitting rider at `distance` along the rails.
+     * `returning` faces the cart back home, the same way ride() does.
+     * footX/Y/Z is the avatar root: the player's sitting capsule, minus the foot offset.
+     */
+    seatAt(distance, returning) {
+      return seatPose(distance, returning);
+    },
+    /**
+     * One step of a guest cart on the same sample and pace as ride() (9 m/s, faster downhill, at most 20).
+     * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means it is back at the station.
+     */
+    advanceGuest(trip, dt) {
+      if (!(dt > 0) || length < 4) return null;
+      const slope = -Math.sin(sampleAt(trip.travel).pitch) * trip.dir;
+      const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
+      trip.travel += trip.dir * speed * dt;
+      let done = false;
+      if (trip.dir > 0 && trip.travel >= length) {
+        trip.travel = length;
+        trip.dir = -1;
+      } else if (trip.dir < 0 && trip.travel <= 0) {
+        trip.travel = 0;
+        trip.dir = 1;
+        done = true;
+      }
+      return { ...seatPose(trip.travel, trip.dir < 0), done };
+    },
+    /** Dresses `root` in the cart you're riding, and returns its tick. */
+    dressGuestCart(root) {
+      return dressCart(scene, root, upgrades.cart, mats);
     },
     saveUpgrades() {
       save();

@@ -1052,6 +1052,13 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
   return runner;
 }
 
+/** The first few regulars, for guests who visit a coaster. Same names and looks as the crowd. */
+export function coasterGuests(count = 3) {
+  return makeRegulars()
+    .slice(0, count)
+    .map(({ name, look }) => ({ name, look: { ...look } }));
+}
+
 /** Fixed per regular: who they are, how they look, and how well they play. */
 function makeRegulars() {
   const regulars = [];

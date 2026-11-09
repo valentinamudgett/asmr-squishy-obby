@@ -636,8 +636,14 @@ body.show-touch #action-prompt { display: none; }
   z-index: 10;
   display: grid;
   place-items: center;
-  background: #000;
-  color: white;
+  padding: 24px;
+  background-color: #f4e7ce;
+  background-image:
+    linear-gradient(rgba(166, 136, 92, 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(166, 136, 92, 0.22) 1px, transparent 1px);
+  background-size: 64px 64px;
+  background-position: center;
+  color: #3c2b24;
   transition: opacity 0.4s ease-out;
 }
 
@@ -646,49 +652,188 @@ body.show-touch #action-prompt { display: none; }
   pointer-events: none;
 }
 
+.boot-doodles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.boot-doodle { position: absolute; }
+
+.boot-doodle-plus {
+  width: 14px;
+  height: 14px;
+  color: #6d5b3c;
+}
+
+.boot-doodle-plus::before,
+.boot-doodle-plus::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.boot-doodle-plus::before {
+  width: 14px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+}
+
+.boot-doodle-plus::after {
+  width: 2px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
+.boot-doodle-a { top: 11%; left: 7%; }
+.boot-doodle-b { top: 17%; right: 8%; }
+.boot-doodle-c { bottom: 15%; left: 6%; color: #8a7348; }
+.boot-doodle-d { bottom: 12%; right: 7%; }
+
+.boot-doodle-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #7d9a52;
+}
+
+.boot-doodle-square {
+  width: 10px;
+  height: 10px;
+  background: #b4963e;
+}
+
 .boot-card {
-  width: min(85vw, 720px);
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 620px);
+  border: 4px solid #3c2b24;
+  border-radius: 18px;
+  background: #f0b6c6;
+  box-shadow: 0 18px 28px rgba(74, 50, 30, 0.2);
+  overflow: hidden;
+}
+
+.boot-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 0 22px 0 20px;
+  background: #6dceb4;
+  border-bottom: 4px solid #3c2b24;
+}
+
+.boot-percent {
+  font-family: "Nunito", "Varela Round", "Quicksand", "Trebuchet MS", "Segoe UI", sans-serif;
+  font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.boot-glyphs {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.boot-glyph-min {
+  width: 16px;
+  height: 3px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.boot-glyph-max {
+  width: 14px;
+  height: 12px;
+  border: 3px solid currentColor;
+  border-radius: 2px;
+}
+
+.boot-glyph-close {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+
+.boot-glyph-close::before,
+.boot-glyph-close::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 3px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.boot-glyph-close::before { transform: translate(-50%, -50%) rotate(45deg); }
+.boot-glyph-close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+.boot-body {
   display: grid;
-  gap: 18px;
-  justify-items: center;
-}
-
-.boot-logo {
-  width: clamp(88px, 14vw, 128px);
-  height: auto;
-  animation: logo-squish 1.6s ease-in-out infinite;
-}
-
-@keyframes logo-squish {
-  0%, 100% { transform: scale(1, 1); }
-  45% { transform: scale(1.08, 0.9) translateY(4px); }
-  60% { transform: scale(0.96, 1.05); }
+  gap: 28px;
+  padding: 28px 28px 32px;
 }
 
 .boot-title {
   margin: 0;
   font-family: "Nunito", "Varela Round", "Quicksand", "Trebuchet MS", "Segoe UI", sans-serif;
-  font-size: clamp(1.6rem, 3.2vw, 2.1rem);
-  font-weight: 800;
+  font-size: clamp(1.7rem, 3.4vw, 2.15rem);
+  font-weight: 700;
   letter-spacing: 0.01em;
-  color: #fff;
+  text-align: left;
+  color: #3c2b24;
 }
 
 .boot-bar {
+  position: relative;
   width: 100%;
-  height: 40px;
-  padding: 4px;
-  border: 5px solid #a0485a;
+  height: 44px;
+  border: 3px solid #3c2b24;
   border-radius: 10px;
-  background: #000;
+  background: #fbf6ea;
+  overflow: visible;
 }
 
 .boot-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 0%;
   height: 100%;
-  border-radius: 2px;
-  background: #f6b6cf;
+  box-sizing: border-box;
+  border: 7px solid transparent;
+  border-right-width: 0;
+  border-radius: 6px;
+  background-image: repeating-linear-gradient(90deg, #e26478 0 24px, transparent 24px 31px);
+  background-clip: padding-box;
   transition: width 0.35s ease-out;
+}
+
+.boot-cursor {
+  position: absolute;
+  z-index: 1;
+  top: -7px;
+  left: 0%;
+  width: 26px;
+  height: 30px;
+  pointer-events: none;
+  transition: left 0.35s ease-out;
+}
+
+.boot-cursor svg { display: block; overflow: visible; }
+
+@keyframes logo-squish {
+  0%, 100% { transform: scale(1, 1); }
+  45% { transform: scale(1.08, 0.9) translateY(4px); }
+  60% { transform: scale(0.96, 1.05); }
 }
 
 #start-menu {
@@ -1010,15 +1155,6 @@ body.show-touch #action-prompt { display: none; }
 [data-difficulty="easy"] .difficulty-icon { background: linear-gradient(145deg, #e4f9cf, #c9eedc); }
 [data-difficulty="hard"] .difficulty-icon { background: linear-gradient(145deg, #ffd9b0, #ffb3c4); }
 
-.role-picker .difficulty-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.picker-note {
-  margin: -2px 0 8px;
-  color: #8e7a99;
-  font-size: 0.78rem;
-}
-[data-role="prisoner"] .difficulty-icon { background: repeating-linear-gradient(0deg, #f4f1ea 0 7px, #c9c4bc 7px 14px); }
-[data-role="police"] .difficulty-icon { background: linear-gradient(145deg, #cfdcff, #9fb6ef); }
-
 .background-preview {
   position: relative;
   display: block;
@@ -1276,7 +1412,7 @@ body.show-touch #action-prompt { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .preview-bubble, .preview-bat, .preview-flake, .preview-leaf, .boot-logo, .title-logo, .title-start, .title-blob { animation: none; }
+  .preview-bubble, .preview-bat, .preview-flake, .preview-leaf, .title-logo, .title-start, .title-blob { animation: none; }
 }
 
 .start-journey {
@@ -1694,10 +1830,12 @@ body.show-touch .chat { bottom: calc(164px + env(safe-area-inset-bottom)); }
 
 .start-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 11px;
-  margin-top: 22px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
 }
+
+#start-avatar { grid-column: 1 / -1; }
 
 .start-actions button {
   min-height: 53px;
@@ -1718,14 +1856,50 @@ body.show-touch .chat { bottom: calc(164px + env(safe-area-inset-bottom)); }
 
 .play-action {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 0;
+  padding: 6px 6px 4px;
+  overflow: hidden;
   color: white;
   background: linear-gradient(135deg, #df75a9, #9d79d5);
   box-shadow: 0 11px 24px rgba(158, 91, 154, 0.28);
+  text-align: center;
   text-shadow: 0 1px 1px rgba(74, 43, 88, 0.18);
 }
+
+.play-action:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+.play-photo {
+  display: block;
+  flex: 0 0 auto;
+  width: 100%;
+  /* Flex would otherwise stretch these to the photo's full pixel height. */
+  height: 92px;
+  min-height: 0;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(58, 36, 51, 0.12);
+}
+
+.play-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 2px 2px;
+  font-size: 0.88rem;
+  line-height: 1.15;
+}
+
+.play-label > span:first-child { min-width: 0; }
 
 .play-prison {
   background: linear-gradient(135deg, #ff8a2a, #e5484d);
@@ -2075,7 +2249,6 @@ body.title-open .players-panel { z-index: 8; }
   .start-subtitle { margin-bottom: 19px; }
   .start-journey { font-size: 0.82rem; }
   .difficulty-options, .background-options { grid-template-columns: 1fr; gap: 8px; }
-  .role-picker .difficulty-options { grid-template-columns: 1fr; }
   .theme-options { grid-auto-flow: row; }
   .difficulty-options button, .background-options button {
     grid-template-columns: auto 1fr;
@@ -2094,6 +2267,24 @@ body.title-open .players-panel { z-index: 8; }
   .difficulty-options strong, .background-options strong { align-self: end; margin-top: 0; }
   .difficulty-options small, .background-options small { align-self: start; }
   .start-actions { grid-template-columns: 1fr; }
+  .play-action {
+    flex-direction: row;
+    align-items: center;
+    padding: 7px 12px 7px 7px;
+    text-align: left;
+  }
+  .play-photo {
+    flex: none;
+    width: 108px;
+    height: 68px;
+  }
+  .play-label {
+    flex: 1;
+    justify-content: flex-start;
+    min-height: 0;
+    padding: 0 4px 0 10px;
+    font-size: 0.95rem;
+  }
   .friends-head { flex-wrap: wrap; }
   body.start-open .players-panel {
     top: max(12px, env(safe-area-inset-top));
@@ -2229,9 +2420,7 @@ body.theme-halloween .start-journey {
 body.theme-halloween .reward-icon { background: linear-gradient(145deg, #ffd9a0, #ff9a4a); }
 body.theme-halloween .reward-badge { background: #ffe2c4; }
 
-body.theme-halloween #boot { background: radial-gradient(ellipse at 50% 120%, #4a1f2a, #0b0614 62%); }
-body.theme-halloween .boot-bar { border-color: #e0701f; }
-body.theme-halloween .boot-fill { background: #ff8a2a; }
+/* Boot keeps the cream graph-paper window in every season. */
 
 /* Thanksgiving game style: the same screens in a golden harvest sunset, in pumpkin and cranberry. */
 body.theme-thanksgiving #title-screen,
@@ -2337,9 +2526,7 @@ body.theme-thanksgiving .start-journey {
 body.theme-thanksgiving .reward-icon { background: linear-gradient(145deg, #ffe08a, #f08a2a); }
 body.theme-thanksgiving .reward-badge { background: #ffe6c8; }
 
-body.theme-thanksgiving #boot { background: radial-gradient(ellipse at 50% 120%, #c8602a, #2a1408 62%); }
-body.theme-thanksgiving .boot-bar { border-color: #d8701e; }
-body.theme-thanksgiving .boot-fill { background: linear-gradient(90deg, #f07a1e, #c8243c); }
+/* Boot keeps the cream graph-paper window in every season. */
 
 /* Christmas game style: the same screens on a snowy evening, in candy red and fir green. */
 body.theme-christmas #title-screen,
@@ -2445,9 +2632,7 @@ body.theme-christmas .start-journey {
 body.theme-christmas .reward-icon { background: linear-gradient(145deg, #ffe08a, #ffb02a); }
 body.theme-christmas .reward-badge { background: #ffe4e8; }
 
-body.theme-christmas #boot { background: radial-gradient(ellipse at 50% 120%, #3a4a8a, #070d24 62%); }
-body.theme-christmas .boot-bar { border-color: #d0243a; }
-body.theme-christmas .boot-fill { background: linear-gradient(90deg, #e8283c, #2fa84f); }
+/* Boot keeps the cream graph-paper window in every season. */
 
 /* Valentine's Day game style: the same screens at a rosy dusk, in candy pink and heart red. */
 body.theme-valentines #title-screen,
@@ -2553,9 +2738,7 @@ body.theme-valentines .start-journey {
 body.theme-valentines .reward-icon { background: linear-gradient(145deg, #ffc4dc, #ff6f9f); }
 body.theme-valentines .reward-badge { background: #ffe4ee; }
 
-body.theme-valentines #boot { background: radial-gradient(ellipse at 50% 120%, #a04a7a, #1e0a1c 62%); }
-body.theme-valentines .boot-bar { border-color: #e83a78; }
-body.theme-valentines .boot-fill { background: linear-gradient(90deg, #ff4f8b, #e8283c); }
+/* Boot keeps the cream graph-paper window in every season. */
 
 /* Coaster upgrades: the on-screen buttons, the upgrade / decor panel, and the decor placing bar. */
 .coaster-hud {
