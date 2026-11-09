@@ -332,6 +332,14 @@
             <span data-i18n="start.play">Start bouncing</span>
             <span aria-hidden="true">→</span>
           </button>
+          <button id="start-prison" class="play-action play-prison" type="button">
+            <span data-i18n="start.prison">Prison run</span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <button id="start-coaster" class="play-action play-coaster" type="button">
+            <span data-i18n="start.coaster">Roller coaster</span>
+            <span aria-hidden="true">→</span>
+          </button>
         </div>
       </section>
 
@@ -365,6 +373,75 @@
       </section>
     </div>
 
+    <div id="coaster-shop" hidden>
+      <button id="coaster-shop-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="coaster-shop-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow" data-i18n="coaster.kicker">Your rollercoaster</p>
+            <h2 id="coaster-shop-title" data-i18n="coaster.shopTitle">Parts shack</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="coaster-coins">0</span></span>
+            <button id="coaster-shop-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p id="coaster-shop-note" class="note" data-i18n="coaster.shopNote">Buy parts here, then walk to the end of your track to add them. Finish a ride to earn 1,000 coins.</p>
+        <div id="coaster-parts" class="shop-grid"></div>
+        <button id="coaster-undo" type="button" data-i18n="coaster.remove">Take a part off</button>
+        <p id="coaster-shop-status" class="note" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="coaster-tool" hidden>
+      <p id="coaster-tool-text" aria-live="polite"></p>
+      <div class="coaster-tool-row">
+        <button id="coaster-tool-go" type="button"></button>
+        <button id="coaster-tool-cancel" type="button" data-i18n="coaster.cancel">Cancel</button>
+      </div>
+    </div>
+
+    <div id="coaster-hud" class="coaster-hud" hidden>
+      <button id="coaster-upgrades-open" type="button"><span aria-hidden="true">⭐</span> <span data-i18n="hud.upgrade">Upgrade</span></button>
+      <button id="coaster-sky-open" type="button" aria-expanded="false" aria-controls="coaster-sky-picker">
+        <span data-sky-glyph aria-hidden="true">🌌</span> <span data-i18n="hud.sky">Sky</span>
+      </button>
+      <div id="coaster-sky-picker" hidden>
+        <p data-i18n="sky.pick">Pick a sky</p>
+        <div id="coaster-sky-list"></div>
+      </div>
+      <button id="coaster-place-open" type="button" hidden><span aria-hidden="true">🎨</span> <span data-i18n="hud.decorate">Decorate</span></button>
+    </div>
+
+    <div id="coaster-upgrades" hidden>
+      <button id="coaster-upgrades-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet upgrade-sheet" role="dialog" aria-modal="true" aria-labelledby="coaster-upgrades-title">
+        <header class="sheet-head">
+          <div>
+            <p id="coaster-upgrades-kicker" class="eyebrow" data-i18n="upgrade.kicker">Make it yours</p>
+            <h2 id="coaster-upgrades-title" data-i18n="upgrade.title">Coaster upgrades</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="coaster-upgrades-coins">0</span></span>
+            <button id="coaster-upgrades-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p id="coaster-upgrades-note" class="note" data-i18n="upgrade.note">Make your platform bigger and pick a cart to ride. Upgrades are yours to keep.</p>
+        <div id="coaster-upgrades-body"></div>
+        <button id="coaster-upgrades-place" type="button" data-i18n="upgrade.placeOpen">🎨 Place decorations</button>
+        <p id="coaster-upgrades-status" class="note" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="coaster-place" hidden>
+      <p id="coaster-place-hint" aria-live="polite"></p>
+      <div id="coaster-place-items" class="place-chips"></div>
+      <div class="place-tools">
+        <button id="coaster-place-remove" type="button" hidden data-i18n="upgrade.pickUp">↩️ Pick it up</button>
+        <button id="coaster-place-done" type="button" data-i18n="upgrade.done">Done</button>
+      </div>
+    </div>
+
     <div id="settings" hidden>
       <button id="settings-backdrop" class="backdrop" type="button" aria-label="Close settings"></button>
       <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -378,7 +455,6 @@
           </div>
         </header>
         <canvas id="preview" width="480" height="320" aria-label="Live avatar preview"></canvas>
-        <button id="replay-prison" type="button" hidden data-i18n="studio.replayPrison">Play the prison escape again</button>
         <p class="label">Starter looks</p>
         <div id="presets" class="row"></div>
         <p class="label" id="body-label">Girl or boy</p>

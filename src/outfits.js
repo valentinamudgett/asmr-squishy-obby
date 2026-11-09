@@ -163,9 +163,40 @@ export const POLICE_OUTFIT = {
   belt: "#141416",
 };
 
+/** Worn by the coaster yard's shopkeepers (see shopkeepers.js). Not in OUTFITS, so never picked, sold, or saved. */
+export const BUILDER_OUTFIT = {
+  id: "builder",
+  label: "Safety vest",
+  swatch: ["#ff9a3d", "#fff3a0"],
+  torso: "#ff9a3d",
+  overlay: "vest",
+  sleeve: "#9fc8ff",
+  forearm: "#9fc8ff",
+  skirt: null,
+  thigh: { type: "denim" },
+  shin: { type: "denim" },
+  shoes: "#8a5a3b",
+};
+
+export const DECORATOR_OUTFIT = {
+  id: "decorator",
+  label: "Paint apron",
+  swatch: ["#7dcea0", "#c7a8ff"],
+  torso: "#c7a8ff",
+  overlay: "apron",
+  sleeve: "#c7a8ff",
+  forearm: "skin",
+  skirt: "#7dcea0",
+  thigh: "skin",
+  shin: "#fff6ea",
+  shoes: "#ff4d8d",
+};
+
 export function outfitById(id) {
   if (id === PRISONER_OUTFIT.id) return PRISONER_OUTFIT;
   if (id === POLICE_OUTFIT.id) return POLICE_OUTFIT;
+  if (id === BUILDER_OUTFIT.id) return BUILDER_OUTFIT;
+  if (id === DECORATOR_OUTFIT.id) return DECORATOR_OUTFIT;
   return OUTFITS.find((outfit) => outfit.id === id) ?? OUTFITS[0];
 }
 
@@ -342,6 +373,15 @@ function star(ctx, x, y, r) {
     const radius = i % 2 ? r * 0.45 : r;
     ctx.lineTo(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius);
   }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function heart(ctx, x, y, r) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + r);
+  ctx.bezierCurveTo(x - r * 1.6, y - r * 0.2, x - r * 0.7, y - r * 1.3, x, y - r * 0.45);
+  ctx.bezierCurveTo(x + r * 0.7, y - r * 1.3, x + r * 1.6, y - r * 0.2, x, y + r);
   ctx.closePath();
   ctx.fill();
 }
@@ -607,6 +647,59 @@ function paintRest(ctx, size, overlay) {
     star(ctx, size * 0.71, size * 0.28, size * 0.11);
     ctx.fillStyle = "#ffd447";
     star(ctx, size * 0.71, size * 0.28, size * 0.085);
+    return;
+  }
+  if (overlay === "vest") {
+    // A tee showing at the neck, a zip, two shiny safety bands, and a pocket with a pink pencil.
+    ctx.fillStyle = "#9fc8ff";
+    ctx.beginPath();
+    ctx.moveTo(size * 0.34, 0);
+    ctx.lineTo(size * 0.66, 0);
+    ctx.lineTo(size * 0.5, size * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    for (const y of [0.5, 0.74]) {
+      ctx.fillStyle = "#fff3a0";
+      ctx.fillRect(0, size * y, size, size * 0.11);
+      ctx.fillStyle = "#e9eef5";
+      ctx.fillRect(0, size * (y + 0.035), size, size * 0.04);
+    }
+    ctx.strokeStyle = "#d9742a";
+    ctx.lineWidth = size * 0.016;
+    ctx.beginPath();
+    ctx.moveTo(size * 0.5, size * 0.3);
+    ctx.lineTo(size * 0.5, size);
+    ctx.stroke();
+    ctx.fillStyle = "#ff4d8d";
+    ctx.fillRect(size * 0.7, size * 0.17, size * 0.035, size * 0.15);
+    ctx.fillStyle = "#e8852f";
+    roundRect(ctx, size * 0.62, size * 0.27, size * 0.2, size * 0.14, size * 0.02);
+    ctx.fill();
+    return;
+  }
+  if (overlay === "apron") {
+    // A mint bib on neck straps, lace along its top, a heart pocket, and a few paint dabs.
+    ctx.fillStyle = "#7dcea0";
+    ctx.fillRect(size * 0.28, 0, size * 0.07, size * 0.3);
+    ctx.fillRect(size * 0.65, 0, size * 0.07, size * 0.3);
+    roundRect(ctx, size * 0.22, size * 0.28, size * 0.56, size * 0.8, size * 0.06);
+    ctx.fill();
+    ctx.fillStyle = "#fff6ea";
+    for (let i = 0; i < 7; i += 1) {
+      ctx.beginPath();
+      ctx.arc(size * (0.26 + i * 0.08), size * 0.28, size * 0.035, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    roundRect(ctx, size * 0.36, size * 0.6, size * 0.28, size * 0.22, size * 0.04);
+    ctx.fill();
+    ctx.fillStyle = "#ff4d8d";
+    heart(ctx, size * 0.5, size * 0.7, size * 0.07);
+    for (const [x, y, r, hex] of [[0.3, 0.44, 0.03, "#ffd23f"], [0.68, 0.5, 0.035, "#ff4d8d"], [0.62, 0.38, 0.022, "#b79cff"], [0.28, 0.9, 0.028, "#9fc8ff"]]) {
+      ctx.fillStyle = hex;
+      ctx.beginPath();
+      ctx.arc(size * x, size * y, size * r, 0, Math.PI * 2);
+      ctx.fill();
+    }
     return;
   }
   if (overlay === "eightyNine") {

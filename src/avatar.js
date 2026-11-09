@@ -123,22 +123,30 @@ export function buildAvatar(scene) {
     const width = isArm ? 0.22 : 0.245;
     const sizes = isArm ? [0.24, 0.16, 0.08] : [0.2, 0.24, 0.06];
     let y = isArm ? 0.02 : 0;
+    // Shin and foot hang off a knee so the coaster seat can fold them. Straight (rotation 0) matches the old leg.
+    // Arms stay one piece: cuffs, mitts, and held toys are placed on the shoulder pivot.
+    const bend = isArm ? null : new TransformNode(`${pivot.name}Bend`, scene);
+    if (bend) {
+      bend.parent = pivot;
+      bend.position.y = -sizes[0];
+    }
     const parts = sizes.map((height, index) => {
       const foot = !isArm && index === 2;
+      const folded = Boolean(bend) && index > 0;
       const mesh = box(
         `${pivot.name}-${index}`,
         width + (foot ? 0.01 : 0),
         height,
         foot ? 0.3 : isArm ? 0.22 : 0.245,
-        pivot,
+        folded ? bend : pivot,
         0,
-        y - height / 2,
+        (folded ? y - bend.position.y : y) - height / 2,
         foot ? 0.03 : 0,
       );
       y -= height;
       return mesh;
     });
-    return { side, pivot, parts };
+    return { side, pivot, bend, parts };
   };
   const arms = [limb(-1, true), limb(1, true)];
   const legs = [limb(-1, false), limb(1, false)];
@@ -224,6 +232,11 @@ export function buildAvatar(scene) {
   blaster.root.position.set(0, -0.42, 0.01);
   blaster.root.setEnabled(false);
   let armed = false;
+  // Center of the left fist. Its y scale undoes the arm's stretch, so anything held keeps its shape.
+  const leftGrip = new TransformNode("avatarLeftGrip", scene);
+  leftGrip.parent = arms[0].pivot;
+  leftGrip.position.set(0, -0.42, 0);
+  let leftHeld = false;
   const costumes = buildCostumes(scene, headNode, body, { arms, skin });
 
   const furTexture = new DynamicTexture("avatarFur", { width: 256, height: 256 }, scene, true);
@@ -300,6 +313,8 @@ export function buildAvatar(scene) {
   let airBlend = 0;
   let flyBlend = 0;
   let hangBlend = 0;
+  // How far a taller build must drop so its hip lands on the same cart seat as a kid.
+  let sitDrop = 0;
   let move = null;
   let lastMove = null;
   let danceTime = 0;
@@ -314,6 +329,8 @@ export function buildAvatar(scene) {
     rig.scaling.setAll(build.scale);
     // Longer legs reach further below the hip, so lift the rig to keep the feet on the ground.
     rigLift = HIP_Y * (build.legs - 1) * build.scale;
+    const kid = BUILDS.kid;
+    sitDrop = HIP_Y * build.legs - (HIP_Y * kid.legs * kid.scale) / build.scale;
     rig.position.y = rigLift;
     torso.scaling.set(wide, build.torso, 1);
     torso.position.y = HIP_Y + torsoH / 2;
@@ -327,6 +344,7 @@ export function buildAvatar(scene) {
       arm.pivot.scaling.y = build.arms;
     }
     for (const leg of legs) leg.pivot.scaling.y = build.legs;
+    leftGrip.scaling.y = 1 / build.arms;
     headNode.scaling.setAll(build.head);
     headNode.position.y = HIP_Y + torsoH + NECK + HEAD_HALF * build.head;
     height = rig.position.y + (headNode.position.y + (HEAD_HALF + 0.05) * build.head) * build.scale;
@@ -418,6 +436,11 @@ export function buildAvatar(scene) {
       armed = on;
       blaster.root.setEnabled(on);
       held.root.setEnabled(!on && Boolean(held.id));
+    },
+    /** Holds `node` up in the left fist, its +z running out of the fist (up while held). */
+    holdLeft(node) {
+      node.parent = leftGrip;
+      leftHeld = true;
     },
     dispose() {
       root.dispose(false, true);
@@ -539,10 +562,31 @@ export function buildAvatar(scene) {
       if (hold > 0.001) toward(arms[1].pivot, -1.25, -0.15, 0.55, hold);
       const aim = armed ? (1 - flyBlend) * (1 - hangBlend) * (1 - danceBlend) * (1 - wave) : 0;
       if (aim > 0.001) toward(arms[1].pivot, -1.5, 0, 0.1, aim);
+      const grip = leftHeld ? (1 - flyBlend) * (1 - hangBlend) * (1 - danceBlend) * (1 - wave) : 0;
+      if (grip > 0.001) toward(arms[0].pivot, -1.2, 0.15, -0.35, grip);
       if (held.id) {
         const pulse = 1 + Math.sin(pose.time * 3.2) * 0.045;
         const armScale = arms[1].pivot.scaling.y || 1;
         held.root.scaling.set(pulse, pulse / armScale, pulse);
+      }
+
+      // Coaster seat: hips down, knees up, hands on the lap. Snaps off when the ride ends (not the zipline hang).
+      const sitting = Boolean(pose.sitting);
+      if (sitting) {
+        body.position.y = -sitDrop;
+        body.rotation.set(-0.05, 0, 0);
+        headNode.rotation.set(0.08, 0, 0);
+        legs[0].pivot.rotation.set(-2.34, 0, -0.16);
+        legs[1].pivot.rotation.set(-2.34, 0, 0.16);
+        legs[0].bend.rotation.set(1.22, 0, 0);
+        legs[1].bend.rotation.set(1.22, 0, 0);
+        arms[0].pivot.rotation.set(-0.7, 0.1, 0.42);
+        arms[1].pivot.rotation.set(-0.7, -0.1, -0.42);
+        skirt.rotation.x = 0.22;
+      } else {
+        legs[0].bend.rotation.set(0, 0, 0);
+        legs[1].bend.rotation.set(0, 0, 0);
+        skirt.rotation.x = 0;
       }
 
       body.scaling.set(1 - stretch * 0.5, 1 + stretch, 1 - stretch * 0.5);

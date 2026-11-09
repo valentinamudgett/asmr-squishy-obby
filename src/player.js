@@ -494,6 +494,17 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         stairRun = onStair;
         move.copyFrom(wish);
         if (onStair) move.scaleInPlace(STAIR_RUN);
+        // Catwalk belt: step along the planks first. Rails, slopes, and a jump still run after this.
+        if (!onStair && !wantJump && allowInput && hooks.beltStep) {
+          const step = hooks.beltStep(foot, wish, dt);
+          if (step) {
+            position.x += step.x;
+            position.y += step.y;
+            position.z += step.z;
+            controller.setPosition(position);
+            if (wish.lengthSquared() <= 0.4) facing = lerpAngle(facing, step.heading, 1 - Math.exp(-8 * dt));
+          }
+        }
         const moved = controller.calculateMovement(
           dt,
           forward,

@@ -75,6 +75,11 @@ export function createWorld(scene, lavaY) {
   let lift = 0;
   let sunk = 0;
   let hemi = null;
+  // Coaster-yard sky. Null keeps the level-150 space look. Never writes the obby backdrop.
+  let yardSky = null;
+  let yardHeld = false;
+  let skyHidden = false;
+  const earthRoot = earth.meshes[0].parent;
 
   return {
     lava: lava.mesh,
@@ -105,6 +110,15 @@ export function createWorld(scene, lavaY) {
      * the sea. `indoors` (in the prison) keeps the cloud puffs, which follow you, out of the rooms.
      */
     update(time, dt, focus, level = 1, drop = 0, indoors = false) {
+      if (!yardSky && yardHeld) {
+        cities.setPhotoDistance(null);
+        cities.setBackdrop(backdrop);
+        yardHeld = false;
+      }
+      if (skyHidden && yardSky !== "overlay") {
+        sky.setEnabled(true);
+        skyHidden = false;
+      }
       const target = cloudTarget(level);
       if (cover < 0) cover = target;
       else cover += (target - cover) * (1 - Math.exp(-0.85 * dt));
@@ -122,16 +136,18 @@ export function createWorld(scene, lavaY) {
       // The ground stays under the clouds and only gives way to the Earth in space.
       const left = 1 - smoothstep(0, 0.35, space);
       const lavaFade = backdrop === "lava" ? left : 0;
-      const lavaOn = lavaFade > 0.03;
+      // The yard's lava sky shows the sea even though this height has already faded it out.
+      const lavaAmount = yardSky === "lava" ? 1 : lavaFade;
+      const lavaOn = lavaAmount > 0.03;
       lava.mesh.setEnabled(lavaOn);
       if (lavaOn) {
         lava.update(time, focus, seaNow);
-        fadeMaterial(lava.mesh.material, lavaFade);
+        fadeMaterial(lava.mesh.material, lavaAmount);
         bubbles.update(dt, focus, seaNow);
         embers.emitter.set(focus.x, seaNow + 0.2, focus.z + 8);
       }
-      bubbles.setFade(lavaFade);
-      embers.setFade(lavaFade);
+      bubbles.setFade(lavaAmount);
+      embers.setFade(lavaAmount);
       const scenery = left > 0.03 && backdrop !== "newyork";
       mountains.root.setEnabled(scenery);
       rainbow.setEnabled(scenery);
@@ -166,7 +182,59 @@ export function createWorld(scene, lavaY) {
         Color3.LerpToRef(hemi.diffuse, HEMI_SPACE, space, hemi.diffuse);
         hemi.intensity = 0.6 + cover * 0.18 * (1 - space) + space * 0.1;
       }
+      if (yardSky) {
+        // Repainting a backdrop also recolors the fog. Put the yard lights back so the deck stays dim.
+        const fog = scene.fogColor.clone();
+        const ambient = scene.ambientColor.clone();
+        const clear = scene.clearColor.clone();
+        const fogStart = scene.fogStart;
+        const fogEnd = scene.fogEnd;
+        const hemiDiffuse = hemi?.diffuse.clone();
+        const hemiGround = hemi?.groundColor.clone();
+        const hemiIntensity = hemi?.intensity;
+        stars.mesh.setEnabled(false);
+        earthRoot.setEnabled(false);
+        if (yardSky === "overlay") {
+          sky.setEnabled(false);
+          skyHidden = true;
+        } else {
+          // A holiday sky may have turned this off. The painted backdrop has to be the one on screen.
+          sky.setEnabled(true);
+          skyHidden = false;
+          // Past the longest track and inside the sky sphere, so the photo can't hide the ride.
+          cities.setPhotoDistance(yardSky === "newyork" ? 700 : null);
+          cities.setCloud(0, 1, 0);
+          cities.setBackdrop(yardSky);
+          cities.update(time, height - lift);
+          if (yardSky === "hollywood") {
+            mountains.root.setEnabled(true);
+            rainbow.setEnabled(true);
+            mountains.root.position.set(focus.x * 0.9, base, focus.z);
+            rainbow.position.set(focus.x * 0.9, base, focus.z);
+            fadeMaterial(mountains.material, 1);
+            fadeMaterial(rainbowMat, 1);
+          }
+        }
+        scene.fogColor.copyFrom(fog);
+        scene.ambientColor.copyFrom(ambient);
+        scene.clearColor.copyFrom(clear);
+        scene.fogStart = fogStart;
+        scene.fogEnd = fogEnd;
+        if (hemi && hemiDiffuse) {
+          hemi.diffuse.copyFrom(hemiDiffuse);
+          hemi.groundColor.copyFrom(hemiGround);
+          hemi.intensity = hemiIntensity;
+        }
+        yardHeld = true;
+      }
       return cover;
+    },
+    /**
+     * Coaster yard only. `null` is the usual space sky. "overlay" hides the Earth and stars
+     * for a coaster sky mesh. Does not change the saved obby backdrop or the yard lights.
+     */
+    setYardSky(mode) {
+      yardSky = mode === "hollywood" || mode === "newyork" || mode === "lava" || mode === "overlay" ? mode : null;
     },
     /** "hollywood" is the sunset city. "newyork" is the night photo. "lava" keeps the sea and embers. */
     setBackdrop(mode) {

@@ -18,7 +18,10 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { createAudio } from "./audio.js";
 import { createLavaPop } from "./boom.js";
 import { createBots } from "./bot.js";
-import { awardLevelCoin, createCoinPop, earnCoins, LEVEL_COINS, loadCoins, spendCoins } from "./coins.js";
+import { awardLevelCoin, createCoinPop, earnCoins, grantCoasterPurse, LEVEL_COINS, loadCoins, spendCoins } from "./coins.js";
+import { bindCoasterShop, COASTER_LEVEL, createCoaster, RIDE_PAY } from "./coaster.js";
+import { bindCoasterUpgrades } from "./coasterUpgrades.js";
+import { bindCoasterSky } from "./coasterSky.js";
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
@@ -51,6 +54,7 @@ import { smoothstep } from "./geometry.js";
 import { createPlayer, FOOT_OFFSET, STAIR_RUN } from "./player.js";
 import { createPrison, FREEDOM_LEVEL, isPrisonLevel, PRISON_LEVEL } from "./prison.js";
 import { hairColorKey, isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, tryBuy } from "./rewards.js";
+import { createShopkeepers } from "./shopkeepers.js";
 import { bindSocial } from "./social.js";
 import { createWorld } from "./world.js";
 import "@fontsource/dancing-script/600.css";
@@ -74,6 +78,7 @@ const actionButton = document.querySelector("#action-button");
 const coinsEl = document.querySelector("#coins");
 const menuCoinsEl = document.querySelector("#menu-coins");
 const shopCoinsEl = document.querySelector("#shop-coins");
+const coasterCoinsEl = document.querySelector("#coaster-coins");
 const coins = loadCoins();
 const hintEl = document.querySelector("#hint");
 const toastEl = document.querySelector("#toast");
@@ -232,19 +237,23 @@ async function bootGame() {
   const seasons = {};
   let prison = null;
   let best = loadBest();
+  if (best >= COASTER_LEVEL && grantCoasterPurse(coins)) showCoins();
   const day = courseDay();
+  let coaster = null;
   const course = createCourse(scene, {
     onAdd(pad) {
       audio.attachPad(pad).catch((error) => console.warn("Pad sound failed", error));
       graphics?.addPad(pad);
       for (const season of Object.values(seasons)) season.addPad(pad);
       prison?.addPad(pad);
+      coaster?.mark(pad);
     },
     onRemove(pad) {
       audio.detachPad(pad);
       graphics?.removePad(pad);
       for (const season of Object.values(seasons)) season.removePad(pad);
       prison?.removePad(pad);
+      coaster?.unmark(pad);
       if (pad.flight) graphics?.removeStair(pad.flight);
     },
     onStair(flight) {
@@ -279,6 +288,7 @@ async function bootGame() {
       toastTimer = 1.6;
       nextToast = null;
     },
+    beltStep: (foot, wish, dt) => coaster?.beltStep(foot, wish, dt) ?? null,
   }, course.start.heading ?? 0);
   player.setAngelFlight(look.costume === "angel");
   audio.attachListener(player.camera);
@@ -296,6 +306,31 @@ async function bootGame() {
   for (const pad of course.pads) prison.addPad(pad);
   escape = createEscape(scene, { graphics, audio, avatar });
   escape.setPolice(look.police);
+  coaster = createCoaster(scene);
+  for (const pad of course.pads) coaster.mark(pad);
+  const shopkeepers = createShopkeepers(scene, graphics, coaster);
+  const yardShop = bindCoasterShop(coaster, {
+    coins,
+    blip: (kind) => audio.blip(kind),
+    onCoins: () => {
+      showCoins();
+      shopkeepers.thanks("shop");
+    },
+    onDone: (text, next) => {
+      showToast(text);
+      toastTimer = 1.6;
+      nextToast = next;
+    },
+  });
+  const yardUpgrades = bindCoasterUpgrades(scene, coaster, {
+    coins,
+    blip: (kind) => audio.blip(kind),
+    onCoins: () => {
+      showCoins();
+      shopkeepers.thanks("decor");
+    },
+  });
+  const yardSky = bindCoasterSky(scene, coaster, world, graphics);
   // In the prison you wear stripes (or your police uniform, with "Play as police" on). Only the avatar
   // wears them: the saved look and the one other players see stay yours.
   let prisoner = false;
@@ -324,6 +359,7 @@ async function bootGame() {
     graphics,
     // Players in the prison are all in the same place, so they see each other there and nowhere else.
     isNear: (index) => {
+      if (coaster.active) return false;
       if (index === PRISON_INDEX || escape.active) return index === PRISON_INDEX && escape.active;
       const pads = course.pads;
       return pads.length > 0 && index >= pads[0].index - 2 && index <= pads[pads.length - 1].index + 2;
@@ -391,6 +427,7 @@ async function bootGame() {
       if (wasSeasonal) world.setBackdrop(background);
       seasons[theme]?.setEnabled(true);
     },
+    (mode) => startGame(mode),
   );
   bindTitleScreen();
   syncMenuMusic();
@@ -424,14 +461,21 @@ async function bootGame() {
     pop.place({ x: spot.x, y: spot.y - FOOT_OFFSET, z: spot.z });
     pointAhead(home);
   };
-  /** Counts down the dark screen before the cell. */
+  /** Counts down the dark screen before the cell, or before the coaster yard. */
   let lockIn = 0;
+  let coasterLock = 0;
+  let coasterLockMode = "enter";
+  let coasterGate = false;
   const showLevel = (level) => {
     levelEl.textContent = String(level);
     showEscape(level);
   };
-  /** Puts you in Capybara Prison at checkpoint `at` (50, 75, 80, or 90). `again` is a replay from the Character studio. */
+  /** Puts you in Capybara Prison at checkpoint `at` (50, 75, 80, or 90). `again` is a visit from the main menu that should not move the climb. */
   const enterEscape = (at, again = false) => {
+    // A coaster fade or an active yard ride would put you back on the cart the same frame, so the
+    // prison never stays on screen. Leave the yard first; the saved track and coins stay put.
+    coasterLock = 0;
+    if (coaster.active) coaster.leave();
     const spot = escape.enter(at, { again });
     nabCount = 0;
     nabCountEl.textContent = "0";
@@ -448,17 +492,14 @@ async function bootGame() {
   };
   /**
    * Out through the prison gate onto the level-100 checkpoint, which then lets you out as usual.
-   * After a replay you're already past it, so you go back to your own checkpoint instead.
+   * A main-menu visit goes back to your own checkpoint instead, so it never skips the climb.
    */
   const leaveEscape = () => {
     const again = escape.replay;
-    escape.leave();
-    bots.setPrison(null, checkpointPad.index);
-    endCloseUp();
-    player.setSpeedBoost(1);
+    leavePrisonQuiet();
     const exit = course.pads.find((pad) => pad.role === "checkpoint" && pad.level === FREEDOM_LEVEL);
     lastSafePad = checkpointPad;
-    sendHome(checkpointPad.level >= FREEDOM_LEVEL || !exit ? checkpointPad : exit);
+    sendHome(again || checkpointPad.level >= FREEDOM_LEVEL || !exit ? checkpointPad : exit);
     showLevel(checkpointPad.level);
     if (again) {
       showToast(t("toast.escaped"));
@@ -466,6 +507,15 @@ async function bootGame() {
       nextToast = t("toast.backToObby");
     }
   };
+  /** Steps out of the prison without moving you. The caller decides where you stand next. */
+  function leavePrisonQuiet() {
+    if (!escape.active) return;
+    escape.leave();
+    bots.setPrison(null, checkpointPad.index);
+    endCloseUp();
+    player.setSpeedBoost(1);
+    showLevel(checkpointPad.level);
+  }
   // The caught close-up looks through its own camera for a second, so the follow camera can't move
   // it. You're hidden meanwhile (your name tag follows the avatar), so nothing of yours blocks the face.
   const closeUpCamera = new FreeCamera("closeUpCamera", new Vector3(), scene);
@@ -488,24 +538,120 @@ async function bootGame() {
     avatar.root.setEnabled(true);
     selfBubble.setShown(true);
   }
-  const replayButton = document.querySelector("#replay-prison");
-  const showReplay = () => {
-    replayButton.hidden = best < FREEDOM_LEVEL || escape.active;
-  };
-  document.querySelector("#settings-open").addEventListener("click", showReplay);
-  replayButton.addEventListener("click", () => {
-    document.querySelector("#settings-close").click();
-    if (ui.startOpen) document.querySelector("#start-play").click();
-    lockIn = 0;
+  /** Where a saved prison run should resume. A visit from the menu always starts in the cell. */
+  function prisonMenuLevel() {
+    if (best < PRISON_LEVEL || best >= FREEDOM_LEVEL) return PRISON_LEVEL;
+    return [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+  }
+  /**
+   * Main menu picks. Obby returns to the climb. Prison and the roller coaster are their own games:
+   * a visit before you reach them (or a replay after you escape) does not skip the climb.
+   */
+  function startGame(mode) {
+    if (mode === "prison") {
+      if (escape.active || lockIn > 0) return;
+      if (coasterLock > 0) {
+        coasterLock = 0;
+        fadeEl.classList.remove("is-on");
+      }
+      if (coaster.active) coaster.leave();
+      const again = best < PRISON_LEVEL || best >= FREEDOM_LEVEL;
+      enterEscape(prisonMenuLevel(), again);
+      return;
+    }
+    if (mode === "coaster") {
+      if (coaster.active && coasterLock <= 0) return;
+      if (coasterLock > 0) {
+        const leaving = coasterLockMode === "leave";
+        coasterLock = 0;
+        fadeEl.classList.remove("is-on");
+        if (coaster.active && leaving) return;
+      }
+      if (lockIn > 0) {
+        lockIn = 0;
+        fadeEl.classList.remove("is-on");
+      }
+      beginCoasterFade("enter");
+      return;
+    }
+    if (lockIn > 0) {
+      lockIn = 0;
+      fadeEl.classList.remove("is-on");
+    }
+    if (coasterLock > 0 && coasterLockMode !== "leave") {
+      coasterLock = 0;
+      fadeEl.classList.remove("is-on");
+    }
+    if (coaster.active) {
+      beginCoasterFade("leave");
+      return;
+    }
+    if (!escape.active) return;
+    // Quitting a visit goes home quietly. Finishing through the gate still uses leaveEscape.
+    leavePrisonQuiet();
+    lastSafePad = checkpointPad;
+    sendHome(checkpointPad);
+  }
+  function beginCoasterFade(mode) {
+    if (coasterLock > 0 || lockIn > 0) return;
+    if (mode === "enter" && coaster.active) return;
+    if (mode === "leave" && !coaster.active) return;
+    if (escape.active && mode !== "enter") return;
+    coasterLockMode = mode;
+    coasterLock = LOCK_SECONDS;
+    fadeEl.classList.add("is-on");
+    audio.setWalking(false);
+    avatar.stopDance();
+    guide.hide();
+    yardShop.close();
+    yardUpgrades.close();
+  }
+  function finishCoasterFade() {
+    // The cell fade owns the screen. Don't drop the player in the yard over it.
+    if (lockIn > 0) return;
     fadeEl.classList.remove("is-on");
-    enterEscape(PRISON_LEVEL, true);
-  });
+    if (coasterLockMode === "leave") {
+      coaster.leave();
+      sendHome(checkpointPad);
+      showLevel(checkpointPad.level);
+      showToast(t("toast.coasterBack"));
+      toastTimer = 1.8;
+      nextToast = null;
+      return;
+    }
+    if (escape.active) leavePrisonQuiet();
+    const spot = coaster.enter();
+    plunge = null;
+    meltHome = null;
+    player.respawn(spot.position, spot.heading);
+    showToast(t("toast.coasterYard"));
+    toastTimer = 2.2;
+    nextToast = t("toast.coasterHint");
+  }
+  function doAction() {
+    if (yardShop.open || yardUpgrades.open || ui.settingsOpen || ui.startOpen || coasterLock > 0) return;
+    if (escape.active) {
+      escape.act();
+      return;
+    }
+    if (coaster.active) {
+      const kind = coaster.act();
+      if (kind === "ride") audio.blip("clank");
+      else if (kind === "shop") yardShop.show("shop");
+      else if (kind === "build") yardShop.show("build");
+      else if (kind === "decor") yardUpgrades.show("decor");
+      else if (kind === "exit") beginCoasterFade("leave");
+      return;
+    }
+    if (coasterGate) beginCoasterFade("enter");
+    else escape.act();
+  }
   window.addEventListener("keydown", (event) => {
-    if (event.code === "KeyE" && !(event.target instanceof HTMLInputElement) && !ui.settingsOpen && !ui.startOpen) escape.act();
+    if (event.code === "KeyE" && !(event.target instanceof HTMLInputElement) && !ui.settingsOpen && !ui.startOpen) doAction();
   });
   actionButton.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    escape.act();
+    doAction();
   });
   let actionShown = null;
   let sodaShown = false;
@@ -538,8 +684,11 @@ async function bootGame() {
       showToast(`Level ${at}`);
       toastTimer = 2.4;
     }
+  } else if (best >= COASTER_LEVEL && coaster.wasHere()) {
+    const spot = coaster.enter();
+    player.respawn(spot.position, spot.heading);
   }
-  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, escape, enterEscape };
+  if (showDebug) window.__obby = { scene, course, player, world, audio, pop, coins, coinPop, online, bots, graphics, seasons, prison, escape, coaster, yardUpgrades, shopkeepers, enterEscape, enterCoaster: () => beginCoasterFade("enter") };
 
   const wake = () => {
     audio.unlock().catch((error) => console.warn("Audio unlock failed", error));
@@ -571,24 +720,35 @@ async function bootGame() {
         fadeEl.classList.remove("is-on");
       }
     }
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !avatar.dancing && !pop.active && lockIn <= 0 && !closeUp;
+    if (coasterLock > 0) {
+      coasterLock -= dt;
+      if (coasterLock <= 0) finishCoasterFade();
+    }
+    const allowInput = !ui.settingsOpen && !ui.startOpen && !yardShop.open && !yardUpgrades.open && !avatar.dancing && !pop.active && lockIn <= 0 && coasterLock <= 0 && !closeUp;
     // On the prison zipline you hang from the handle: no steering until it lets go.
-    const ride = plunge ? null : escape.ride(dt, ui.settingsOpen || ui.startOpen);
+    // On your coaster the car carries you the same way, out along the track and back.
+    const holdRide = ui.settingsOpen || ui.startOpen || yardShop.open || yardUpgrades.open;
+    const escapeRide = plunge ? null : escape.ride(dt, holdRide);
+    const coasterRide = plunge || escapeRide || escape.active ? null : coaster.ride(dt, holdRide);
+    const ride = escapeRide ?? coasterRide;
     const frame = plunge ? player.plunge(dt) : ride ? player.carry(dt, ride.position, ride.heading) : player.update(dt, allowInput);
     const standing = frame.grounded ? frame.pad : null;
     airTime = frame.grounded ? 0 : airTime + dt;
     // In the prison the course keeps itself around the gate checkpoint.
     const inEscape = escape.active;
+    const parked = inEscape || coaster.active;
     // Moving pads and hazards run on the wall clock, so online players see them in step.
     course.update(courseClock(day), dt, {
-      standing: inEscape ? null : standing,
-      position: inEscape ? checkpointPad.mesh.position : frame.position,
+      standing: parked ? null : standing,
+      position: parked ? checkpointPad.mesh.position : frame.position,
       keepFrom: checkpointPad.index,
     });
     const here = frame.pad ?? lastSafePad;
     hereIndex = !inEscape && Number.isFinite(here.index) ? here.index : lastSafePad.index;
     const drop = plunge ? plunge.fromY - frame.position.y : 0;
-    const cover = world.update(clock, dt, frame.position, hereIndex / PADS_PER_LEVEL + 1, drop, inEscape);
+    const viewLevel = coaster.active ? Math.max(COASTER_LEVEL, hereIndex / PADS_PER_LEVEL + 1) : hereIndex / PADS_PER_LEVEL + 1;
+    yardSky.sync(coaster.active);
+    const cover = world.update(clock, dt, frame.position, viewLevel, drop, parked);
     // High up the skyline is below you, so stop tipping the view toward the horizon.
     player.setAimRaise(aimRaise * (1 - smoothstep(8, 120, world.altitude)));
     graphics.update(clock, cover);
@@ -596,8 +756,13 @@ async function bootGame() {
       // Indoors: the walls are close and pale, so ease off the sun and the bloom.
       graphics.sun.intensity *= 0.62;
       graphics.pipeline.bloomWeight *= 0.45;
+    } else if (coaster.active) {
+      // The yard is pastel in full sun: soften both so it doesn't flare white.
+      graphics.sun.intensity *= 0.7;
+      graphics.pipeline.bloomWeight *= 0.5;
     }
     for (const season of Object.values(seasons)) season.update(clock, dt, frame.position, player.camera, cover, world.space);
+    yardSky.finish(coaster.active, clock);
     prison.update(clock);
     audio.setWalking(frame.walking);
     avatar.update(dt, {
@@ -607,13 +772,14 @@ async function bootGame() {
       sink: standing ? standing.sink : 0,
       facing: frame.facing,
       faceAngle: Math.atan2(player.camera.position.x - frame.foot.x, player.camera.position.z - frame.foot.z),
-      airborne: frame.airborne,
+      airborne: coasterRide ? false : frame.airborne,
       trick: frame.trick,
       trickP: frame.trickP,
       flying: frame.flying,
-      hanging: Boolean(ride),
+      hanging: Boolean(escapeRide),
+      sitting: Boolean(coasterRide?.sitting),
       // Input, not speed: a moving pad or a landing slide carries the body without any steps.
-      moving: frame.walking,
+      moving: coasterRide ? false : frame.walking,
       stride: frame.onStair ? STAIR_RUN : 1,
       running: frame.onStair,
       time: clock,
@@ -631,7 +797,7 @@ async function bootGame() {
       trick: frame.trick,
       trickP: frame.trickP,
       index: inEscape ? PRISON_INDEX : hereIndex,
-      away: ui.startOpen,
+      away: ui.startOpen || coaster.active,
     });
     online.update(dt, player.camera, clock);
     bots.update(dt, player.camera, clock, hereIndex, frame.foot);
@@ -656,7 +822,7 @@ async function bootGame() {
     graphics.sun.setDirectionToTarget(frame.position);
 
     // The prison's own floors aren't pads; escape.js looks after falls and catches in there.
-    const coursePad = inEscape ? null : frame.pad;
+    const coursePad = inEscape || coaster.active ? null : frame.pad;
     if (frame.grounded && coursePad && coursePad.index < checkpointPad.index && !pop.active && fallLock <= 0) {
       fallLock = 0.6;
       lastSafePad = checkpointPad;
@@ -679,7 +845,7 @@ async function bootGame() {
         toastTimer = 1.4;
         nextToast = t("toast.keepGoing");
       }
-    } else if (!inEscape && !pop.active && fallLock <= 0) {
+    } else if (!inEscape && !coaster.active && !pop.active && fallLock <= 0) {
       const burned = frame.foot.y < world.seaY + 0.15 || course.lavaBurn(frame.position);
       // Up high the sea is far below, so dropping past the course floor counts as the fall.
       const dropped = !burned && course.lava.y > world.seaY + 0.5 && frame.foot.y < course.lava.y;
@@ -713,6 +879,15 @@ async function bootGame() {
         }
       }
     }
+    if (!escape.active && coaster.active && !coaster.riding && !pop.active && coasterLock <= 0 && fallLock <= 0 && frame.foot.y < coaster.fallY) {
+      fallLock = 0.6;
+      const spot = coaster.spawn();
+      avatar.stopDance();
+      player.respawn(spot.position, spot.heading);
+      showToast(t("toast.coasterFell"));
+      toastTimer = 1.4;
+      nextToast = null;
+    }
     guide.update(dt, clock);
 
     if (frame.grounded && coursePad?.role === "checkpoint" && coursePad.index > checkpointPad.index) {
@@ -725,7 +900,7 @@ async function bootGame() {
         saveBest(best);
       }
       payCheckpoint(level);
-      if (level !== PRISON_LEVEL) {
+      if (level !== PRISON_LEVEL && level !== COASTER_LEVEL) {
         avatar.dance(look.dance);
         online.dance(look.dance);
       }
@@ -734,6 +909,16 @@ async function bootGame() {
         lockIn = LOCK_SECONDS;
         fadeEl.classList.add("is-on");
         audio.setWalking(false);
+      } else if (level === COASTER_LEVEL) {
+        beginCoasterFade("enter");
+        const purse = grantCoasterPurse(coins);
+        if (purse) {
+          coinPop.burst(frame.position);
+          audio.blip("ding");
+        }
+        showToast(t("toast.coaster"));
+        toastTimer = 2.2;
+        nextToast = purse ? t("toast.coasterPurse") : t("toast.coasterHint");
       } else if (level === FREEDOM_LEVEL) {
         const lines = [t("toast.escaped")];
         if (firstTime) {
@@ -754,8 +939,30 @@ async function bootGame() {
       coinPop.burst(frame.position);
     }
 
-    if (escape.active !== prisoner) wearPrisoner(escape.active);
-    const menus = ui.startOpen || ui.settingsOpen;
+    // Stripes only inside the prison, and not on the title or start menu. Leaving, a course
+    // respawn, or pressing Play from the menu puts your own look back. The saved look is never the stripes.
+    const wearStripes = escape.active && !ui.startOpen;
+    if (wearStripes !== prisoner) wearPrisoner(wearStripes);
+    for (const event of coaster.update(dt, frame.foot, clock)) {
+      if (event.type === "paid") {
+        earnCoins(coins, RIDE_PAY);
+        showCoins();
+        coinPop.burst(frame.position);
+        audio.blip("ding");
+        showToast(t("toast.coasterPay").replace("{n}", String(RIDE_PAY)));
+        toastTimer = 1.8;
+        nextToast = null;
+        yardUpgrades.cheer();
+      } else if (event.type === "move" && !escape.active) {
+        avatar.stopDance();
+        player.respawn(event.position, event.heading);
+      }
+    }
+    shopkeepers.update(dt, frame.foot, clock);
+    yardShop.tick();
+    yardUpgrades.tick(dt, clock, ui.startOpen || ui.settingsOpen || yardShop.open);
+    coasterGate = !escape.active && !coaster.active && frame.grounded && coursePad?.role === "checkpoint" && coursePad.level === COASTER_LEVEL;
+    const menus = ui.startOpen || ui.settingsOpen || yardShop.open || yardUpgrades.open;
     if (shooting.take() && !menus) escape.shoot();
     const escapeEvents = escape.update(dt, clock, {
       foot: frame.foot,
@@ -763,7 +970,7 @@ async function bootGame() {
       pad: frame.pad,
       grounded: frame.grounded,
       facing: frame.facing,
-      hold: menus || avatar.dancing || lockIn > 0,
+      hold: menus || avatar.dancing || lockIn > 0 || coasterLock > 0,
     });
     for (const event of escapeEvents) {
       if (event.type === "toast") {
@@ -781,7 +988,8 @@ async function bootGame() {
         pop.place({ x: event.position.x, y: event.position.y - FOOT_OFFSET, z: event.position.z });
       } else if (event.type === "checkpoint") {
         showLevel(event.level);
-        if (event.level > best) {
+        // A menu visit before the climb reaches the prison must not skip you ahead.
+        if (event.level > best && !(escape.replay && best < PRISON_LEVEL)) {
           best = event.level;
           saveBest(best);
         }
@@ -824,7 +1032,7 @@ async function bootGame() {
         leaveEscape();
       }
     }
-    const action = menus ? null : escape.action;
+    const action = menus || coasterLock > 0 ? null : escape.active ? escape.action : coaster.active ? coaster.action : coasterGate ? "visit" : escape.action;
     if (action !== actionShown) {
       actionShown = action;
       document.body.classList.toggle("can-act", action !== null);
@@ -909,9 +1117,11 @@ async function bootGame() {
   }
 }
 
-function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onTheme) {
+function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onTheme, onPlay) {
   const menu = document.querySelector("#start-menu");
   const playButton = document.querySelector("#start-play");
+  const prisonButton = document.querySelector("#start-prison");
+  const coasterButton = document.querySelector("#start-coaster");
   const avatarButton = document.querySelector("#start-avatar");
   const onlineButton = document.querySelector("#online-toggle");
   const nameInput = document.querySelector("#player-name");
@@ -995,7 +1205,7 @@ function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onThem
     document.querySelector("#settings-open").click();
   });
 
-  playButton.addEventListener("click", () => {
+  const closeMenu = () => {
     preferences.name = nameInput.value.trim() || "Player";
     nameInput.value = preferences.name;
     savePlayerPreferences(preferences);
@@ -1006,6 +1216,19 @@ function bindStartMenu(onDifficulty, onBackground, syncMenuMusic, online, onThem
     document.body.classList.remove("start-open");
     document.querySelector("#view").focus();
     syncMenuMusic();
+  };
+
+  playButton.addEventListener("click", () => {
+    closeMenu();
+    onPlay("obby");
+  });
+  prisonButton.addEventListener("click", () => {
+    closeMenu();
+    onPlay("prison");
+  });
+  coasterButton.addEventListener("click", () => {
+    closeMenu();
+    onPlay("coaster");
   });
 
   window.__obbyPreferences = preferences;
@@ -1114,6 +1337,7 @@ function showCoins() {
   coinsEl.textContent = text;
   menuCoinsEl.textContent = text;
   shopCoinsEl.textContent = text;
+  if (coasterCoinsEl) coasterCoinsEl.textContent = text;
 }
 
 /** Every checkpoint you move on to pays LEVEL_COINS, the first time through or not. */
@@ -1123,6 +1347,12 @@ function payCheckpoint(level) {
 
 /** What the prompt and the touch action button say for each of the prison's `action`s. */
 function actionText(action) {
+  if (action === "visit") return [t("prompt.coaster"), t("hud.visit")];
+  if (action === "ride") return [t("prompt.coasterRide"), t("hud.ride")];
+  if (action === "shop") return [t("prompt.coasterShop"), t("hud.shop")];
+  if (action === "build") return [t("prompt.coasterBuild"), t("hud.build")];
+  if (action === "decor") return [t("prompt.coasterDecor"), t("hud.decor")];
+  if (action === "exit") return [t("prompt.coasterExit"), t("hud.back")];
   if (action === "zip") return [t("prompt.zipline"), t("hud.grab")];
   if (action === "soda") return [t("prompt.soda").replace("{n}", String(SODA_PRICE)), t("hud.buy")];
   if (action === "cupboard") return [t("prompt.cupboard"), t("hud.open")];

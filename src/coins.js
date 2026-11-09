@@ -3,6 +3,8 @@ import { Matrix, Vector3 } from "@babylonjs/core";
 const COINS_KEY = "asmr-squishy-obby:coins";
 /** Coins paid the first time each level is reached. */
 export const LEVEL_COINS = 5;
+/** Paid once, the first time the climb reaches the rollercoaster. */
+export const COASTER_PURSE = 5000;
 /** How long the pop stays up. */
 const POP_LIFE = 1.9;
 /** Lift above the capsule center so the pop sits just over the avatar's head. */
@@ -18,17 +20,36 @@ let viewH = 0;
 /**
  * Coins are the shop currency. LEVEL_COINS coins the first time a level checkpoint is reached.
  * Level 1 never pays: the run starts there. `claimed` is the level numbers already paid.
+ * A brand-new game starts at 0. `coasterPurse` remembers the one-time 5,000 paid at level 150.
  */
 export function loadCoins() {
-  const empty = { coins: 0, claimed: [] };
   try {
     const data = JSON.parse(localStorage.getItem(COINS_KEY) ?? "null");
-    if (!data || typeof data !== "object") return empty;
-    const coins = Number.isFinite(data.coins) && data.coins >= 0 ? Math.floor(data.coins) : 0;
-    return { coins, claimed: cleanClaimed(data.claimed) };
+    if (!data || typeof data !== "object") return { coins: 0, claimed: [], coasterPurse: false };
+    let coins = Number.isFinite(data.coins) && data.coins >= 0 ? Math.floor(data.coins) : 0;
+    const claimed = cleanClaimed(data.claimed);
+    const coasterPurse = data.coasterPurse === true;
+    // An earlier build topped every wallet up to 5,000 on launch and stamped `purse`.
+    // Give that starter gift back when the balance is still exactly 5,000 and checkpoint
+    // earnings are nowhere near it. Real balances above that, and the level-150 purse, stay.
+    if (data.purse === true && !coasterPurse && coins === COASTER_PURSE) {
+      const earned = claimed.length * LEVEL_COINS;
+      if (earned < 500) coins = earned;
+    }
+    const state = { coins, claimed, coasterPurse };
+    saveCoins(state);
+    return state;
   } catch {
-    return empty;
+    return { coins: 0, claimed: [], coasterPurse: false };
   }
+}
+
+/** Pays 5,000 coins the first time level 150 is reached. Later calls do nothing. */
+export function grantCoasterPurse(state) {
+  if (state.coasterPurse) return false;
+  state.coasterPurse = true;
+  earnCoins(state, COASTER_PURSE);
+  return true;
 }
 
 /** Awards LEVEL_COINS coins for a new level. Returns false when that level already paid or is level 1. */
@@ -82,7 +103,10 @@ function cleanClaimed(value) {
 
 function saveCoins(state) {
   try {
-    localStorage.setItem(COINS_KEY, JSON.stringify({ coins: state.coins, claimed: state.claimed }));
+    localStorage.setItem(
+      COINS_KEY,
+      JSON.stringify({ coins: state.coins, claimed: state.claimed, coasterPurse: state.coasterPurse === true }),
+    );
   } catch {
     // Private mode: the coin count just won't persist.
   }

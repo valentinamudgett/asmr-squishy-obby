@@ -34,9 +34,12 @@ export function costumeSkin(id, hex) {
 
 /** Worn with the police uniform for "Play as police". Not in COSTUMES, so it is never picked or sold. */
 export const POLICE_CAP = { id: "police", label: "Police cap", icon: "👮", head: true };
+/** Worn by the builder at the coaster yard's Parts shack. Not in COSTUMES, so it is never picked or sold. */
+export const HARD_HAT = { id: "hardhat", label: "Hard hat", icon: "⛑️", head: true };
 
 export function costumeById(id) {
   if (id === POLICE_CAP.id) return POLICE_CAP;
+  if (id === HARD_HAT.id) return HARD_HAT;
   return COSTUMES.find((costume) => costume.id === id) ?? COSTUMES[0];
 }
 
@@ -512,7 +515,23 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   policeBadge.rotation.x = Math.PI / 2;
   policeBadge.position.set(0, 0.115, 0.152);
 
-  const outfits = { leaves, turkey, pilgrim, scarecrow, pie, elf, santa, reindeer, snowman, gingerbread, angel, police };
+  // The hard hat: a yellow dome with a raised ridge front to back, a wide brim, and a pink sticker.
+  // Sized for the short hair, and pushed up and back so the brim clears the eyes from above.
+  const hardhat = { head: node("hardHat", head), back: null, more: [] };
+  const hardTilt = pivot("hardHatTilt", hardhat.head);
+  hardTilt.position.set(0, -0.12, -0.02);
+  hardTilt.rotation.x = -0.2;
+  add(MeshBuilder.CreateSphere("hardHatDome", { diameter: 0.5, segments: 20, slice: 0.5 }, scene), hardTilt, "#ffd23f").scaling.y = 0.88;
+  const ridge = add(MeshBuilder.CreateSphere("hardHatRidge", { diameter: 0.54, segments: 20, slice: 0.5 }, scene), hardTilt, "#ffc21a");
+  ridge.scaling.set(0.22, 0.88, 1);
+  const hardBrim = add(MeshBuilder.CreateCylinder("hardHatBrim", { height: 0.025, diameter: 0.56, tessellation: 32 }, scene), hardTilt, "#ffc21a");
+  hardBrim.scaling.z = 1.12;
+  hardBrim.position.set(0, 0.012, 0.03);
+  const sticker = add(MeshBuilder.CreateCylinder("hardHatSticker", { height: 0.012, diameter: 0.075, tessellation: 20 }, scene), hardTilt, "#ff4d8d");
+  sticker.position.set(0.1, 0.1, 0.2);
+  sticker.rotation.set(Math.PI / 2 - 0.5, 0.45, 0);
+
+  const outfits = { leaves, turkey, pilgrim, scarecrow, pie, elf, santa, reindeer, snowman, gingerbread, angel, police, hardhat };
   let worn = "none";
 
   return {

@@ -108,6 +108,8 @@ export function createCities(scene, lavaY, sky, ridge) {
   const look = skyLook(sky);
 
   let mode = "hollywood";
+  // The coaster yard sets this so the night photo sits behind the whole track.
+  let photoDistance = null;
   let cloud = 0;
   let space = 0;
   let paintedSpace = -1;
@@ -178,7 +180,7 @@ export function createCities(scene, lavaY, sky, ridge) {
     fx /= flat;
     fz /= flat;
     const rootPos = root.getAbsolutePosition();
-    const dist = NY_DISTANCE;
+    const dist = photoDistance ?? NY_DISTANCE;
     photo.position.x = camera.position.x + fx * dist - rootPos.x;
     photo.position.z = camera.position.z + fz * dist - rootPos.z;
     // Scale the photo to cover the view, with the harbor sitting on the horizon and the buildings in the sky.
@@ -229,6 +231,10 @@ export function createCities(scene, lavaY, sky, ridge) {
       if (mode === "lava") showLava();
       else if (mode === "newyork") showNewYork();
       else showHollywood();
+    },
+    /** `null` uses the usual photo distance. A larger one keeps the billboard behind a long coaster. */
+    setPhotoDistance(meters) {
+      photoDistance = meters > 0 ? meters : null;
     },
     /**
      * `cover` blends the sky toward daylight. `groundLeft` fades the city, beach, and ocean out.
