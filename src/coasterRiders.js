@@ -2,47 +2,51 @@ import { Quaternion, TransformNode } from "@babylonjs/core";
 import { coasterGuests } from "./bot.js";
 import { createFigure } from "./figure.js";
 
-const GUESTS = 3;
-const BOARD = 0.72;
-const ALIGHT = 0.7;
-/** Seconds the line waits between laps, so they don't leap straight back in. */
+/** Short tracks still run a line of 5. Longer tracks add cars until the train is 10. */
+const MIN_TRAIN = 5;
+const MAX_TRAIN = 10;
+/**
+ * Meters between cart centers along the rails.
+ * A cart is about 1.75 deep, so this leaves a gap and a seat of its own.
+ */
+const GAP = 2.8;
+/** Seconds the train waits at the station between laps. */
 const BETWEEN = 1.05;
-/** Meters over which a guest cart eases off the side dock and onto the rails. */
-const JOIN = 4.5;
+/** Meters over which a cart eases off the side dock and onto the rails. */
+const JOIN = 2.4;
 /** How far the dock sits beside the station, clear of the player's own cart. */
 const SIDE = 1.75;
-/** Waiting spots on the deck, left of the station and outside the ride prompt. Spread in x so the line reads from the deck. */
-const LINE = [
-  { x: -3.6, z: 7.8 },
-  { x: -5.2, z: 6.6 },
-  { x: -6.8, z: 5.4 },
-];
 
 /**
- * While you're online in your coaster yard, a few regulars line up and ride the track
- * you've built. Each sits in their own cart, on the same rail sample as your ride, and a
- * lap that gets back to the station pays the yard. Leaving, going offline, or editing the
- * track sends the current lap away with no pay. No physics: the cart is moved along the sample.
+ * How many carts fit without sharing a seat. Under a full gap per rider, stay at 5
+ * and let the tail wait on the siding instead of stacking onto the front car.
+ */
+function trainCount(length) {
+  const fit = Math.floor(Math.max(0, length) / GAP);
+  return Math.max(MIN_TRAIN, Math.min(MAX_TRAIN, fit));
+}
+
+/**
+ * While you're online in your coaster yard, regulars sit in a train and ride the track
+ * you've built. Each has their own cart, spaced along the same rail sample as your ride.
+ * The front car goes out and back; the rest follow one gap behind. A lap that gets the
+ * front car home pays the yard once. Leaving, going offline, or editing the track sends
+ * the current lap away with no pay. No physics: the carts are moved along the sample.
  */
 export function createCoasterRiders(scene, graphics, coaster) {
-  const roster = coasterGuests(GUESTS);
+  const roster = coasterGuests(MAX_TRAIN);
   const origin = coaster.origin;
   const guests = [];
-  const order = [0, 1, 2];
+  const cars = [];
   const trip = { travel: 0, dir: 1 };
   const yaw = new Quaternion();
-  const cart = new TransformNode("coaster-guest-cart", scene);
-  cart.rotationQuaternion = new Quaternion();
-  cart.setEnabled(false);
 
   let online = false;
   let shown = false;
   let phase = "queue";
-  let blend = 0;
   let wait = 0.8;
   let stamp = 0;
-  let style = null;
-  let cartTick = () => {};
+  let count = MIN_TRAIN;
   let axisRev = -1;
   const axis = { x: -1, z: 0 };
 
@@ -53,12 +57,12 @@ export function createCoasterRiders(scene, graphics, coaster) {
     }
   }
 
-  function dress() {
+  function dress(car) {
     const id = coaster.upgrades.cart;
-    if (id === style) return;
-    style = id;
-    cartTick = coaster.dressGuestCart(cart).tick;
-    stayClear(cart);
+    if (car.style === id) return;
+    car.style = id;
+    car.tick = coaster.dressGuestCart(car.node).tick;
+    stayClear(car.node);
   }
 
   function buildNext() {
@@ -67,18 +71,21 @@ export function createCoasterRiders(scene, graphics, coaster) {
     figure.setName(spec.name);
     figure.avatar.apply(spec.look);
     stayClear(figure.avatar.root);
-    figure.setShown(true);
+    figure.setShown(false);
     guests.push(figure);
+    const node = new TransformNode("coaster-guest-cart", scene);
+    node.rotationQuaternion = new Quaternion();
+    node.setEnabled(false);
+    cars.push({ node, tick: () => {}, style: null });
   }
 
   function hide() {
     shown = false;
     phase = "queue";
-    blend = 0;
     wait = 0.8;
     trip.travel = 0;
     trip.dir = 1;
-    cart.setEnabled(false);
+    for (const car of cars) car.node.setEnabled(false);
     for (const figure of guests) figure.setShown(false);
   }
 
@@ -110,71 +117,54 @@ export function createCoasterRiders(scene, graphics, coaster) {
     };
   }
 
-  function dock() {
-    return shifted(coaster.seatAt(0, false), 0);
-  }
-
-  function rideSeat() {
-    return shifted(coaster.seatAt(trip.travel, trip.dir < 0), trip.travel);
-  }
-
-  function spot(index) {
-    const local = LINE[Math.min(index, LINE.length - 1)];
+  /** Car `index` follows the front car by `index` gaps. Behind the station it sits on the siding. */
+  function carPose(index) {
+    const distance = trip.travel - index * GAP;
+    const returning = trip.dir < 0;
+    if (distance >= 0) return shifted(coaster.seatAt(distance, returning), distance);
+    const home = shifted(coaster.seatAt(0, returning), 0);
+    const heading = coaster.seatAt(0, false).heading;
+    const back = -distance;
+    const sx = Math.sin(heading) * back;
+    const sz = Math.cos(heading) * back;
     return {
-      x: origin.x + local.x,
-      y: origin.y,
-      z: origin.z + local.z,
-      heading: Math.atan2(-local.x, 12.2 - local.z),
+      ...home,
+      cartX: home.cartX - sx,
+      cartZ: home.cartZ - sz,
+      footX: home.footX - sx,
+      footZ: home.footZ - sz,
     };
   }
 
   function step(dt) {
     // A half-finished lap never pays: the track changed, or it is too short to ride.
-    if (phase !== "queue" && (coaster.trackRev !== stamp || coaster.trackLength < 4)) {
+    if (phase === "ride" && (coaster.trackRev !== stamp || coaster.trackLength < 4)) {
       phase = "queue";
-      blend = 0;
       trip.travel = 0;
       trip.dir = 1;
       wait = 0.6;
       return false;
     }
-    // Your own ride goes first. A guest already out on the track waits where they are.
-    if (coaster.riding) {
-      if (phase === "queue") wait = Math.max(wait, 0.45);
-      return false;
-    }
-    if (phase === "board") {
-      blend = Math.min(1, blend + dt / BOARD);
-      if (blend >= 1) phase = "ride";
-      return false;
-    }
     if (phase === "ride") {
+      // Keep rolling while the player rides too. Stopping here left the train frozen in the station.
       const moved = coaster.advanceGuest(trip, dt);
       if (!moved) {
         phase = "queue";
+        trip.travel = 0;
+        trip.dir = 1;
         wait = 0.6;
         return false;
       }
       if (moved.done) {
-        phase = "alight";
-        blend = 0;
+        phase = "queue";
+        wait = BETWEEN;
         return true;
       }
       return false;
     }
-    if (phase === "alight") {
-      blend = Math.min(1, blend + dt / ALIGHT);
-      if (blend >= 1) {
-        order.push(order.shift());
-        phase = "queue";
-        wait = BETWEEN;
-      }
-      return false;
-    }
     wait -= dt;
-    if (wait <= 0 && guests[order[0]] && coaster.trackLength >= 4) {
-      phase = "board";
-      blend = 0;
+    if (wait <= 0 && guests.length >= count && coaster.trackLength >= 4) {
+      phase = "ride";
       stamp = coaster.trackRev;
       trip.travel = 0;
       trip.dir = 1;
@@ -182,23 +172,23 @@ export function createCoasterRiders(scene, graphics, coaster) {
     return false;
   }
 
-  function placeCart(pose, bob) {
-    cart.position.set(pose.cartX, pose.cartY + bob, pose.cartZ);
+  function placeCart(node, pose, bob) {
+    node.position.set(pose.cartX, pose.cartY + bob, pose.cartZ);
     Quaternion.RotationYawPitchRollToRef(pose.heading, 0, 0, yaw);
-    cart.rotationQuaternion.copyFrom(yaw);
+    node.rotationQuaternion.copyFrom(yaw);
   }
 
-  function placeFigure(figure, pose, sitting, moving, dt, camera, time) {
+  function placeFigure(figure, pose, bob, dt, camera, time) {
     if (!figure.shown) figure.setShown(true);
     figure.update(
       dt,
       {
-        x: pose.x,
-        y: pose.y,
-        z: pose.z,
+        x: pose.footX,
+        y: pose.footY + bob,
+        z: pose.footZ,
         facing: pose.heading,
-        sitting,
-        moving,
+        sitting: true,
+        moving: false,
         airborne: false,
         running: false,
         time,
@@ -210,70 +200,35 @@ export function createCoasterRiders(scene, graphics, coaster) {
 
   function poseAll(dt, camera, time) {
     const bob = phase === "queue" ? Math.sin(time * 2.2) * 0.035 : 0;
-    const seat = phase === "ride" ? rideSeat() : dock();
-    placeCart(seat, bob);
-    const rider = order[0];
-    const eased = ease(blend);
-    let slot = 0;
-    for (const index of order) {
+    const ready = Math.min(count, guests.length);
+    for (let index = 0; index < cars.length; index += 1) {
+      const car = cars[index];
       const figure = guests[index];
-      if (!figure) continue;
-      if (index === rider && phase !== "queue") {
-        const from = spot(0);
-        const back = spot(Math.min(guests.length, LINE.length) - 1);
-        if (phase === "board") {
-          placeFigure(
-            figure,
-            {
-              x: mix(from.x, seat.footX, eased),
-              y: mix(from.y, seat.footY, eased),
-              z: mix(from.z, seat.footZ, eased),
-              heading: mixAngle(from.heading, seat.heading, eased),
-            },
-            eased > 0.82,
-            eased <= 0.82,
-            dt,
-            camera,
-            time,
-          );
-        } else if (phase === "ride") {
-          placeFigure(figure, { x: seat.footX, y: seat.footY, z: seat.footZ, heading: seat.heading }, true, false, dt, camera, time);
-        } else {
-          placeFigure(
-            figure,
-            {
-              x: mix(seat.footX, back.x, eased),
-              y: mix(seat.footY, back.y, eased),
-              z: mix(seat.footZ, back.z, eased),
-              heading: mixAngle(seat.heading, back.heading, eased),
-            },
-            eased < 0.18,
-            eased >= 0.18,
-            dt,
-            camera,
-            time,
-          );
-        }
+      const on = index < ready;
+      car.node.setEnabled(on);
+      if (!on) {
+        if (figure?.shown) figure.setShown(false);
         continue;
       }
-      const at = spot(slot);
-      slot += 1;
-      placeFigure(
-        figure,
-        { x: at.x, y: at.y + Math.sin(time * 2 + index) * 0.012, z: at.z, heading: at.heading },
-        false,
-        false,
-        dt,
-        camera,
-        time,
-      );
+      const pose = carPose(index);
+      placeCart(car.node, pose, bob);
+      car.tick(time);
+      placeFigure(figure, pose, bob, dt, camera, time);
     }
   }
 
   return {
-    /** `queue`, `board`, `ride`, or `alight`. */
+    /** `queue` while the train waits at the station, `ride` while it is out on the rails. */
     get phase() {
       return phase;
+    },
+    /** Carts in the train this visit. 5 on a short track, up to 10 when they fit a gap apart. */
+    get count() {
+      return Math.min(count, guests.length);
+    },
+    /** Meters of the front car along the rails. Followers sit `index *` one gap behind. */
+    get travel() {
+      return trip.travel;
     },
     /** Online room is connected. Guests still stay hidden until you're in the yard. */
     setOnline(on) {
@@ -281,7 +236,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
       if (!on && shown) hide();
     },
     /**
-     * One frame. Returns true the frame a guest cart gets back to the station.
+     * One frame. Returns true the frame the front cart gets back to the station.
      * Returns false, and does not pay, when the lap is dropped.
      */
     update(dt, camera, time) {
@@ -293,28 +248,12 @@ export function createCoasterRiders(scene, graphics, coaster) {
         shown = true;
         wait = 0.8;
       }
-      if (guests.length < GUESTS) buildNext();
-      dress();
-      if (!cart.isEnabled()) cart.setEnabled(true);
+      if (phase !== "ride") count = trainCount(coaster.trackLength);
+      if (guests.length < count) buildNext();
+      for (const car of cars) dress(car);
       const paid = step(dt);
       poseAll(dt, camera, time);
-      cartTick(time);
       return paid;
     },
   };
-}
-
-function ease(t) {
-  return t * t * (3 - 2 * t);
-}
-
-function mix(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function mixAngle(from, to, t) {
-  let delta = to - from;
-  while (delta > Math.PI) delta -= Math.PI * 2;
-  while (delta < -Math.PI) delta += Math.PI * 2;
-  return from + delta * t;
 }

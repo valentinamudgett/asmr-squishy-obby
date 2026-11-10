@@ -238,6 +238,7 @@ export const messages = {
   "toast.policeNabbed": "Police officer {name} caught you!",
   "toast.backToCell": "Back to your cell!",
   "toast.backToLava": "Back to the lava room!",
+  "toast.backToSquishy": "Back to the squishy room!",
   "toast.lavaRoom": "The police can't come in here! Find the key in a cupboard.",
   "toast.lavaRoomPolice": "The lava room! Find the key in a cupboard.",
   "toast.keyFound": "You found the key!",

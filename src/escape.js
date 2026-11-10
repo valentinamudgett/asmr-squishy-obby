@@ -25,8 +25,10 @@ import { lavaTexture } from "./world.js";
 /**
  * Checkpoints inside the prison. PRISON_LEVEL is the cell; FREEDOM_LEVEL is back out on the course.
  * LAVA_LEVEL is the lava room off the top of the police stairs, where the police can't get you.
+ * SQUISHY_LEVEL is the squishy room through that room's exit. Reaching it saves you there.
  */
 export const LAVA_LEVEL = 60;
+export const SQUISHY_LEVEL = 70;
 export const KILLER_LEVEL = 75;
 /** The vending room past the killer capybara's obby, where the chef comes after you. */
 export const VENDING_LEVEL = 80;
@@ -56,6 +58,8 @@ const PACE = {
 const SPAWNS = {
   [PRISON_LEVEL]: { x: 0.8, y: 0, z: 1.2, heading: -Math.PI / 2 },
   [LAVA_LEVEL]: { x: -19.5, y: 9, z: 8.6, heading: 0 },
+  // Inside the squishy room, clear of the exit door and the police path along z = 0. Facing the wall.
+  [SQUISHY_LEVEL]: { x: -10, y: 9, z: 3.2, heading: Math.PI },
   [KILLER_LEVEL]: { x: 10.5, y: 17.6, z: -4.2, heading: Math.PI / 2 },
   [VENDING_LEVEL]: { x: 41.8, y: 21.8, z: 10.6, heading: -Math.PI / 2 },
   [BOSS_LEVEL]: { x: 46.6, y: 21.8, z: 0, heading: Math.PI / 2 },
@@ -405,7 +409,8 @@ const COVER = [
  * 1. Your cell. Climb the stool, the desk, and the top bunk into the vent in the wall.
  * 2. The vent drops you through the hall ceiling. Police capybaras come out of their door and chase
  *    you up four flights of stairs. If they catch you, it's back to the cell.
- * 3. Big squishies stuck to the wall climb to a second vent. The police can't catch you on them.
+ * 3. Level 70, the squishy room. Big squishies stuck to the wall climb to a second vent. The police
+ *    can't catch you on them; caught on the floor, you're back in this room.
  * 4. The vent goes round the outside to a ledge high on the stairwell's far wall, and a long
  *    zipline carries you over the cells, the police stairs, and the squishy wall to level 75. A
  *    killer capybara chases you across the floor until you're on the obby over the goo.
@@ -469,18 +474,22 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     // Running into the lava room, the police chasing you walk on up to its door instead of vanishing.
     const fromChase = phase === "chase" && !late && at === LAVA_LEVEL;
     level = at;
-    phase = { [PRISON_LEVEL]: police ? "chase" : "cell", [LAVA_LEVEL]: "lava", [KILLER_LEVEL]: "killer", [VENDING_LEVEL]: "chef" }[at] ?? "boss";
+    phase = { [PRISON_LEVEL]: police ? "chase" : "cell", [LAVA_LEVEL]: "lava", [SQUISHY_LEVEL]: "chase", [KILLER_LEVEL]: "killer", [VENDING_LEVEL]: "chef" }[at] ?? "boss";
     site.escapee.hide();
     escapeeIn = police && at === PRISON_LEVEL ? ESCAPEE_FIRST : Infinity;
     safeShown = false;
     obbyShown = false;
-    late = false;
+    late = at === SQUISHY_LEVEL;
     melt = 0;
     for (const officer of site.police) {
       if (!fromChase) officer.hide();
       officer.route = site.policeRoute;
     }
     site.sideDoor.close();
+    if (at === SQUISHY_LEVEL) {
+      for (const officer of site.police) officer.route = site.sideRoute;
+      policeIn = pace.policeDelay + 0.6;
+    }
     if (at === PRISON_LEVEL) site.lava.reset();
     site.lift.reset();
     lifting = false;
@@ -578,15 +587,19 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       });
     }
     if (catcher) {
-      if (late) catchBy(catcher, LAVA_LEVEL, t("toast.policeCaught"), t("toast.backToLava"));
+      // On the squishy-room floor the save is that room. The stair chase still goes back to the cell.
+      if (late) catchBy(catcher, SQUISHY_LEVEL, t("toast.policeCaught"), t("toast.backToSquishy"));
       else catchBy(catcher, PRISON_LEVEL, t("toast.policeCaught"), t("toast.backToCell"));
       return;
     }
     // Into the lava room: the police have to stop at its door. Back in from the squishy room, they
-    // go back round to wait at the door again.
+    // go back round to wait at the door again. The squishy-room checkpoint stays put.
     if (inLavaRoom()) {
-      if (late) reset(LAVA_LEVEL);
-      else reach(LAVA_LEVEL, police ? t("toast.lavaRoomPolice") : t("toast.lavaRoom"));
+      if (late) {
+        const saved = level;
+        reset(LAVA_LEVEL);
+        if (saved >= SQUISHY_LEVEL) level = saved;
+      } else reach(LAVA_LEVEL, police ? t("toast.lavaRoomPolice") : t("toast.lavaRoom"));
       return;
     }
     if (onSquishy && !safeShown) {
@@ -640,6 +653,13 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       if (!police) catchBy(site.police[0], LAVA_LEVEL, t("toast.policeCaught"), t("toast.backToLava"));
       return;
     }
+    // Through the exit into the squishy room: that is the next checkpoint. A later walk out
+    // starts the chase again without paying the checkpoint a second time.
+    const arrived = level < SQUISHY_LEVEL;
+    if (arrived) {
+      level = SQUISHY_LEVEL;
+      events.push({ type: "checkpoint", level: SQUISHY_LEVEL, text: police ? t("toast.climbSquishies") : t("toast.sideDoor") });
+    }
     phase = "chase";
     late = true;
     safeShown = false;
@@ -648,8 +668,10 @@ export function createEscape(scene, { graphics, audio, avatar }) {
       officer.route = site.sideRoute;
     }
     policeIn = pace.policeDelay + 0.6;
-    if (police) toast(t("toast.climbSquishies"), null, 2.6);
-    else toast(t("toast.sideDoor"), t("toast.climbSquishies"), 2.6);
+    if (!arrived) {
+      if (police) toast(t("toast.climbSquishies"), null, 2.6);
+      else toast(t("toast.sideDoor"), t("toast.climbSquishies"), 2.6);
+    }
   }
 
   /**
@@ -874,7 +896,7 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     setDifficulty(difficulty) {
       pace = PACE[difficulty] ?? PACE.easy;
     },
-    /** Locks you up at checkpoint `at` (50, 75, 80, or 90), building the prison. Returns where to put the player. */
+    /** Locks you up at checkpoint `at` (50, 60, 70, 75, 80, or 90), building the prison. Returns where to put the player. */
     enter(at, { again = false } = {}) {
       replay = again;
       site ??= buildSite(scene, origin, { graphics, audio });
@@ -1177,7 +1199,7 @@ function botRoute(keyIndex) {
     at((LIFT.x0 + LIFT.x1) / 2, S, (LIFT.z0 + LIFT.z1) / 2, "lift"),
     at((LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S, 7.6),
     at((LAVA_EXIT[0] + LAVA_EXIT[1]) / 2, S, 4.6),
-    at(-12.6, S, -2.7, "run", { section: { say: "prisonSafe" } }),
+    at(-12.6, S, -2.7, "run", { section: { level: SQUISHY_LEVEL, say: "prisonSafe" } }),
     ...WALL_SQUISHIES.map((pad) => at(pad.x, pad.top, pad.z, "hop", { risky: true })),
     at(-3.6, LEDGE_TOP, 4.5, "hop"),
     ...VENT2_PATH.slice(1).map(([x, z]) => at(x, LEDGE_TOP, z, "crawl")),
@@ -1664,6 +1686,7 @@ function buildSite(scene, origin, { graphics, audio }) {
 
   // 5. The squishy wall room, floor 9. The squishies climb the far wall to the second vent.
   box(-17.6, SQUISHY_FLOOR - 0.4, -6.4, -3.6, SQUISHY_FLOOR, 6.4, M.floor);
+  marker(SQUISHY_LEVEL, SPAWNS[SQUISHY_LEVEL].x, SQUISHY_FLOOR, SPAWNS[SQUISHY_LEVEL].z);
   box(-18, HALL_FLOOR, -6.4, -3.6, SPLIT_TOP, -6, M.concrete);
   box(-17.6, SQUISHY_FLOOR, 6, LAVA_EXIT[0], BLOCK_TOP + 0.4, 6.4, M.concrete);
   box(LAVA_EXIT[1], SQUISHY_FLOOR, 6, -3.6, BLOCK_TOP + 0.4, 6.4, M.concrete);

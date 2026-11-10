@@ -26,7 +26,7 @@ import { bindCoasterSky } from "./coasterSky.js";
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
-import { BOSS_LEVEL, createEscape, KILLER_LEVEL, LAVA_LEVEL, SODA_PRICE, SODA_SPEED, VENDING_LEVEL } from "./escape.js";
+import { BOSS_LEVEL, createEscape, KILLER_LEVEL, LAVA_LEVEL, SODA_PRICE, SODA_SPEED, SQUISHY_LEVEL, VENDING_LEVEL } from "./escape.js";
 import { drawFace, FACES } from "./faces.js";
 import { BUBBLE_LIFT, createBubble } from "./figure.js";
 import { DANCES } from "./dances.js";
@@ -479,7 +479,7 @@ async function bootGame() {
     levelEl.textContent = String(level);
     showEscape(level);
   };
-  /** Puts you in Capybara Prison at checkpoint `at` (50, 75, 80, or 90). `again` is a visit from the main menu that should not move the climb. */
+  /** Puts you in Capybara Prison at checkpoint `at` (50, 60, 70, 75, 80, or 90). `again` is a visit from the main menu that should not move the climb. */
   const enterEscape = (at, again = false) => {
     // A coaster fade or an active yard ride would put you back on the cart the same frame, so the
     // prison never stays on screen. Leave the yard first; the saved track and coins stay put.
@@ -550,7 +550,7 @@ async function bootGame() {
   /** Where a saved prison run should resume. A visit from the menu always starts in the cell. */
   function prisonMenuLevel() {
     if (best < PRISON_LEVEL || best >= FREEDOM_LEVEL) return PRISON_LEVEL;
-    return [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+    return [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, SQUISHY_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
   }
   /**
    * Main menu picks. Obby returns to the climb. Prison and the roller coaster are their own games:
@@ -687,7 +687,7 @@ async function bootGame() {
   let fightShown = "";
   showLevel(course.start.level);
   if (isPrisonLevel(best)) {
-    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, SQUISHY_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
     enterEscape(at);
     if (at !== PRISON_LEVEL) {
       showToast(`Level ${at}`);

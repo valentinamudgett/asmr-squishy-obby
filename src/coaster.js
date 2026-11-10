@@ -35,7 +35,8 @@ const OY = 980;
 const OZ = -1100;
 const RAIL_Y = 0.95;
 const RAIL_MIN = -18;
-const RAIL_MAX = 42;
+/** Clears a straight-up tower (UP_RISE) with room for a hill or loop above it. */
+const RAIL_MAX = 96;
 const STEP = 0.85;
 // Standing capsule: feet rest on the cart floor. The sit drops that center so the hips meet the same floor.
 const SEAT = 0.42 + FOOT_OFFSET;
@@ -414,13 +415,13 @@ export function createCoaster(scene) {
       return seatPose(distance, returning);
     },
     /**
-     * One step of a guest cart on the same sample and pace as ride() (9 m/s, faster downhill, at most 20).
+     * One step of a guest cart on the same sample and pace as ride()
+     * (9 m/s, faster downhill up to 20, a crawl on a near-vertical climb).
      * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means it is back at the station.
      */
     advanceGuest(trip, dt) {
       if (!(dt > 0) || length < 4) return null;
-      const slope = -Math.sin(sampleAt(trip.travel).pitch) * trip.dir;
-      const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
+      const speed = rideSpeed(sampleAt(trip.travel).pitch, trip.dir);
       trip.travel += trip.dir * speed * dt;
       let done = false;
       if (trip.dir > 0 && trip.travel >= length) {
@@ -571,8 +572,7 @@ export function createCoaster(scene) {
       if (!active || !riding) return null;
       if (!hold) {
         const pose = sampleAt(travel);
-        const slope = -Math.sin(pose.pitch) * travelDir;
-        const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
+        const speed = rideSpeed(pose.pitch, travelDir);
         travel += travelDir * speed * dt;
         if (travelDir > 0 && travel >= length) {
           travel = length;
@@ -1181,13 +1181,25 @@ function appendLine(points, pose, length, rise) {
 }
 
 /** How tall a straight-up tower tries to be, before the rail ceiling. */
-const UP_RISE = 10;
+const UP_RISE = 72;
+/** Crawl speed on a near-vertical climb. Downhill still uses the boost in rideSpeed. */
+const CLIMB_CRAWL = 2.8;
 /** Forward drift so each span stays a real segment. Small enough that the tower still looks vertical. */
 const UP_NUDGE = 0.2;
 /** Steepest catwalk the belt can carry. A vertical plank is a wall to the character. */
 const UP_SLOPE = 28 * Math.PI / 180;
 /** Least rise between stacked loops, so a rail doesn't poke through the deck above it. */
 const UP_CLEAR = 1.45;
+
+/** Pace along the rails. Downhill speeds up; a near-vertical climb crawls. */
+function rideSpeed(pitch, dir) {
+  const slope = -Math.sin(pitch) * dir;
+  const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
+  // Hills and the shallow climb stay under 80°. The straight-up tower sits past 88°.
+  if (dir <= 0 || pitch < 80 * Math.PI / 180) return speed;
+  const steep = Math.min(1, (pitch - 80 * Math.PI / 180) / (8 * Math.PI / 180));
+  return speed + (CLIMB_CRAWL - speed) * steep;
+}
 
 function appendUp(points, pose) {
   const room = Math.min(RAIL_MAX, Math.max(RAIL_MIN, pose.y + UP_RISE)) - pose.y;
