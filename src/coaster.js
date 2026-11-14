@@ -72,6 +72,7 @@ export const PARTS = [
   { id: "straight", cost: 500, nameKey: "coaster.straight", emoji: "➡️" },
   { id: "climb", cost: 800, nameKey: "coaster.climb", emoji: "↗️" },
   { id: "up", cost: 1200, nameKey: "coaster.up", emoji: "⬆️" },
+  { id: "down", cost: 1200, nameKey: "coaster.down", emoji: "⬇️" },
   { id: "drop", cost: 800, nameKey: "coaster.drop", emoji: "↘️" },
   { id: "left", cost: 700, nameKey: "coaster.left", emoji: "↩️" },
   { id: "right", cost: 700, nameKey: "coaster.right", emoji: "↪️" },
@@ -86,11 +87,14 @@ const SHACK_Z = -5.5;
 /** Where the parts shack stands, relative to the yard origin. It stays put when the deck grows. */
 export const PARTS_SHACK = { x: SHACK_X, z: SHACK_Z };
 
+/** Ticket booth on the right of the path to the ride, clear of the shack, decor, and exit. */
+const BUSINESS = { x: 8.6, z: 3.2, reach: 2.35 };
 const ZONES = [
   { id: "ride", x: 0, z: 10.2, reach: 2.9 },
   { id: "shop", x: SHACK_X, z: SHACK_Z + 3.3, reach: 2.6 },
   { id: "decor", x: DECOR_SPOT.x, z: DECOR_SPOT.z, reach: DECOR_SPOT.reach },
   { id: "exit", x: 0, z: -13.2, reach: 2.9 },
+  { id: "business", x: BUSINESS.x, z: BUSINESS.z, reach: BUSINESS.reach },
 ];
 
 /**
@@ -105,6 +109,8 @@ export function createCoaster(scene) {
   const layout = saved.track;
   let added = layout.reduce((top, piece) => Math.max(top, piece.n), 0);
   let here = saved.here;
+  // Closed: the yard is yours alone. Open: the regulars come and ride.
+  let open = saved.open;
   const owned = saved.owned;
   const upgrades = saved.upgrades;
   // { kind: "place", id, joint } while choosing where a part goes, { kind: "remove", piece } while picking one to take off.
@@ -161,6 +167,8 @@ export function createCoaster(scene) {
 
   const beltLook = createBeltLook(scene);
   buildYard(scene, mats);
+  const gate = buildBusiness(scene, mats);
+  gate.paint(open);
   let deckKit = buildDeck(scene, mats, deckTier(upgrades.deck));
   const marker = buildMarker(scene, mats);
   rebuild(false);
@@ -344,6 +352,10 @@ export function createCoaster(scene) {
     },
     get riding() {
       return riding;
+    },
+    /** True while the yard is open for business and the regulars may ride. */
+    get open() {
+      return open;
     },
     get action() {
       return action;
@@ -552,6 +564,13 @@ export function createCoaster(scene) {
       else if (where && where.piece >= r) moveTo(sideSpot(joints[where.piece === r ? r : where.piece - 1], 0));
       return partById(piece.id);
     },
+    /** Opens the yard for riders, or closes it so it is yours alone. Saved in this browser. */
+    toggleBusiness() {
+      open = !open;
+      gate.paint(open);
+      save();
+      return open;
+    },
     act() {
       if (action === "ride") {
         if (riding || length < 4) return null;
@@ -681,6 +700,7 @@ export function createCoaster(scene) {
         const dz = z - spot.z;
         if (Math.abs(y - spot.y) < 2.2 && dx * dx + dz * dz <= BUILD_REACH * BUILD_REACH) action = "build";
         else action = y > -1.6 && y < 4 ? zoneAt(x, z) : null;
+        if (action === "business") action = open ? "closeBusiness" : "openBusiness";
       }
       return events.splice(0);
     },
@@ -688,7 +708,7 @@ export function createCoaster(scene) {
 
   function save() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ track: layout, here, owned, upgrades }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ track: layout, here, owned, upgrades, open }));
     } catch {
       // Private mode: the track just won't persist.
     }
@@ -1046,9 +1066,9 @@ function loadLayout() {
       const n = Math.floor(Number(data?.owned?.[part.id]));
       if (Number.isFinite(n) && n > 0) owned[part.id] = Math.min(MAX_OWNED, n);
     }
-    return { track, here: data?.here === true, owned, upgrades: cleanUpgrades(data?.upgrades) };
+    return { track, here: data?.here === true, owned, upgrades: cleanUpgrades(data?.upgrades), open: data?.open === true };
   } catch {
-    return { track: starterTrack(), here: false, owned: noParts(), upgrades: cleanUpgrades(null) };
+    return { track: starterTrack(), here: false, owned: noParts(), upgrades: cleanUpgrades(null), open: false };
   }
 }
 
@@ -1078,8 +1098,9 @@ function lerpAngle(from, to, t) {
 
 /**
  * Rail points, plus the catwalk's center line: one node per piece end (tagged with its piece), and
- * the arc on turns. Straight-up towers add a spiral beside the rails. `joints[k]` is where piece k
- * starts, and the last one is the track end. `spans[k]` is the first and last point of piece k.
+ * the arc on turns. Straight-up towers and straight-down drops add a spiral beside the rails.
+ * `joints[k]` is where piece k starts, and the last one is the track end. `spans[k]` is the first
+ * and last point of piece k.
  */
 function buildTrack(ids) {
   const pose = { x: 0, y: RAIL_Y, z: 12.2, heading: 0 };
@@ -1093,7 +1114,7 @@ function buildTrack(ids) {
     appendPiece(id, pose, points);
     spans.push([from - 1, points.length - 1]);
     joints.push({ ...pose });
-    if (id === "up") appendUpWalk(walk, started, pose, piece);
+    if (id === "up" || id === "down") appendUpWalk(walk, started, pose, piece);
     else {
       // Hills and loops end at the height they started, so the catwalk runs level past them.
       const nodes = id === "left" || id === "right" ? points.slice(from) : points.slice(-1);
@@ -1142,6 +1163,7 @@ function appendPiece(id, pose, points) {
   else if (id === "climb") appendLine(points, pose, 8, 4.6);
   else if (id === "drop") appendLine(points, pose, 8, -4.6);
   else if (id === "up") appendUp(points, pose);
+  else if (id === "down") appendDown(points, pose);
   else if (id === "hill") appendHill(points, pose);
   else if (id === "loop") appendLoop(points, pose);
   else if (id === "left") appendTurn(points, pose, -1);
@@ -1195,9 +1217,11 @@ const UP_CLEAR = 1.45;
 function rideSpeed(pitch, dir) {
   const slope = -Math.sin(pitch) * dir;
   const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
-  // Hills and the shallow climb stay under 80°. The straight-up tower sits past 88°.
-  if (dir <= 0 || pitch < 80 * Math.PI / 180) return speed;
-  const steep = Math.min(1, (pitch - 80 * Math.PI / 180) / (8 * Math.PI / 180));
+  // Hills and the shallow climb stay under 80°. A straight-up tower, and the ride back up a
+  // straight drop, sit past 88° and crawl instead of shooting up the wall.
+  const climbing = (dir > 0 && pitch > 80 * Math.PI / 180) || (dir < 0 && pitch < -80 * Math.PI / 180);
+  if (!climbing) return speed;
+  const steep = Math.min(1, (Math.abs(pitch) - 80 * Math.PI / 180) / (8 * Math.PI / 180));
   return speed + (CLIMB_CRAWL - speed) * steep;
 }
 
@@ -1220,18 +1244,41 @@ function appendUp(points, pose) {
   takeEnd(points, pose);
 }
 
+/** Rails go straight down, the mirror of the straight-up tower, until the rail floor. */
+function appendDown(points, pose) {
+  const target = Math.min(RAIL_MAX, Math.max(RAIL_MIN, pose.y - UP_RISE));
+  const room = pose.y - target;
+  // A shorter leftover would stack the catwalk closer than a person can stand.
+  const drop = room >= UP_CLEAR ? room : 0;
+  const run = UP_NUDGE;
+  const steps = Math.max(2, Math.round(Math.max(run, drop) / STEP));
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    pushPoint(
+      points,
+      pose.x + Math.sin(pose.heading) * run * t,
+      pose.y - drop * t,
+      pose.z + Math.cos(pose.heading) * run * t,
+      pose.heading,
+    );
+  }
+  takeEnd(points, pose);
+}
+
 /**
- * The rails go straight up. The catwalk cannot: the character treats a vertical belt as a wall
- * and falls off. A spiral around the tower stays under 30 degrees and lands back on the same side.
+ * The rails go straight up or straight down. The catwalk cannot: the character treats a vertical
+ * belt as a wall and falls off. A spiral around the tower stays under 30 degrees and lands back
+ * on the same side.
  */
 function appendUpWalk(walk, start, end, piece) {
   const rise = end.y - start.y;
   const flat = Math.hypot(end.x - start.x, end.z - start.z);
-  if (!(rise >= UP_CLEAR) || rise <= Math.max(flat, 0.05) * Math.tan(UP_SLOPE)) {
+  const height = Math.abs(rise);
+  if (!(height >= UP_CLEAR) || height <= Math.max(flat, 0.05) * Math.tan(UP_SLOPE)) {
     walk.push({ x: end.x, y: end.y, z: end.z, heading: end.heading, piece });
     return;
   }
-  const minRun = rise / Math.tan(UP_SLOPE);
+  const minRun = height / Math.tan(UP_SLOPE);
   const lap = 2 * Math.PI * WALK_SIDE;
   const turns = Math.max(1, Math.ceil(minRun / lap - 1e-9));
   appendUpSpiral(walk, start, end, piece, rise, turns);
@@ -1643,6 +1690,45 @@ function buildDeck(scene, mats, { half, back }) {
   };
 }
 
+/** The ticket booth: stand in the ring and press E to open the yard for riders, or close it. */
+function buildBusiness(scene, mats) {
+  const { x, z } = BUSINESS;
+  const ringMesh = MeshBuilder.CreateTorus("coaster-business-ring", { diameter: 2.6, thickness: 0.12, tessellation: 28 }, scene);
+  ringMesh.position.set(OX + x, OY + 0.06, OZ + z);
+  ringMesh.isPickable = false;
+  post(scene, mats.cream, x - 0.85, 1.2, z + 0.2);
+  post(scene, mats.cream, x + 0.85, 1.2, z + 0.2);
+  const counter = box(scene, mats.wood, 2.1, 1.05, 0.5, x, 0.52, z - 0.2);
+  counter.computeWorldMatrix(true);
+  addStatic(scene, counter, 2.1, 1.05, 0.5);
+  const closedSign = makeSign(
+    scene, null, "coaster-business-closed",
+    [t("coaster.businessKicker"), t("coaster.businessClosed")],
+    OX + x, OY + 2.2, OZ + z + 0.25, 0, 2.4, 0.78, "#ff4d8d", "#fff8fb",
+  );
+  const openSign = makeSign(
+    scene, null, "coaster-business-open",
+    [t("coaster.businessKicker"), t("coaster.businessOpen")],
+    OX + x, OY + 2.2, OZ + z + 0.25, 0, 2.4, 0.78, "#1f8a4c", "#fff8fb",
+  );
+  const balloon = MeshBuilder.CreateSphere("coaster-business-balloon", { diameter: 0.55, segments: 12 }, scene);
+  balloon.position.set(OX + x + 1.35, OY + 3.15, OZ + z + 0.2);
+  balloon.material = mats.gold;
+  balloon.isPickable = false;
+  const string = MeshBuilder.CreateCylinder("coaster-business-string", { height: 0.9, diameter: 0.03, tessellation: 6 }, scene);
+  string.position.set(OX + x + 1.35, OY + 2.45, OZ + z + 0.2);
+  string.material = mats.ink;
+  string.isPickable = false;
+  return {
+    paint(isOpen) {
+      for (const mesh of closedSign.meshes) mesh.setEnabled(!isOpen);
+      for (const mesh of openSign.meshes) mesh.setEnabled(isOpen);
+      ringMesh.material = isOpen ? mats.mint : mats.pink;
+      balloon.material = isOpen ? mats.mint : mats.gold;
+    },
+  };
+}
+
 function buildYard(scene, mats) {
   ring(scene, mats.gold, 0, 10.2, 3.1);
   ring(scene, mats.mint, 0, -13.2, 2.8);
@@ -1769,8 +1855,9 @@ function makeSign(scene, parent, name, text, x, y, z, yaw, width, height, backgr
   return paintSign(scene, parent, name, text, x, y, z, yaw, width, height, background, ink, texture);
 }
 
-function paintSign(scene, parent, name, text, x, y, z, yaw, width, height, background, ink, texture) {
+function writeBoard(texture, lines, background, ink) {
   const ctx = texture.getContext();
+  const rows = Array.isArray(lines) ? lines : [lines];
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, 512, 256);
   ctx.strokeStyle = ink;
@@ -1779,13 +1866,29 @@ function paintSign(scene, parent, name, text, x, y, z, yaw, width, height, backg
   ctx.fillStyle = ink;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  let size = 96;
-  do {
-    ctx.font = `900 ${size}px Arial Black, Arial, sans-serif`;
-    size -= 4;
-  } while (ctx.measureText(text).width > 460 && size > 28);
-  ctx.fillText(text, 256, 132);
+  if (rows.length < 2) {
+    const text = rows[0] ?? "";
+    let size = 96;
+    do {
+      ctx.font = `900 ${size}px Arial Black, Arial, sans-serif`;
+      size -= 4;
+    } while (ctx.measureText(text).width > 460 && size > 28);
+    ctx.fillText(text, 256, 132);
+  } else {
+    ctx.font = "900 46px Arial Black, Arial, sans-serif";
+    ctx.fillText(rows[0], 256, 82);
+    let size = 78;
+    do {
+      ctx.font = `900 ${size}px Arial Black, Arial, sans-serif`;
+      size -= 4;
+    } while (ctx.measureText(rows[1]).width > 440 && size > 36);
+    ctx.fillText(rows[1], 256, 164);
+  }
   texture.update();
+}
+
+function paintSign(scene, parent, name, text, x, y, z, yaw, width, height, background, ink, texture) {
+  writeBoard(texture, text, background, ink);
   const material = unlitMaterial(scene, `${name}-mat`, texture, { alpha: false });
   material.backFaceCulling = true;
   const meshes = [0, Math.PI].map((flip) => {

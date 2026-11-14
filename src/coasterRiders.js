@@ -27,8 +27,9 @@ function trainCount(length) {
 }
 
 /**
- * While you're online in your coaster yard, regulars sit in a train and ride the track
- * you've built. Each has their own cart, spaced along the same rail sample as your ride.
+ * While the yard is open for business and you're online, regulars from the bot crowd
+ * sit in a train and ride the track you've built. Closed, they leave and the yard is yours.
+ * Each has their own cart, spaced along the same rail sample as your ride.
  * The front car goes out and back; the rest follow one gap behind. A lap that gets the
  * front car home pays the yard once. Leaving, going offline, or editing the track sends
  * the current lap away with no pay. No physics: the carts are moved along the sample.
@@ -240,7 +241,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
      * Returns false, and does not pay, when the lap is dropped.
      */
     update(dt, camera, time) {
-      if (!online || !coaster.active) {
+      if (!online || !coaster.active || !coaster.open) {
         if (shown) hide();
         return false;
       }

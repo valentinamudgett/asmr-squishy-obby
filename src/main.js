@@ -569,6 +569,13 @@ async function bootGame() {
       return;
     }
     if (mode === "coaster") {
+      // The menu button opens the yard only after level 150. The checkpoint still opens it the moment you arrive.
+      if (best < COASTER_LEVEL && !coaster.active) {
+        showToast(t("toast.coasterLocked"));
+        toastTimer = 2.2;
+        nextToast = null;
+        return;
+      }
       if (coaster.active && coasterLock <= 0) return;
       if (coasterLock > 0) {
         const leaving = coasterLockMode === "leave";
@@ -649,6 +656,14 @@ async function bootGame() {
       else if (kind === "shop") yardShop.show("shop");
       else if (kind === "build") yardShop.show("build");
       else if (kind === "decor") yardUpgrades.show("decor");
+      else if (kind === "openBusiness" || kind === "closeBusiness") {
+        coaster.stopTool();
+        const now = coaster.toggleBusiness();
+        audio.blip(now ? "ding" : "thump");
+        showToast(t(now ? "toast.coasterOpen" : "toast.coasterClosed"));
+        toastTimer = 2.2;
+        nextToast = null;
+      }
       else if (kind === "exit") beginCoasterFade("leave");
       return;
     }
@@ -1363,6 +1378,8 @@ function actionText(action) {
   if (action === "shop") return [t("prompt.coasterShop"), t("hud.shop")];
   if (action === "build") return [t("prompt.coasterBuild"), t("hud.build")];
   if (action === "decor") return [t("prompt.coasterDecor"), t("hud.decor")];
+  if (action === "openBusiness") return [t("prompt.coasterOpen"), t("hud.open")];
+  if (action === "closeBusiness") return [t("prompt.coasterClose"), t("hud.close")];
   if (action === "exit") return [t("prompt.coasterExit"), t("hud.back")];
   if (action === "zip") return [t("prompt.zipline"), t("hud.grab")];
   if (action === "soda") return [t("prompt.soda").replace("{n}", String(SODA_PRICE)), t("hud.buy")];
