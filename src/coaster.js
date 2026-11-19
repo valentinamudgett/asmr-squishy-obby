@@ -427,6 +427,14 @@ export function createCoaster(scene) {
       return seatPose(distance, returning);
     },
     /**
+     * Footsteps for the guest line, in world space (avatar-root height).
+     * A straight aisle up the deck, a step beside each decoration, then the catwalk
+     * out through every piece and back to the station.
+     */
+    parade() {
+      return guestParade();
+    },
+    /**
      * One step of a guest cart on the same sample and pace as ride()
      * (9 m/s, faster downhill up to 20, a crawl on a near-vertical climb).
      * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means it is back at the station.
@@ -770,7 +778,89 @@ export function createCoaster(scene) {
     return found;
   }
 
-  function sampleLane(s) {
+  /**
+ * The walk the guest line takes before it boards. Local floors become avatar-root heights.
+ * Decorations up on the rails are skipped: the catwalk already runs through those pieces.
+ */
+function guestParade() {
+  const spots = [];
+  const add = (x, y, z) => {
+    const last = spots[spots.length - 1];
+    if (last && (x - last.x) ** 2 + (y - last.y) ** 2 + (z - last.z) ** 2 < 0.16) return;
+    spots.push({ x, y, z });
+  };
+  const feet = (localY = 0) => OY + localY + FOOT_OFFSET + 0.08;
+  const deck = deckTier(upgrades.deck);
+  const z0 = deck.back + 4;
+  const z1 = Math.min(DECK_FRONT - 2.5, z0 + 27);
+
+  const columns = new Map();
+  for (const record of upgrades.placed) {
+    if (record.track && record.y > 3) continue;
+    const key = `${Math.round(record.x / 1.2)},${Math.round(record.z / 1.2)}`;
+    const prev = columns.get(key);
+    if (!prev || record.y < prev.y) columns.set(key, record);
+  }
+  const stops = [...columns.values()];
+  const beside = (stop) => {
+    const sign = Math.abs(stop.x) < 0.35 ? 1 : Math.sign(stop.x);
+    return { x: stop.x - sign * 1.55, z: stop.z };
+  };
+
+  // The line forms on this aisle, long enough for every cart to stand on the deck.
+  const aisle = stops
+    .filter((stop) => !stop.track && stop.z >= z0 - 0.5 && stop.z <= z1 + 0.5)
+    .sort((a, b) => a.z - b.z || a.x - b.x);
+  add(OX, feet(), OZ + z0);
+  let z = z0;
+  for (const stop of aisle) {
+    if (stop.z > z + 0.3) add(OX, feet(), OZ + stop.z);
+    const side = beside(stop);
+    add(OX + side.x, feet(), OZ + side.z);
+    add(OX, feet(), OZ + stop.z);
+    z = stop.z;
+  }
+  if (z1 > z + 0.3) add(OX, feet(), OZ + z1);
+
+  // Everything else on the platform, nearest first, then the whole track.
+  const rest = stops.filter((stop) => !aisle.includes(stop));
+  let cx = 0;
+  let cz = Math.min(z1, z);
+  while (rest.length) {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < rest.length; i += 1) {
+      const d = (rest[i].x - cx) ** 2 + (rest[i].z - cz) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    const stop = rest.splice(best, 1)[0];
+    const side = beside(stop);
+    const floor = stop.track ? Math.max(0, stop.y - RAIL_Y) : 0;
+    add(OX + side.x, feet(floor), OZ + side.z);
+    cx = side.x;
+    cz = side.z;
+  }
+
+  const step = 1.8;
+  // Stop short of the gate across the end of the catwalk.
+  const reach = Math.max(0, laneLength - 1.4);
+  const samples = Math.max(1, Math.ceil(reach / step));
+  const at = (i) => sampleLane((i / samples) * reach);
+  for (let i = 0; i <= samples; i += 1) {
+    const node = at(i);
+    add(OX + node.x, feet(node.y), OZ + node.z);
+  }
+  for (let i = samples - 1; i >= 0; i -= 1) {
+    const node = at(i);
+    add(OX + node.x, feet(node.y), OZ + node.z);
+  }
+  return spots;
+}
+
+function sampleLane(s) {
     const c = Math.max(0, Math.min(laneLength, s));
     let lo = 0;
     let hi = laneDist.length - 1;

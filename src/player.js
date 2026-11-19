@@ -482,6 +482,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       const canJump = state === "ON_GROUND" || coyote > 0;
       const wantJump = allowInput && jumpQueued > 0 && canJump;
       let jumped = false;
+      let doubleJumped = false;
 
       const onStair = state === "ON_GROUND" && Boolean(pad?.stair);
       const climbing = onStair || (stairRun && !launched && state !== "ON_GROUND");
@@ -573,6 +574,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
           trick = null;
           trickTime = 0;
           next.y = Math.max(next.y, FLY_LIFT);
+          doubleJumped = true;
           hooks.onFly?.(true);
         }
         // One extra press after a jump. It pops higher and, if you're moving, carries farther.
@@ -600,6 +602,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
           stairRun = false;
           coyote = 0;
           jumped = true;
+          doubleJumped = true;
           beginTrick();
         }
       }
@@ -620,6 +623,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       if (jumped && pad && !justLanded && mute <= 0) hooks.onJump(pad);
 
       const speed = Math.hypot(next.x, next.z);
+      const looked = lookedAround;
       if (trick && !trickFresh) {
         // Finish the flip quickly once the feet are back on a pad.
         trickTime += dt * (state === "ON_GROUND" ? 4 : 1);
@@ -669,6 +673,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         state,
         justLanded,
         jumped,
+        doubleJumped,
+        looked,
         trick: trickOut,
         trickP,
         flying,

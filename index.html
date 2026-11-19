@@ -91,6 +91,18 @@
     </section>
 
     <p id="hint">Press a key or tap to wake the crunch.</p>
+    <section id="tutorial" hidden aria-labelledby="tutorial-title">
+      <p class="tutorial-kicker" data-i18n="tutorial.kicker">First time</p>
+      <div class="tutorial-dots" aria-hidden="true"></div>
+      <h2 id="tutorial-title" data-i18n="tutorial.welcomeTitle">Welcome</h2>
+      <p id="tutorial-body" data-i18n="tutorial.welcome">A short lesson, then the climb is yours.</p>
+      <div id="tutorial-keys" class="tutorial-keys" hidden></div>
+      <p id="tutorial-try" class="tutorial-try" hidden data-i18n="tutorial.try">Try it!</p>
+      <div class="tutorial-actions">
+        <button id="tutorial-skip" type="button" data-i18n="tutorial.skip">Skip</button>
+        <button id="tutorial-next" type="button" data-i18n="tutorial.go">Next</button>
+      </div>
+    </section>
     <p id="toast" hidden>Checkpoint</p>
     <section id="boss-hud" hidden>
       <p class="boss-row">
@@ -104,6 +116,19 @@
     </section>
     <p id="action-prompt" data-i18n="prompt.openVent">Press E to open the vent</p>
     <div id="fade" aria-hidden="true"></div>
+    <div
+      id="game-over"
+      class="game-over"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="game-over-title"
+      hidden
+    >
+      <h2 id="game-over-title" class="visually-hidden" data-i18n="gameOver.title">Game over</h2>
+      <button id="game-over-continue" type="button" data-i18n-label="gameOver.continue" aria-label="Continue?">
+        <img src="/game-over.webp" alt="" width="860" height="860" draggable="false" />
+      </button>
+    </div>
     <pre id="debug" hidden></pre>
 
     <div class="touch-ui" id="touch">
@@ -501,44 +526,55 @@
     </div>
 
     <div id="boot">
-      <div class="boot-doodles" aria-hidden="true">
-        <span class="boot-doodle boot-doodle-plus boot-doodle-a"></span>
-        <span class="boot-doodle boot-doodle-dot boot-doodle-b"></span>
-        <span class="boot-doodle boot-doodle-plus boot-doodle-c"></span>
-        <span class="boot-doodle boot-doodle-square boot-doodle-d"></span>
-      </div>
-      <div class="boot-card">
-        <div class="boot-titlebar">
-          <span id="boot-percent" class="boot-percent">0%</span>
-          <span class="boot-glyphs" aria-hidden="true">
-            <span class="boot-glyph boot-glyph-min"></span>
-            <span class="boot-glyph boot-glyph-max"></span>
-            <span class="boot-glyph boot-glyph-close"></span>
-          </span>
-        </div>
-        <div class="boot-body">
+      <div class="boot-frame">
+        <svg class="boot-defs" aria-hidden="true" focusable="false" width="0" height="0">
+          <symbol id="boot-berry" viewBox="0 0 100 124">
+            <path fill="#ff5c66" d="M50 42c18-1 33 13 32 34-1 21-14 40-32 44-18-4-31-23-32-44 1-21 14-33 32-34z"/>
+            <g fill="#fff">
+              <ellipse cx="36" cy="64" rx="2.3" ry="3.4" transform="rotate(-22 36 64)"/>
+              <ellipse cx="50" cy="59" rx="2.3" ry="3.4" transform="rotate(4 50 59)"/>
+              <ellipse cx="64" cy="65" rx="2.3" ry="3.4" transform="rotate(22 64 65)"/>
+              <ellipse cx="29" cy="79" rx="2.2" ry="3.2" transform="rotate(-16 29 79)"/>
+              <ellipse cx="43" cy="75" rx="2.3" ry="3.3" transform="rotate(-4 43 75)"/>
+              <ellipse cx="57" cy="77" rx="2.3" ry="3.3" transform="rotate(14 57 77)"/>
+              <ellipse cx="71" cy="83" rx="2.1" ry="3" transform="rotate(26 71 83)"/>
+              <ellipse cx="36" cy="93" rx="2.2" ry="3.1" transform="rotate(-12 36 93)"/>
+              <ellipse cx="50" cy="91" rx="2.2" ry="3.1" transform="rotate(2 50 91)"/>
+              <ellipse cx="64" cy="95" rx="2.1" ry="3" transform="rotate(16 64 95)"/>
+              <ellipse cx="44" cy="106" rx="2" ry="2.8" transform="rotate(-8 44 106)"/>
+              <ellipse cx="57" cy="108" rx="2" ry="2.7" transform="rotate(10 57 108)"/>
+            </g>
+            <path fill="#69b85a" d="M47 10h6v16h-6z"/>
+            <g fill="#84d46c">
+              <ellipse cx="50" cy="32" rx="11" ry="18"/>
+              <ellipse cx="33" cy="38" rx="11" ry="16" transform="rotate(-48 33 38)"/>
+              <ellipse cx="67" cy="38" rx="11" ry="16" transform="rotate(48 67 38)"/>
+              <ellipse cx="21" cy="50" rx="9" ry="14" transform="rotate(-76 21 50)"/>
+              <ellipse cx="79" cy="50" rx="9" ry="14" transform="rotate(76 79 50)"/>
+            </g>
+          </symbol>
+        </svg>
+        <svg class="boot-berry boot-berry-1" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-2" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-3" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-4" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-5" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-6" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-7" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-berry boot-berry-8" viewBox="0 0 100 124" aria-hidden="true" focusable="false"><use href="#boot-berry" width="100" height="124"/></svg>
+        <svg class="boot-wave" viewBox="0 0 1440 280" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path fill="#ffffff" d="M0 124C170 176 280 46 460 88C640 130 730 34 940 64C1140 94 1280 36 1440 86V280H0Z"/>
+        </svg>
+        <div
+          id="boot-bar"
+          class="boot-bar"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="boot-fill" class="boot-fill"></div>
           <p id="boot-status" class="boot-title" data-i18n="boot.title">Loading...</p>
-          <div
-            id="boot-bar"
-            class="boot-bar"
-            role="progressbar"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="0"
-          >
-            <div id="boot-fill" class="boot-fill"></div>
-            <span id="boot-cursor" class="boot-cursor" aria-hidden="true">
-              <svg viewBox="0 0 22 26" width="26" height="30">
-                <path
-                  fill="#fffaf3"
-                  stroke="#3c2b24"
-                  stroke-width="1.6"
-                  stroke-linejoin="round"
-                  d="M3.2 2.2 3.2 19.4 8.2 14.8 12.4 22.6 15.5 21 11.3 13.2 17.8 13Z"
-                />
-              </svg>
-            </span>
-          </div>
         </div>
       </div>
     </div>

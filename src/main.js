@@ -26,7 +26,7 @@ import { bindCoasterSky } from "./coasterSky.js";
 import { buildAvatar, createPreview } from "./avatar.js";
 import { COSTUMES, costumeById } from "./costumes.js";
 import { createCourse, LAVA_Y, PADS_PER_LEVEL } from "./course.js";
-import { BOSS_LEVEL, createEscape, KILLER_LEVEL, LAVA_LEVEL, SODA_PRICE, SODA_SPEED, SQUISHY_LEVEL, VENDING_LEVEL } from "./escape.js";
+import { BOSS_LEVEL, createEscape, KILLER_LEVEL, LAVA_LEVEL, SODA_PRICE, SODA_SPEED, VENDING_LEVEL } from "./escape.js";
 import { drawFace, FACES } from "./faces.js";
 import { BUBBLE_LIFT, createBubble } from "./figure.js";
 import { DANCES } from "./dances.js";
@@ -36,6 +36,7 @@ import { createThanksgiving } from "./thanksgiving.js";
 import { createChristmas } from "./christmas.js";
 import { createValentines } from "./valentines.js";
 import { applyTranslations, t } from "./i18n.js";
+import { createTutorial } from "./tutorial.js";
 import {
   AGES,
   BODIES,
@@ -67,8 +68,6 @@ const boot = document.querySelector("#boot");
 const bootStatus = document.querySelector("#boot-status");
 const bootBar = document.querySelector("#boot-bar");
 const bootFill = document.querySelector("#boot-fill");
-const bootPercent = document.querySelector("#boot-percent");
-const bootCursor = document.querySelector("#boot-cursor");
 const levelEl = document.querySelector("#level");
 const escapeStat = document.querySelector("#escape-stat");
 const escapeCount = document.querySelector("#escape-count");
@@ -133,6 +132,7 @@ const ui = {
 };
 
 applyTranslations();
+const tutorial = createTutorial();
 document.body.classList.add("start-open");
 // Before boot, so the title screen already wears the saved game style.
 wearTheme(loadPlayerPreferences().theme);
@@ -160,12 +160,8 @@ function createBootProgress() {
   bootBar.setAttribute("aria-label", t("boot.title"));
 
   const paint = () => {
-    const width = `${(shown * 100).toFixed(2)}%`;
-    bootFill.style.width = width;
-    bootCursor.style.left = width;
-    const percent = Math.round(shown * 100);
-    bootBar.setAttribute("aria-valuenow", String(percent));
-    bootPercent.textContent = `${percent}%`;
+    bootFill.style.width = `${(shown * 100).toFixed(2)}%`;
+    bootBar.setAttribute("aria-valuenow", String(Math.round(shown * 100)));
   };
 
   // While waiting on a stage, ease a little past it (never near 100%) so the bar is never frozen.
@@ -278,6 +274,43 @@ async function bootGame() {
   const spawn = course.standOn(course.start, FOOT_OFFSET);
   let checkpointPad = course.start;
   let escape = null;
+  // Shown after a capybara's catch close-up, until a fresh click, tap, Enter, or Space.
+  const gameOverEl = document.querySelector("#game-over");
+  const gameOverContinue = document.querySelector("#game-over-continue");
+  let gameOver = false;
+  let armGameOver = false;
+  function setGameOverInert(on) {
+    for (const child of document.body.children) {
+      if (child !== gameOverEl) child.inert = on;
+    }
+  }
+  function showGameOver() {
+    if (gameOver) return;
+    gameOver = true;
+    gameOverEl.hidden = false;
+    setGameOverInert(true);
+    gameOverContinue.focus({ preventScroll: true });
+  }
+  function hideGameOver() {
+    if (!gameOver) return;
+    gameOver = false;
+    gameOverEl.hidden = true;
+    setGameOverInert(false);
+    canvas.focus({ preventScroll: true });
+  }
+  gameOverContinue.addEventListener("click", () => hideGameOver());
+  // Registered before the player, so Space continues without also queueing a jump.
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!gameOver || event.repeat) return;
+      if (event.code !== "Enter" && event.code !== "NumpadEnter" && event.code !== "Space") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hideGameOver();
+    },
+    true,
+  );
   const player = createPlayer(scene, spawn, {
     findPad: (foot) => course.findPad(foot) ?? escape?.findPad(foot) ?? null,
     onLand: (pad, impact) => {
@@ -479,7 +512,7 @@ async function bootGame() {
     levelEl.textContent = String(level);
     showEscape(level);
   };
-  /** Puts you in Capybara Prison at checkpoint `at` (50, 60, 70, 75, 80, or 90). `again` is a visit from the main menu that should not move the climb. */
+  /** Puts you in Capybara Prison at checkpoint `at` (50, 75, 80, or 90). `again` is a visit from the main menu that should not move the climb. */
   const enterEscape = (at, again = false) => {
     // A coaster fade or an active yard ride would put you back on the cart the same frame, so the
     // prison never stays on screen. Leave the yard first; the saved track and coins stay put.
@@ -521,12 +554,15 @@ async function bootGame() {
     if (!escape.active) return;
     escape.leave();
     bots.setPrison(null, checkpointPad.index);
+    armGameOver = false;
+    hideGameOver();
     endCloseUp();
     player.setSpeedBoost(1);
     showLevel(checkpointPad.level);
   }
   // The caught close-up looks through its own camera for a second, so the follow camera can't move
   // it. You're hidden meanwhile (your name tag follows the avatar), so nothing of yours blocks the face.
+  // The game over screen comes up as that close-up ends, and stays until you continue.
   const closeUpCamera = new FreeCamera("closeUpCamera", new Vector3(), scene);
   closeUpCamera.minZ = 0.05;
   closeUpCamera.fov = 0.7;
@@ -550,7 +586,7 @@ async function bootGame() {
   /** Where a saved prison run should resume. A visit from the menu always starts in the cell. */
   function prisonMenuLevel() {
     if (best < PRISON_LEVEL || best >= FREEDOM_LEVEL) return PRISON_LEVEL;
-    return [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, SQUISHY_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+    return [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
   }
   /**
    * Main menu picks. Obby returns to the climb. Prison and the roller coaster are their own games:
@@ -590,6 +626,7 @@ async function bootGame() {
       beginCoasterFade("enter");
       return;
     }
+    if (tutorial.offer(best > 1)) pointAhead(course.start);
     if (lockIn > 0) {
       lockIn = 0;
       fadeEl.classList.remove("is-on");
@@ -645,7 +682,7 @@ async function bootGame() {
     nextToast = t("toast.coasterHint");
   }
   function doAction() {
-    if (yardShop.open || yardUpgrades.open || ui.settingsOpen || ui.startOpen || coasterLock > 0) return;
+    if (gameOver || yardShop.open || yardUpgrades.open || ui.settingsOpen || ui.startOpen || coasterLock > 0) return;
     if (escape.active) {
       escape.act();
       return;
@@ -702,7 +739,7 @@ async function bootGame() {
   let fightShown = "";
   showLevel(course.start.level);
   if (isPrisonLevel(best)) {
-    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, SQUISHY_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
+    const at = [BOSS_LEVEL, VENDING_LEVEL, KILLER_LEVEL, LAVA_LEVEL].find((level) => best >= level) ?? PRISON_LEVEL;
     enterEscape(at);
     if (at !== PRISON_LEVEL) {
       showToast(`Level ${at}`);
@@ -748,7 +785,7 @@ async function bootGame() {
       coasterLock -= dt;
       if (coasterLock <= 0) finishCoasterFade();
     }
-    const allowInput = !ui.settingsOpen && !ui.startOpen && !yardShop.open && !yardUpgrades.open && !avatar.dancing && !pop.active && lockIn <= 0 && coasterLock <= 0 && !closeUp;
+    const allowInput = !gameOver && !ui.settingsOpen && !ui.startOpen && !yardShop.open && !yardUpgrades.open && !avatar.dancing && !pop.active && lockIn <= 0 && coasterLock <= 0 && !closeUp;
     // On the prison zipline you hang from the handle: no steering until it lets go.
     // On your coaster the car carries you the same way, out along the track and back.
     const holdRide = ui.settingsOpen || ui.startOpen || yardShop.open || yardUpgrades.open;
@@ -996,14 +1033,14 @@ async function bootGame() {
     yardUpgrades.tick(dt, clock, ui.startOpen || ui.settingsOpen || yardShop.open);
     coasterGate = !escape.active && !coaster.active && frame.grounded && coursePad?.role === "checkpoint" && coursePad.level === COASTER_LEVEL;
     const menus = ui.startOpen || ui.settingsOpen || yardShop.open || yardUpgrades.open;
-    if (shooting.take() && !menus) escape.shoot();
+    if (shooting.take() && !menus && !gameOver) escape.shoot();
     const escapeEvents = escape.update(dt, clock, {
       foot: frame.foot,
       position: frame.position,
       pad: frame.pad,
       grounded: frame.grounded,
       facing: frame.facing,
-      hold: menus || avatar.dancing || lockIn > 0 || coasterLock > 0,
+      hold: gameOver || menus || avatar.dancing || lockIn > 0 || coasterLock > 0,
     });
     for (const event of escapeEvents) {
       if (event.type === "toast") {
@@ -1012,8 +1049,13 @@ async function bootGame() {
         nextToast = event.next;
       } else if (event.type === "closeUp") {
         startCloseUp(event.eye, event.target);
+        armGameOver = true;
       } else if (event.type === "closeUpEnd") {
         endCloseUp();
+        if (armGameOver) {
+          armGameOver = false;
+          showGameOver();
+        }
       } else if (event.type === "respawn") {
         endCloseUp();
         avatar.stopDance();
@@ -1101,7 +1143,12 @@ async function bootGame() {
       showFight(fight, escape.armed);
     }
 
-    if (hintTimer > 0) {
+    tutorial.tick(dt, frame, {
+      teaching: allowInput && !escape.active && !coaster.active && !plunge,
+      startPad: course.start,
+    });
+    if (tutorial.showing) hintEl.hidden = true;
+    else if (hintTimer > 0) {
       hintTimer -= dt;
       if (hintTimer <= 0 || (frame.justLanded && frame.pad && frame.pad !== course.start)) {
         hintEl.hidden = true;
@@ -1383,6 +1430,7 @@ function actionText(action) {
   if (action === "exit") return [t("prompt.coasterExit"), t("hud.back")];
   if (action === "zip") return [t("prompt.zipline"), t("hud.grab")];
   if (action === "soda") return [t("prompt.soda").replace("{n}", String(SODA_PRICE)), t("hud.buy")];
+  if (action === "wash") return [t("prompt.wash"), t("hud.wash")];
   if (action === "cupboard") return [t("prompt.cupboard"), t("hud.open")];
   if (action === "unlock") return [t("prompt.unlock"), t("hud.unlock")];
   if (action === "needKey") return [t("prompt.needKey"), t("hud.unlock")];

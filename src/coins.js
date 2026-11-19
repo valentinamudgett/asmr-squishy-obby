@@ -44,7 +44,7 @@ export function loadCoins() {
   }
 }
 
-/** Pays 5,000 coins the first time level 150 is reached. Later calls do nothing. */
+/** Pays 5,000 coins the first time the roller coaster opens. Later calls do nothing. */
 export function grantCoasterPurse(state) {
   if (state.coasterPurse) return false;
   state.coasterPurse = true;

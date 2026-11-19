@@ -1,6 +1,7 @@
 import { Quaternion, TransformNode } from "@babylonjs/core";
 import { coasterGuests } from "./bot.js";
 import { createFigure } from "./figure.js";
+import { FOOT_OFFSET } from "./player.js";
 
 /** Short tracks still run a line of 5. Longer tracks add cars until the train is 10. */
 const MIN_TRAIN = 5;
@@ -10,8 +11,8 @@ const MAX_TRAIN = 10;
  * A cart is about 1.75 deep, so this leaves a gap and a seat of its own.
  */
 const GAP = 2.8;
-/** Seconds the train waits at the station between laps. */
-const BETWEEN = 1.05;
+/** How fast the line walks the park, in meters per second. */
+const LINE_SPEED = 3.4;
 /** Meters over which a cart eases off the side dock and onto the rails. */
 const JOIN = 2.4;
 /** How far the dock sits beside the station, clear of the player's own cart. */
@@ -28,11 +29,12 @@ function trainCount(length) {
 
 /**
  * While the yard is open for business and you're online, regulars from the bot crowd
- * sit in a train and ride the track you've built. Closed, they leave and the yard is yours.
+ * walk in one line through the decorations and the whole track you built, then sit in a
+ * train and ride it. Closed, they leave and the yard is yours.
  * Each has their own cart, spaced along the same rail sample as your ride.
  * The front car goes out and back; the rest follow one gap behind. A lap that gets the
  * front car home pays the yard once. Leaving, going offline, or editing the track sends
- * the current lap away with no pay. No physics: the carts are moved along the sample.
+ * the current lap away with no pay. No physics: the line and the carts are moved by hand.
  */
 export function createCoasterRiders(scene, graphics, coaster) {
   const roster = coasterGuests(MAX_TRAIN);
@@ -44,8 +46,8 @@ export function createCoasterRiders(scene, graphics, coaster) {
 
   let online = false;
   let shown = false;
-  let phase = "queue";
-  let wait = 0.8;
+  let phase = "line";
+  let tour = null;
   let stamp = 0;
   let count = MIN_TRAIN;
   let axisRev = -1;
@@ -82,12 +84,82 @@ export function createCoasterRiders(scene, graphics, coaster) {
 
   function hide() {
     shown = false;
-    phase = "queue";
-    wait = 0.8;
+    phase = "line";
+    tour = null;
     trip.travel = 0;
     trip.dir = 1;
     for (const car of cars) car.node.setEnabled(false);
     for (const figure of guests) figure.setShown(false);
+  }
+
+  /** Changes when a decoration moves, so the line walks the park you have now. */
+  function decorStamp() {
+    let n = coaster.upgrades.placed.length;
+    for (const piece of coaster.upgrades.placed) {
+      n = (Math.imul(n, 33) + Math.round(piece.x * 4) + Math.round(piece.z * 4) * 13 + Math.round(piece.y * 4) * 3) | 0;
+    }
+    return n;
+  }
+
+  /**
+   * The walk, then a straight finish along the station dock.
+   * The last stretch is one cart-gap per rider, ending at the front cart,
+   * so the line arrives already standing where it will sit.
+   */
+  function makeTour() {
+    const spots = coaster.parade();
+    const seat = coaster.seatAt(0, false);
+    const sideX = -Math.cos(seat.heading);
+    const sideZ = Math.sin(seat.heading);
+    const homeX = seat.footX + sideX * SIDE;
+    const homeZ = seat.footZ + sideZ * SIDE;
+    const y = coaster.origin.y + FOOT_OFFSET + 0.08;
+    const fx = Math.sin(seat.heading);
+    const fz = Math.cos(seat.heading);
+    for (let i = MAX_TRAIN - 1; i >= 0; i -= 1) {
+      const back = i * GAP;
+      spots.push({ x: homeX - fx * back, y, z: homeZ - fz * back });
+    }
+    const dist = [0];
+    for (let i = 1; i < spots.length; i += 1) {
+      const a = spots[i - 1];
+      const b = spots[i];
+      dist.push(dist[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+    }
+    return {
+      spots,
+      dist,
+      length: dist[dist.length - 1] || 0,
+      head: Math.max(0, (count - 1) * GAP),
+      rev: coaster.trackRev,
+      decor: decorStamp(),
+    };
+  }
+
+  function sampleTour(s) {
+    const spots = tour?.spots ?? [];
+    if (spots.length < 2) {
+      const only = spots[0] ?? { x: 0, y: 0, z: 0 };
+      return { x: only.x, y: only.y, z: only.z, heading: 0 };
+    }
+    const c = Math.max(0, Math.min(tour.length, s));
+    let lo = 0;
+    let hi = tour.dist.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (tour.dist[mid] <= c) lo = mid;
+      else hi = mid;
+    }
+    const span = tour.dist[lo + 1] - tour.dist[lo] || 1;
+    const t = (c - tour.dist[lo]) / span;
+    const a = spots[lo];
+    const b = spots[Math.min(spots.length - 1, lo + 1)];
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      z: a.z + (b.z - a.z) * t,
+      heading: Math.atan2(b.x - a.x, b.z - a.z),
+    };
   }
 
   // Fixed side of the station, so the way home doesn't swing the dock onto the catwalk.
@@ -140,31 +212,35 @@ export function createCoasterRiders(scene, graphics, coaster) {
   function step(dt) {
     // A half-finished lap never pays: the track changed, or it is too short to ride.
     if (phase === "ride" && (coaster.trackRev !== stamp || coaster.trackLength < 4)) {
-      phase = "queue";
+      phase = "line";
+      tour = null;
       trip.travel = 0;
       trip.dir = 1;
-      wait = 0.6;
       return false;
     }
     if (phase === "ride") {
       // Keep rolling while the player rides too. Stopping here left the train frozen in the station.
       const moved = coaster.advanceGuest(trip, dt);
       if (!moved) {
-        phase = "queue";
+        phase = "line";
+        tour = null;
         trip.travel = 0;
         trip.dir = 1;
-        wait = 0.6;
         return false;
       }
       if (moved.done) {
-        phase = "queue";
-        wait = BETWEEN;
+        phase = "line";
+        tour = null;
+        trip.travel = 0;
+        trip.dir = 1;
         return true;
       }
       return false;
     }
-    wait -= dt;
-    if (wait <= 0 && guests.length >= count && coaster.trackLength >= 4) {
+    if (!tour || tour.rev !== coaster.trackRev || tour.decor !== decorStamp()) tour = makeTour();
+    // The whole line keeps its gaps. The leader stops on the front cart; everyone else is one gap behind.
+    tour.head = Math.min(tour.length, tour.head + LINE_SPEED * dt);
+    if (guests.length >= count && coaster.trackLength >= 4 && tour.head >= tour.length - 0.05) {
       phase = "ride";
       stamp = coaster.trackRev;
       trip.travel = 0;
@@ -179,7 +255,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
     node.rotationQuaternion.copyFrom(yaw);
   }
 
-  function placeFigure(figure, pose, bob, dt, camera, time) {
+  function placeFigure(figure, pose, bob, dt, camera, time, walk) {
     if (!figure.shown) figure.setShown(true);
     figure.update(
       dt,
@@ -188,8 +264,8 @@ export function createCoasterRiders(scene, graphics, coaster) {
         y: pose.footY + bob,
         z: pose.footZ,
         facing: pose.heading,
-        sitting: true,
-        moving: false,
+        sitting: !walk,
+        moving: walk,
         airborne: false,
         running: false,
         time,
@@ -200,7 +276,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
   }
 
   function poseAll(dt, camera, time) {
-    const bob = phase === "queue" ? Math.sin(time * 2.2) * 0.035 : 0;
+    const walking = phase === "line" && tour;
     const ready = Math.min(count, guests.length);
     for (let index = 0; index < cars.length; index += 1) {
       const car = cars[index];
@@ -211,15 +287,28 @@ export function createCoasterRiders(scene, graphics, coaster) {
         if (figure?.shown) figure.setShown(false);
         continue;
       }
-      const pose = carPose(index);
-      placeCart(car.node, pose, bob);
+      const parked = carPose(index);
+      placeCart(car.node, parked, 0);
       car.tick(time);
-      placeFigure(figure, pose, bob, dt, camera, time);
+      if (!walking) {
+        placeFigure(figure, parked, 0, dt, camera, time, false);
+        continue;
+      }
+      const step = sampleTour(tour.head - index * GAP);
+      placeFigure(
+        figure,
+        { footX: step.x, footY: step.y, footZ: step.z, heading: step.heading },
+        0,
+        dt,
+        camera,
+        time,
+        tour.head < tour.length - 0.05,
+      );
     }
   }
 
   return {
-    /** `queue` while the train waits at the station, `ride` while it is out on the rails. */
+    /** `line` while they walk the park, `ride` while the train is out on the rails. */
     get phase() {
       return phase;
     },
@@ -247,7 +336,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
       }
       if (!shown) {
         shown = true;
-        wait = 0.8;
+        tour = null;
       }
       if (phase !== "ride") count = trainCount(coaster.trackLength);
       if (guests.length < count) buildNext();

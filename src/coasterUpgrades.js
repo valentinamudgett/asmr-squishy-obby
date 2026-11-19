@@ -37,10 +37,13 @@ export const CARTS = [
 ];
 
 export const DECOR = [
+  { id: "block", cost: 150, nameKey: "upgrade.decorBlock", hintKey: "upgrade.decorBlockHint", emoji: "🧱" },
+  { id: "fence", cost: 180, nameKey: "upgrade.decorFence", hintKey: "upgrade.decorFenceHint", emoji: "🚧" },
   { id: "lights", cost: 300, nameKey: "upgrade.decorLights", hintKey: "upgrade.decorLightsHint", emoji: "💡" },
   { id: "flag", cost: 200, nameKey: "upgrade.decorFlag", hintKey: "upgrade.decorFlagHint", emoji: "🚩" },
   { id: "balloons", cost: 250, nameKey: "upgrade.decorBalloons", hintKey: "upgrade.decorBalloonsHint", emoji: "🎈" },
   { id: "arch", cost: 600, nameKey: "upgrade.decorArch", hintKey: "upgrade.decorArchHint", emoji: "🍬" },
+  { id: "ceiling", cost: 700, nameKey: "upgrade.decorCeiling", hintKey: "upgrade.decorCeilingHint", emoji: "🏠" },
   { id: "fireworks", cost: 1000, nameKey: "upgrade.decorFireworks", hintKey: "upgrade.decorFireworksHint", emoji: "🎆" },
 ];
 
@@ -50,6 +53,12 @@ export const DECOR_SHACK = { x: 15, z: -5.5 };
 export const DECOR_SPOT = { x: DECOR_SHACK.x, z: DECOR_SHACK.z + 3.3, reach: 2.6 };
 
 const MAX_PLACED = 60;
+/** Blocks and fences snap to this grid so a row lines up. A block is one step tall, so the next one sits on top. */
+const BUILD_GRID = 1.2;
+const BLOCK_H = 0.82;
+const FENCE_H = 1.12;
+/** How many blocks can sit in one pile. Each one is a step you can jump. */
+const STACK_MAX = 8;
 const MAX_STOCK = 99;
 /** Decor beside the track sits on the side away from the catwalk, clear of the car. */
 const TRACK_SIDE = 0.95;
@@ -247,6 +256,8 @@ function buildDecor(scene, kit, type, tint, ghost = false) {
   const ink = paint(scene, "#3a2433", 0.08);
   const moving = [];
   let tick = null;
+  let collider = null;
+  const box = (w, h, d) => MeshBuilder.CreateBox("coaster-decor-part", { width: w, height: h, depth: d }, scene);
 
   if (type === "lights") {
     for (const x of [-1.2, 1.2]) {
@@ -316,6 +327,39 @@ function buildDecor(scene, kit, type, tint, ghost = false) {
     }
     add(ball(0.28), gold, 0, 2.68, 0);
     for (const x of [-0.85, 0.85]) add(cyl(0.08, 0.3), gold, x, 0.04, 0);
+  } else if (type === "ceiling") {
+    // A roof high enough to ride and walk under. No collider, so it never stops the car or a builder.
+    const roofY = 3.4;
+    const hx = 2.15;
+    const hz = 1.55;
+    for (const x of [-hx + 0.2, hx - 0.2]) {
+      for (const z of [-hz + 0.2, hz - 0.2]) {
+        add(cyl(roofY, 0.09), cream, x, roofY / 2, z);
+        add(ball(0.16), pink, x, 0.1, z);
+      }
+    }
+    add(box(hx * 2 + 0.55, 0.14, hz * 2 + 0.45), pink, 0, roofY, 0);
+    for (let i = 0; i < 4; i += 1) {
+      add(box(hx * 2 + 0.58, 0.05, 0.22), cream, 0, roofY + 0.09, -hz * 0.62 + i * ((hz * 1.24) / 3));
+    }
+    add(box(hx * 2 + 0.7, 0.08, 0.12), gold, 0, roofY + 0.08, -hz);
+    add(box(hx * 2 + 0.7, 0.08, 0.12), gold, 0, roofY + 0.08, hz);
+    add(box(0.12, 0.08, hz * 2 + 0.28), gold, -hx, roofY + 0.08, 0);
+    add(box(0.12, 0.08, hz * 2 + 0.28), gold, hx, roofY + 0.08, 0);
+    for (const x of [-1.1, 0, 1.1]) add(ball(0.14), gold, x, roofY - 0.18, 0);
+  } else if (type === "block") {
+    const color = paint(scene, TINTS[tint % TINTS.length], 0.16);
+    add(box(1.14, BLOCK_H - 0.1, 1.14), color, 0, (BLOCK_H - 0.1) / 2, 0);
+    add(box(1.18, 0.1, 1.18), cream, 0, BLOCK_H - 0.05, 0);
+    collider = { w: 1.18, h: BLOCK_H, d: 1.18, cy: BLOCK_H / 2 };
+  } else if (type === "fence") {
+    const rail = paint(scene, TINTS[tint % TINTS.length], 0.16);
+    for (const x of [-0.55, 0.55]) add(box(0.1, FENCE_H, 0.1), cream, x, FENCE_H / 2, 0);
+    for (const x of [-0.28, 0, 0.28]) add(box(0.07, 0.86, 0.05), cream, x, 0.5, 0);
+    for (const y of [0.38, 0.72, 1.02]) add(box(1.16, 0.07, 0.06), rail, 0, y, 0);
+    add(ball(0.14), gold, -0.55, FENCE_H + 0.04, 0);
+    add(ball(0.14), gold, 0.55, FENCE_H + 0.04, 0);
+    collider = { w: 1.2, h: FENCE_H, d: 0.18, cy: FENCE_H / 2 };
   } else {
     add(MeshBuilder.CreateBox("coaster-decor-part", { width: 0.72, height: 0.46, depth: 0.72 }, scene), pink, 0, 0.23, 0);
     add(MeshBuilder.CreateBox("coaster-decor-part", { width: 0.75, height: 0.08, depth: 0.75 }, scene), gold, 0, 0.32, 0);
@@ -338,6 +382,7 @@ function buildDecor(scene, kit, type, tint, ghost = false) {
     root,
     meshes,
     tick,
+    collider: ghost ? null : collider,
     dispose() {
       for (const mesh of meshes) {
         if (mesh.material && mesh.material.subMaterials) mesh.material.dispose(false, false, false);
@@ -737,11 +782,36 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     const item = buildDecor(scene, kit, record.type, record.tint);
     item.root.position.set(origin.x + record.x, origin.y + record.y, origin.z + record.z);
     item.root.rotation.y = record.yaw;
+    if (item.collider) attachSolid(item);
     for (const mesh of item.meshes) {
       mesh.isPickable = true;
       mesh.metadata = { coasterDecor: record };
     }
     placedKits.set(record, item);
+  }
+
+  /** A static box you can stand on or be stopped by. The preview ghost stays open to walk through. */
+  function attachSolid(item) {
+    const { w, h, d, cy } = item.collider;
+    const mesh = MeshBuilder.CreateBox("coaster-decor-solid", { width: w, height: h, depth: d }, scene);
+    mesh.parent = item.root;
+    mesh.position.y = cy;
+    mesh.isVisible = false;
+    mesh.isPickable = false;
+    item.root.computeWorldMatrix(true);
+    mesh.computeWorldMatrix(true);
+    const shape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(w, h, d), scene);
+    shape.material = { friction: 0.92, restitution: 0 };
+    const body = new PhysicsBody(mesh, PhysicsMotionType.STATIC, false, scene);
+    body.shape = shape;
+    body.setMassProperties({ mass: 0 });
+    body.disablePreStep = true;
+    const drop = item.dispose;
+    item.dispose = () => {
+      body.dispose();
+      shape.dispose();
+      drop();
+    };
   }
 
   function startPlacing() {
@@ -786,7 +856,8 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       chip.setAttribute("aria-pressed", String(pick === item.id && !chosen));
       chip.disabled = have <= 0;
       chip.addEventListener("click", () => {
-        pick = item.id;
+        // Tap the selected button again to put it down, so a click can pick a decoration up.
+        pick = pick === item.id && !chosen ? null : item.id;
         chosen = null;
         marker.setEnabled(false);
         clearGhost();
@@ -796,9 +867,12 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       chips.append(chip);
     }
     pickUp.hidden = !chosen;
+    const armed = pick && state.decor[pick] > 0 ? decorById(pick) : null;
     if (message) hint.textContent = message;
     else if (chosen) hint.textContent = t("upgrade.placeChosen").replace("{name}", t(decorById(chosen.type).nameKey));
-    else if (pick && state.decor[pick] > 0) hint.textContent = t("upgrade.placeHint").replace("{name}", t(decorById(pick).nameKey));
+    else if (armed && (pick === "block" || pick === "fence")) hint.textContent = t("upgrade.placeStack").replace("{name}", t(armed.nameKey));
+    else if (armed) hint.textContent = t("upgrade.placeHint").replace("{name}", t(armed.nameKey));
+    else if (DECOR.some((item) => state.decor[item.id] > 0)) hint.textContent = t("upgrade.placeSelect");
     else hint.textContent = t("upgrade.placeEmpty");
   }
 
@@ -818,6 +892,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     const ray = rayAt(clientX, clientY);
     if (!ray) return null;
     const hit = scene.pickWithRay(ray, (mesh) => mesh.isEnabled() && Boolean(mesh.metadata?.coasterDecor));
+    const stacked = hit?.hit ? stackSpot(hit) : null;
     let best = null;
     if (ray.direction.y < -1e-4) {
       const along = (origin.y - ray.origin.y) / ray.direction.y;
@@ -848,14 +923,65 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       if (score <= 1 && (!near || score < near.score)) near = { kind: "track", along, score, x: p.x, y: p.y, z: p.z, heading: p.heading };
     }
     if (near && (!best || near.along <= best.along + 1.5)) best = near;
+    // A block under the pointer stacks even when the ride rails are the closer empty spot.
+    if (stacked) return stacked;
     if (hit?.hit && (!best || hit.distance <= best.along + 0.6)) return { kind: "decor", record: hit.pickedMesh.metadata.coasterDecor };
+    if (best?.kind === "deck") {
+      const lifted = offerStack(Math.round(best.x / BUILD_GRID) * BUILD_GRID, Math.round(best.z / BUILD_GRID) * BUILD_GRID);
+      if (lifted) return lifted;
+    }
     return best;
   }
 
+  /** Blocks and fences already standing on this grid cell. `top` is the highest one. */
+  function columnAt(x, z) {
+    let top = null;
+    let blocks = 0;
+    for (const record of state.placed) {
+      if (record.type !== "block" && record.type !== "fence") continue;
+      if (Math.abs(record.x - x) > 0.25 || Math.abs(record.z - z) > 0.25) continue;
+      if (record.type === "block") blocks += 1;
+      if (!top || record.y > top.y) top = record;
+    }
+    return top ? { top, blocks } : null;
+  }
+
+  /**
+   * Where a block or fence in hand sits on the pile at `x, z`.
+   * Clicking any face of a block counts, so the pile grows without a perfect hit on the top.
+   */
+  function offerStack(x, z) {
+    if (!pick || (pick !== "block" && pick !== "fence") || state.decor[pick] <= 0 || chosen) return null;
+    const column = columnAt(x, z);
+    if (!column) return null;
+    if (column.top.type === "block" && column.blocks < STACK_MAX) {
+      return { kind: "stack", x: column.top.x, y: round(column.top.y + BLOCK_H), z: column.top.z };
+    }
+    return { kind: "stackFull", reason: column.blocks >= STACK_MAX ? "tall" : "taken" };
+  }
+
+  /** Clicking a block, while a block or fence is in hand, builds on top of that pile. */
+  function stackSpot(hit) {
+    const record = hit.pickedMesh.metadata?.coasterDecor;
+    if (!record || record.type !== "block") return null;
+    return offerStack(record.x, record.z);
+  }
+
   function poseFor(type, target) {
+    if (target.kind === "stackFull") return null;
+    if (type === "block" || type === "fence") {
+      if (target.kind === "track") return null;
+      const eye = scene.activeCamera?.globalPosition ?? new Vector3(origin.x, origin.y, origin.z - 10);
+      const face = Math.atan2(eye.x - (origin.x + target.x), eye.z - (origin.z + target.z));
+      const yaw = type === "fence" ? Math.round(face / (Math.PI / 2)) * (Math.PI / 2) : 0;
+      const x = target.kind === "stack" ? target.x : Math.round(target.x / BUILD_GRID) * BUILD_GRID;
+      const z = target.kind === "stack" ? target.z : Math.round(target.z / BUILD_GRID) * BUILD_GRID;
+      return { x, y: target.kind === "stack" ? target.y : 0, z, yaw, track: false };
+    }
     if (target.kind === "track") {
       const h = target.heading;
-      if (type === "arch") return { x: target.x, y: target.y - 0.05, z: target.z, yaw: h, track: true };
+      // The arch and the ceiling sit over the rails. Everything else stands beside them.
+      if (type === "arch" || type === "ceiling") return { x: target.x, y: target.y - 0.05, z: target.z, yaw: h, track: true };
       const yaw = type === "lights" ? h - Math.PI / 2 : type === "flag" ? h + Math.PI : h;
       return {
         x: target.x - Math.cos(h) * TRACK_SIDE,
@@ -876,7 +1002,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       return;
     }
     const target = aim(clientX, clientY);
-    if (!target || target.kind === "decor") {
+    if (!target || target.kind === "decor" || target.kind === "stackFull") {
       if (ghost) ghost.item.root.setEnabled(false);
       return;
     }
@@ -885,6 +1011,10 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       ghost = { type: pick, item: buildDecor(scene, kit, pick, state.placed.length, true) };
     }
     const pose = poseFor(pick, target);
+    if (!pose) {
+      ghost.item.root.setEnabled(false);
+      return;
+    }
     ghost.item.root.setEnabled(true);
     ghost.item.root.position.set(origin.x + pose.x, origin.y + pose.y, origin.z + pose.z);
     ghost.item.root.rotation.y = pose.yaw;
@@ -892,6 +1022,11 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
 
   function tap(clientX, clientY) {
     const target = aim(clientX, clientY);
+    if (target?.kind === "stackFull") {
+      if (state.placed.length >= MAX_PLACED) paintBar(t("upgrade.placeFull"));
+      else paintBar(t(target.reason === "tall" ? "upgrade.stackTall" : "upgrade.stackTaken"));
+      return;
+    }
     if (target?.kind === "decor") {
       chosen = target.record;
       const item = placedKits.get(chosen);
@@ -918,6 +1053,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       return;
     }
     const pose = poseFor(pick, target);
+    if (!pose) return;
     const record = {
       type: pick,
       x: round(pose.x),
