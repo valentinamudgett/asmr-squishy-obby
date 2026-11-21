@@ -90,6 +90,7 @@ const livesEl = document.querySelector("#lives");
 const bossFill = document.querySelector("#boss-fill");
 const debugEl = document.querySelector("#debug");
 const settingsEl = document.querySelector("#settings");
+const shopEl = document.querySelector("#shop");
 const qualityNote = document.querySelector("#quality-note");
 const showDebug = new URLSearchParams(location.search).has("debug");
 const BEST_KEY = "asmr-squishy-obby:best";
@@ -207,6 +208,8 @@ function createBootProgress() {
 async function hideBoot() {
   await bootProgress.finish();
   boot.classList.add("is-done");
+  // The loading screen is fading. This is the first moment the title is visible.
+  tutorial.offer();
   await new Promise((resolve) => setTimeout(resolve, 400));
   boot.hidden = true;
 }
@@ -626,7 +629,8 @@ async function bootGame() {
       beginCoasterFade("enter");
       return;
     }
-    if (tutorial.offer(best > 1)) pointAhead(course.start);
+    tutorial.offer();
+    if (tutorial.claimClimb()) pointAhead(course.start);
     if (lockIn > 0) {
       lockIn = 0;
       fadeEl.classList.remove("is-on");
@@ -1144,8 +1148,8 @@ async function bootGame() {
     }
 
     tutorial.tick(dt, frame, {
-      teaching: allowInput && !escape.active && !coaster.active && !plunge,
-      startPad: course.start,
+      present: !ui.settingsOpen && !yardShop.open && !yardUpgrades.open && !gameOver && shopEl.hidden,
+      playing: !ui.startOpen,
     });
     if (tutorial.showing) hintEl.hidden = true;
     else if (hintTimer > 0) {
@@ -1336,7 +1340,8 @@ function bindTitleScreen() {
   };
   const onKey = (event) => {
     if (event.repeat || ["Tab", "Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
-    if (!players.hidden || (event.target instanceof Element && event.target.closest("#friends-box"))) return;
+    if (!document.querySelector("#tutorial").hidden) return;
+    if (!players.hidden || (event.target instanceof Element && event.target.closest("#friends-box, #tutorial"))) return;
     event.preventDefault();
     enter();
   };

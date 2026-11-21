@@ -1,37 +1,48 @@
 import { t } from "./i18n.js";
 
 const SEEN_KEY = "asmr-squishy-obby:tutorial";
-const STEPS = ["welcome", "move", "look", "jump", "double", "climb", "ready"];
-/** Long enough to read the card, short enough that a finished action moves on. */
-const READ_SECONDS = 0.55;
+
+/** One idea per slide. `keys` draws the desktop controls under the sentence. */
+const SLIDES = [
+  { id: "welcome" },
+  { id: "move", keys: "wasd" },
+  { id: "look" },
+  { id: "jump", keys: "space" },
+  { id: "double", keys: "space" },
+  { id: "climb" },
+  { id: "checkpoint" },
+  { id: "coins" },
+  { id: "ready" },
+];
 
 /**
- * First-play coach for the climb. It stays hidden until Start bouncing, waits while a menu
- * or another mode has the screen, and remembers when it is skipped or finished.
+ * First-open slideshow. It covers the screen until Skip or Got it, which are remembered.
+ * Next and Back move between slides. Starting play also closes it, so it never sits over the climb.
  */
 export function createTutorial() {
   const root = document.querySelector("#tutorial");
+  const slideBox = document.querySelector("#tutorial .tutorial-slide");
   const title = document.querySelector("#tutorial-title");
   const body = document.querySelector("#tutorial-body");
   const keys = document.querySelector("#tutorial-keys");
-  const tryLine = document.querySelector("#tutorial-try");
   const skipButton = document.querySelector("#tutorial-skip");
+  const backButton = document.querySelector("#tutorial-back");
   const nextButton = document.querySelector("#tutorial-next");
   const dots = document.querySelector(".tutorial-dots");
-  for (let i = 0; i < STEPS.length; i += 1) dots.append(document.createElement("span"));
+  for (let i = 0; i < SLIDES.length; i += 1) dots.append(document.createElement("span"));
 
   let armed = false;
+  let climbClaimed = false;
   let stepIndex = 0;
-  let stepAge = 0;
-  let ready = false;
-  let pendingDouble = false;
   let painted = "";
 
   skipButton.addEventListener("click", finish);
+  backButton.addEventListener("click", () => {
+    if (stepIndex > 0) go(stepIndex - 1);
+  });
   nextButton.addEventListener("click", () => {
-    const step = STEPS[stepIndex];
-    if (step === "welcome") go(stepIndex + 1);
-    else if (step === "ready") finish();
+    if (stepIndex >= SLIDES.length - 1) finish();
+    else go(stepIndex + 1);
   });
 
   function seen() {
@@ -43,87 +54,93 @@ export function createTutorial() {
   }
 
   function finish() {
+    const wasOpen = armed || !root.hidden;
     armed = false;
     root.hidden = true;
     painted = "";
-    markHighlights(null, false);
     try {
       localStorage.setItem(SEEN_KEY, "1");
     } catch {
       // Private mode: the lesson can show again next visit.
     }
+    if (!wasOpen) return;
+    const screen = document.querySelector("#title-screen");
+    if (screen && !screen.hidden) document.querySelector("#title-start")?.focus({ preventScroll: true });
   }
 
-  /** `alreadyPlayed` is true once a checkpoint past the start has been saved. Returns true when the lesson actually starts. */
-  function offer(alreadyPlayed) {
-    if (armed || seen() || alreadyPlayed) return false;
+  /** Starts the lesson unless it was skipped, finished, or is already on screen. */
+  function offer() {
+    if (armed || seen()) return false;
     armed = true;
     stepIndex = 0;
-    stepAge = 0;
-    ready = false;
-    pendingDouble = false;
     painted = "";
+    paint(0);
+    nextButton.focus({ preventScroll: true });
+    return true;
+  }
+
+  /** True once, the first time the climb starts while this lesson is still up. */
+  function claimClimb() {
+    if (!armed || climbClaimed) return false;
+    climbClaimed = true;
     return true;
   }
 
   function go(index) {
-    stepIndex = index;
-    stepAge = 0;
-    ready = false;
-    if (STEPS[index] !== "double") pendingDouble = false;
+    stepIndex = Math.max(0, Math.min(SLIDES.length - 1, index));
     painted = "";
+    paint(stepIndex);
   }
 
-  function tick(dt, frame, { teaching, startPad }) {
+  function tick(_dt, _frame, { present = true, playing = false } = {}) {
     if (!armed) return;
-    if (!teaching) {
-      root.hidden = true;
-      markHighlights(null, false);
+    // The lesson is only for the opening. Once the menu closes, play has started.
+    if (playing) {
+      finish();
       return;
     }
-    const step = STEPS[stepIndex];
-    stepAge += dt;
-    if (step === "move" && frame.walking) ready = true;
-    if (step === "look" && frame.looked) ready = true;
-    if (step === "jump" && frame.jumped) ready = true;
-    if ((step === "jump" || step === "double") && (frame.doubleJumped || frame.flying)) pendingDouble = true;
-    if (step === "double" && pendingDouble) ready = true;
-    if (step === "climb" && frame.pad && frame.pad !== startPad && (frame.grounded || frame.justLanded)) ready = true;
-    if (step !== "welcome" && step !== "ready" && ready && stepAge >= READ_SECONDS) go(stepIndex + 1);
-    paint(STEPS[stepIndex]);
+    // Settings, the shop, and game over take the screen. The title stays covered.
+    if (!present) {
+      root.hidden = true;
+      return;
+    }
+    paint(stepIndex);
   }
 
-  function paint(step) {
+  function paint(index) {
+    const slide = SLIDES[index];
     const touch = window.matchMedia("(pointer: coarse)").matches || document.body.classList.contains("show-touch");
-    const key = `${step}:${touch}`;
+    const key = `${slide.id}:${touch}`;
     root.hidden = false;
-    markHighlights(step, touch);
     if (key === painted) return;
     painted = key;
-    title.textContent = titleFor(step);
-    body.textContent = bodyFor(step, touch);
-    const caps = keycaps(step, touch);
+    title.textContent = titleFor(slide.id);
+    body.textContent = bodyFor(slide.id, touch);
     keys.replaceChildren();
-    if (step === "move" && !touch) {
+    if (!touch && slide.keys === "wasd") {
       keys.hidden = false;
       keys.append(wasdKeys());
+    } else if (!touch && slide.keys === "space") {
+      keys.hidden = false;
+      keys.append(cap("Space"));
     } else {
-      keys.hidden = caps.length === 0;
-      for (const label of caps) keys.append(cap(label));
+      keys.hidden = true;
     }
-    const prompted = step !== "welcome" && step !== "ready";
-    tryLine.hidden = !prompted;
-    skipButton.hidden = step === "ready";
-    nextButton.hidden = step !== "welcome" && step !== "ready";
-    nextButton.textContent = step === "ready" ? t("tutorial.gotIt") : t("tutorial.go");
-    [...dots.children].forEach((dot, index) => {
-      dot.classList.toggle("is-done", index < stepIndex);
-      dot.classList.toggle("is-on", index === stepIndex);
+    const last = index === SLIDES.length - 1;
+    backButton.hidden = index === 0;
+    nextButton.textContent = last ? t("tutorial.gotIt") : t("tutorial.go");
+    [...dots.children].forEach((dot, dotIndex) => {
+      dot.classList.toggle("is-done", dotIndex < index);
+      dot.classList.toggle("is-on", dotIndex === index);
     });
+    slideBox.classList.remove("is-changing");
+    void slideBox.offsetWidth;
+    slideBox.classList.add("is-changing");
   }
 
   return {
     offer,
+    claimClimb,
     tick,
     get showing() {
       return armed && !root.hidden;
@@ -131,30 +148,28 @@ export function createTutorial() {
   };
 }
 
-function titleFor(step) {
-  if (step === "welcome") return t("tutorial.welcomeTitle");
-  if (step === "move") return t("tutorial.moveTitle");
-  if (step === "look") return t("tutorial.lookTitle");
-  if (step === "jump") return t("tutorial.jumpTitle");
-  if (step === "double") return t("tutorial.doubleTitle");
-  if (step === "climb") return t("tutorial.climbTitle");
+function titleFor(id) {
+  if (id === "welcome") return t("tutorial.welcomeTitle");
+  if (id === "move") return t("tutorial.moveTitle");
+  if (id === "look") return t("tutorial.lookTitle");
+  if (id === "jump") return t("tutorial.jumpTitle");
+  if (id === "double") return t("tutorial.doubleTitle");
+  if (id === "climb") return t("tutorial.climbTitle");
+  if (id === "checkpoint") return t("tutorial.checkpointTitle");
+  if (id === "coins") return t("tutorial.coinsTitle");
   return t("tutorial.readyTitle");
 }
 
-function bodyFor(step, touch) {
-  if (step === "welcome") return t("tutorial.welcome");
-  if (step === "move") return touch ? t("tutorial.moveTouch") : t("tutorial.moveKeys");
-  if (step === "look") return touch ? t("tutorial.lookTouch") : t("tutorial.lookKeys");
-  if (step === "jump") return touch ? t("tutorial.jumpTouch") : t("tutorial.jumpKeys");
-  if (step === "double") return touch ? t("tutorial.doubleTouch") : t("tutorial.doubleKeys");
-  if (step === "climb") return t("tutorial.climb");
+function bodyFor(id, touch) {
+  if (id === "welcome") return t("tutorial.welcome");
+  if (id === "move") return touch ? t("tutorial.moveTouch") : t("tutorial.moveKeys");
+  if (id === "look") return touch ? t("tutorial.lookTouch") : t("tutorial.lookKeys");
+  if (id === "jump") return touch ? t("tutorial.jumpTouch") : t("tutorial.jumpKeys");
+  if (id === "double") return touch ? t("tutorial.doubleTouch") : t("tutorial.doubleKeys");
+  if (id === "climb") return t("tutorial.climb");
+  if (id === "checkpoint") return t("tutorial.checkpoint");
+  if (id === "coins") return t("tutorial.coins");
   return t("tutorial.ready");
-}
-
-function keycaps(step, touch) {
-  if (touch) return [];
-  if (step === "jump" || step === "double") return ["Space"];
-  return [];
 }
 
 function cap(label) {
@@ -172,9 +187,4 @@ function wasdKeys() {
   bottom.append(cap("A"), cap("S"), cap("D"));
   cluster.append(top, bottom);
   return cluster;
-}
-
-function markHighlights(step, touch) {
-  document.body.classList.toggle("tutorial-stick", touch && step === "move");
-  document.body.classList.toggle("tutorial-jump", touch && (step === "jump" || step === "double"));
 }

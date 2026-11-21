@@ -91,16 +91,20 @@
     </section>
 
     <p id="hint">Press a key or tap to wake the crunch.</p>
-    <section id="tutorial" hidden aria-labelledby="tutorial-title">
-      <p class="tutorial-kicker" data-i18n="tutorial.kicker">First time</p>
-      <div class="tutorial-dots" aria-hidden="true"></div>
-      <h2 id="tutorial-title" data-i18n="tutorial.welcomeTitle">Welcome</h2>
-      <p id="tutorial-body" data-i18n="tutorial.welcome">A short lesson, then the climb is yours.</p>
-      <div id="tutorial-keys" class="tutorial-keys" hidden></div>
-      <p id="tutorial-try" class="tutorial-try" hidden data-i18n="tutorial.try">Try it!</p>
-      <div class="tutorial-actions">
-        <button id="tutorial-skip" type="button" data-i18n="tutorial.skip">Skip</button>
-        <button id="tutorial-next" type="button" data-i18n="tutorial.go">Next</button>
+    <section id="tutorial" hidden role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+      <div class="tutorial-panel">
+        <p class="tutorial-kicker" data-i18n="tutorial.kicker">First time</p>
+        <div class="tutorial-dots" aria-hidden="true"></div>
+        <div class="tutorial-slide">
+          <h2 id="tutorial-title" data-i18n="tutorial.welcomeTitle">Welcome</h2>
+          <p id="tutorial-body" data-i18n="tutorial.welcome">These slides tell you how to play. Use Next to move ahead.</p>
+          <div id="tutorial-keys" class="tutorial-keys" hidden></div>
+        </div>
+        <div class="tutorial-actions">
+          <button id="tutorial-skip" type="button" data-i18n="tutorial.skip">Skip</button>
+          <button id="tutorial-back" type="button" data-i18n="tutorial.back" hidden>Back</button>
+          <button id="tutorial-next" type="button" data-i18n="tutorial.go">Next</button>
+        </div>
       </div>
     </section>
     <p id="toast" hidden>Checkpoint</p>

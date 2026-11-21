@@ -150,6 +150,8 @@ export function createCoaster(scene) {
   let lowest = 0;
   let walkKit = null;
   let joints = [];
+  // True when the last rail is back on the platform, so the ride stops there instead of turning around.
+  let platformEnd = false;
   let lane = [];
   let laneDist = [0];
   let laneLength = 0;
@@ -197,6 +199,7 @@ export function createCoaster(scene) {
       dist.push(dist[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
     }
     length = dist[dist.length - 1] || 0;
+    platformEnd = trackEndsOnPlatform(points);
     travel = 0;
     travelDir = 1;
     layTrack(scene, points, mats, trackMeshes);
@@ -437,7 +440,8 @@ export function createCoaster(scene) {
     /**
      * One step of a guest cart on the same sample and pace as ride()
      * (9 m/s, faster downhill up to 20, a crawl on a near-vertical climb).
-     * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means it is back at the station.
+     * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means the lap is over:
+     * back at the station, or stopped on the platform when the track ends there.
      */
     advanceGuest(trip, dt) {
       if (!(dt > 0) || length < 4) return null;
@@ -446,7 +450,8 @@ export function createCoaster(scene) {
       let done = false;
       if (trip.dir > 0 && trip.travel >= length) {
         trip.travel = length;
-        trip.dir = -1;
+        if (platformEnd) done = true;
+        else trip.dir = -1;
       } else if (trip.dir < 0 && trip.travel <= 0) {
         trip.travel = 0;
         trip.dir = 1;
@@ -603,7 +608,10 @@ export function createCoaster(scene) {
         travel += travelDir * speed * dt;
         if (travelDir > 0 && travel >= length) {
           travel = length;
-          travelDir = -1;
+          if (platformEnd) {
+            riding = false;
+            events.push({ type: "paid" });
+          } else travelDir = -1;
         } else if (travelDir < 0 && travel <= 0) {
           travel = 0;
           travelDir = 1;
@@ -1699,6 +1707,15 @@ let deckBounds = deckTier(0);
 
 function onDeck(point) {
   return Math.abs(point.x) <= deckBounds.half - 2 && point.z >= deckBounds.back + 1 && point.z <= DECK_FRONT - 0.8;
+}
+
+/** The last rail is on the platform, about as high as the station, and not still diving. */
+function trackEndsOnPlatform(points) {
+  const end = points[points.length - 1];
+  if (!end) return false;
+  if (Math.abs(end.y - RAIL_Y) > 1.35) return false;
+  if (Math.abs(end.pitch) > 0.7) return false;
+  return onDeck(end);
 }
 
 function lateral(heading, amount) {

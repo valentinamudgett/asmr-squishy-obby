@@ -52,14 +52,12 @@ export const DECOR_SHACK = { x: 15, z: -5.5 };
 /** Where you stand to shop: the ring in front of the shack's counter. */
 export const DECOR_SPOT = { x: DECOR_SHACK.x, z: DECOR_SHACK.z + 3.3, reach: 2.6 };
 
-const MAX_PLACED = 60;
 /** Blocks and fences snap to this grid so a row lines up. A block is one step tall, so the next one sits on top. */
 const BUILD_GRID = 1.2;
 const BLOCK_H = 0.82;
 const FENCE_H = 1.12;
 /** How many blocks can sit in one pile. Each one is a step you can jump. */
 const STACK_MAX = 8;
-const MAX_STOCK = 99;
 /** Decor beside the track sits on the side away from the catwalk, clear of the car. */
 const TRACK_SIDE = 0.95;
 const TAP_PX = 6;
@@ -84,12 +82,11 @@ export function cleanUpgrades(raw) {
   const decor = {};
   for (const item of DECOR) {
     const n = Math.floor(Number(data.decor?.[item.id]));
-    decor[item.id] = Number.isFinite(n) && n > 0 ? Math.min(MAX_STOCK, n) : 0;
+    decor[item.id] = Number.isFinite(n) && n > 0 ? n : 0;
   }
   const types = new Set(DECOR.map((item) => item.id));
   const placed = (Array.isArray(data.placed) ? data.placed : [])
     .filter((p) => p && types.has(p.type) && [p.x, p.y, p.z, p.yaw].every(Number.isFinite))
-    .slice(0, MAX_PLACED)
     .map((p) => ({ type: p.type, x: p.x, y: p.y, z: p.z, yaw: p.yaw, track: p.track === true, tint: (Math.floor(p.tint) || 0) % TINTS.length }));
   return { deck, carts, cart, decor, placed, sky: isCoasterSky(data.sky) ? data.sky : "space" };
 }
@@ -700,7 +697,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       paintPanel(t(owned ? "upgrade.usingCart" : "upgrade.gotCart").replace("{name}", t(cart.nameKey)));
     } else {
       const item = DECOR[index];
-      if (state.decor[item.id] >= MAX_STOCK || !buy(item.cost)) return;
+      if (!buy(item.cost)) return;
       state.decor[item.id] += 1;
       coaster.saveUpgrades();
       blip?.("clank");
@@ -870,6 +867,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     const armed = pick && state.decor[pick] > 0 ? decorById(pick) : null;
     if (message) hint.textContent = message;
     else if (chosen) hint.textContent = t("upgrade.placeChosen").replace("{name}", t(decorById(chosen.type).nameKey));
+    else if (armed && pick === "ceiling") hint.textContent = t("upgrade.placeCeiling");
     else if (armed && (pick === "block" || pick === "fence")) hint.textContent = t("upgrade.placeStack").replace("{name}", t(armed.nameKey));
     else if (armed) hint.textContent = t("upgrade.placeHint").replace("{name}", t(armed.nameKey));
     else if (DECOR.some((item) => state.decor[item.id] > 0)) hint.textContent = t("upgrade.placeSelect");
@@ -964,6 +962,10 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
   function stackSpot(hit) {
     const record = hit.pickedMesh.metadata?.coasterDecor;
     if (!record || record.type !== "block") return null;
+    // A ceiling sits on the block you clicked, not on the ground beside it.
+    if (pick === "ceiling" && state.decor.ceiling > 0 && !chosen) {
+      return { kind: "stack", x: record.x, y: round(record.y + BLOCK_H), z: record.z };
+    }
     return offerStack(record.x, record.z);
   }
 
@@ -977,6 +979,11 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       const x = target.kind === "stack" ? target.x : Math.round(target.x / BUILD_GRID) * BUILD_GRID;
       const z = target.kind === "stack" ? target.z : Math.round(target.z / BUILD_GRID) * BUILD_GRID;
       return { x, y: target.kind === "stack" ? target.y : 0, z, yaw, track: false };
+    }
+    if (type === "ceiling" && target.kind === "stack") {
+      const eye = scene.activeCamera?.globalPosition ?? new Vector3(origin.x, origin.y, origin.z - 10);
+      const yaw = Math.atan2(eye.x - (origin.x + target.x), eye.z - (origin.z + target.z));
+      return { x: target.x, y: target.y, z: target.z, yaw, track: false };
     }
     if (target.kind === "track") {
       const h = target.heading;
@@ -1023,8 +1030,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
   function tap(clientX, clientY) {
     const target = aim(clientX, clientY);
     if (target?.kind === "stackFull") {
-      if (state.placed.length >= MAX_PLACED) paintBar(t("upgrade.placeFull"));
-      else paintBar(t(target.reason === "tall" ? "upgrade.stackTall" : "upgrade.stackTaken"));
+      paintBar(t(target.reason === "tall" ? "upgrade.stackTall" : "upgrade.stackTaken"));
       return;
     }
     if (target?.kind === "decor") {
@@ -1046,10 +1052,6 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     if (!target) return;
     if (!pick || state.decor[pick] <= 0) {
       paintBar(t("upgrade.placeEmpty"));
-      return;
-    }
-    if (state.placed.length >= MAX_PLACED) {
-      paintBar(t("upgrade.placeFull"));
       return;
     }
     const pose = poseFor(pick, target);
@@ -1082,7 +1084,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     if (index >= 0) state.placed.splice(index, 1);
     placedKits.get(record)?.dispose();
     placedKits.delete(record);
-    state.decor[record.type] = Math.min(MAX_STOCK, state.decor[record.type] + 1);
+    state.decor[record.type] += 1;
     coaster.saveUpgrades();
     chosen = null;
     pick = record.type;
