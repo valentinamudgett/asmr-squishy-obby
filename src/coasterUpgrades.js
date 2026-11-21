@@ -325,16 +325,10 @@ function buildDecor(scene, kit, type, tint, ghost = false) {
     add(ball(0.28), gold, 0, 2.68, 0);
     for (const x of [-0.85, 0.85]) add(cyl(0.08, 0.3), gold, x, 0.04, 0);
   } else if (type === "ceiling") {
-    // A roof high enough to ride and walk under. No collider, so it never stops the car or a builder.
+    // A roof high enough to ride and walk under. No posts and no collider, so it never stops the car or a builder.
     const roofY = 3.4;
     const hx = 2.15;
     const hz = 1.55;
-    for (const x of [-hx + 0.2, hx - 0.2]) {
-      for (const z of [-hz + 0.2, hz - 0.2]) {
-        add(cyl(roofY, 0.09), cream, x, roofY / 2, z);
-        add(ball(0.16), pink, x, 0.1, z);
-      }
-    }
     add(box(hx * 2 + 0.55, 0.14, hz * 2 + 0.45), pink, 0, roofY, 0);
     for (let i = 0; i < 4; i += 1) {
       add(box(hx * 2 + 0.58, 0.05, 0.22), cream, 0, roofY + 0.09, -hz * 0.62 + i * ((hz * 1.24) / 3));
