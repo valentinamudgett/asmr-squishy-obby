@@ -361,6 +361,13 @@
               <span aria-hidden="true">→</span>
             </span>
           </button>
+          <button id="start-tower" class="play-action play-tower" type="button">
+            <img class="play-photo" src="/menu/game-tower.svg" alt="" width="1280" height="720" />
+            <span class="play-label">
+              <span data-i18n="start.tower">Tower climb</span>
+              <span aria-hidden="true">→</span>
+            </span>
+          </button>
         </div>
       </section>
 
@@ -410,7 +417,26 @@
         <p id="coaster-shop-note" class="note" data-i18n="coaster.shopNote">Buy parts here, then walk to the end of your track to add them. Finish a ride to earn 1,000 coins.</p>
         <div id="coaster-parts" class="shop-grid"></div>
         <button id="coaster-undo" type="button" data-i18n="coaster.remove">Take a part off</button>
+        <button id="coaster-remove-all" type="button" data-i18n="coaster.removeAll">Remove all</button>
         <p id="coaster-shop-status" class="note" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="coaster-bots" hidden>
+      <button id="coaster-bots-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="coaster-bots-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow" data-i18n="coaster.botsKicker">Other builders</p>
+            <h2 id="coaster-bots-title" data-i18n="coaster.botsTitle">Bot coasters</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="coaster-bots-coins">0</span></span>
+            <button id="coaster-bots-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p id="coaster-bots-note" class="note" data-i18n="coaster.botsNote">These are coasters bots are building. Ride one and you still earn 1,000 coins.</p>
+        <div id="coaster-bots-list" class="shop-grid"></div>
       </section>
     </div>
 
@@ -420,6 +446,97 @@
         <button id="coaster-tool-go" type="button"></button>
         <button id="coaster-tool-cancel" type="button" data-i18n="coaster.cancel">Cancel</button>
       </div>
+    </div>
+
+    <aside id="tower-pay" class="tower-pay" hidden>
+      <p data-i18n="tower.purse">Tower coins</p>
+      <p class="tower-pay-amount">
+        <span class="coin-glyph" aria-hidden="true"></span>
+        <strong id="tower-purse">0</strong>
+      </p>
+      <p data-i18n="tower.jumpLabel">If you jump you get</p>
+      <p class="tower-jump-amount">
+        <span class="coin-glyph" aria-hidden="true"></span>
+        <strong id="tower-pay-amount">0</strong>
+      </p>
+      <p id="tower-jump-note" data-i18n="tower.jumpHint">Grab the ladder, then jump.</p>
+      <p data-i18n="tower.higher">The higher you climb, the more you get.</p>
+      <p id="tower-wins">Wins 0</p>
+    </aside>
+
+    <aside id="tower-map" class="tower-map" data-place="eiffel" hidden>
+      <p data-i18n="tower.map">Map</p>
+      <p id="tower-map-place">Eiffel Tower</p>
+      <div class="tower-map-col">
+        <span class="tower-map-top" data-i18n="tower.mapTop">Top</span>
+        <div class="tower-map-stage" aria-hidden="true">
+          <svg class="tower-sil" data-shape="eiffel" viewBox="0 0 100 800" preserveAspectRatio="none">
+            <path fill="#6e4e34" fill-rule="evenodd" d="M50 8 L55 78 L68 90 L60 118 L54 300 L74 314 L64 346 L56 520 L86 540 L72 578 L97 748 L80 788 L68 690 C58 630 50 610 50 610 C50 610 42 630 32 690 L20 788 L3 748 L28 578 L14 540 L44 520 L36 346 L26 314 L46 300 L40 118 L32 90 L45 78 Z M30 700 C42 640 58 640 70 700 L62 770 C54 730 46 730 38 770 Z"/>
+          </svg>
+          <svg class="tower-sil" data-shape="lighthouse" viewBox="0 0 100 800" preserveAspectRatio="none">
+            <path fill="#e23b4a" d="M40 788 L43 150 L57 150 L60 788 Z"/>
+            <path fill="#fff6ea" d="M43 470 H57 V310 H43 Z M43 310 H57 V150 H43 Z"/>
+            <path fill="#e23b4a" d="M30 150 H70 V108 H62 V70 L50 18 L38 70 V108 H30 Z"/>
+            <path fill="#ffe38a" d="M40 100 H60 V72 H40 Z"/>
+            <path fill="#7a4e2d" d="M28 788 H72 V748 H28 Z"/>
+          </svg>
+          <svg class="tower-sil" data-shape="ice" viewBox="0 0 100 800" preserveAspectRatio="none">
+            <path fill="#7ec8ee" d="M50 12 L60 140 H72 L84 340 H94 L100 788 H0 L6 340 H16 L28 140 H40 Z"/>
+            <path fill="#e8f7ff" d="M50 12 L44 140 H56 Z"/>
+          </svg>
+          <svg class="tower-sil" data-shape="volcano" viewBox="0 0 100 800" preserveAspectRatio="none">
+            <path fill="#4a342c" d="M6 788 L34 230 L26 150 L46 270 L54 270 L74 150 L66 230 L94 788 Z"/>
+            <path fill="#ff6a2a" d="M42 250 L50 175 L58 250 Z"/>
+          </svg>
+          <span id="tower-map-you"></span>
+        </div>
+      </div>
+      <p id="tower-map-height">0 m</p>
+    </aside>
+
+    <div id="tower-hud" class="tower-hud" hidden>
+      <button id="tower-auto" type="button" aria-pressed="false">
+        <span data-i18n="tower.autoClimb">Auto climb</span>
+      </button>
+      <div class="tower-hud-row">
+      <div class="tower-hud-slot">
+        <div id="tower-place-picker" hidden>
+          <p data-i18n="tower.placePick">Pick a place</p>
+          <div id="tower-place-list"></div>
+        </div>
+        <button id="tower-place-open" type="button" aria-expanded="false" aria-controls="tower-place-picker">
+          <span aria-hidden="true">🗼</span> <span data-i18n="tower.place">Places</span>
+        </button>
+      </div>
+      <div class="tower-hud-slot">
+        <div id="tower-sky-picker" hidden>
+          <p data-i18n="sky.pick">Pick a sky</p>
+          <div id="tower-sky-list"></div>
+        </div>
+        <button id="tower-sky-open" type="button" aria-expanded="false" aria-controls="tower-sky-picker">
+          <span data-sky-glyph aria-hidden="true">🪐</span> <span data-i18n="hud.sky">Sky</span>
+        </button>
+      </div>
+      </div>
+    </div>
+
+    <div id="tower-shop" hidden>
+      <button id="tower-shop-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="tower-shop-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow" data-i18n="tower.kicker">Tower climb</p>
+            <h2 id="tower-shop-title" data-i18n="tower.shopTitle">Wings</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="tower-coins">0</span></span>
+            <button id="tower-shop-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p class="note" data-i18n="tower.shopNote">Each pair costs more than the last and makes you climb the ladder faster. Jump off to earn coins. Higher up pays more. Reach the top for 1 win.</p>
+        <div id="tower-wings" class="shop-grid"></div>
+        <p id="tower-shop-status" class="note" aria-live="polite"></p>
+      </section>
     </div>
 
     <div id="coaster-hud" class="coaster-hud" hidden>

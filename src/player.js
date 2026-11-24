@@ -265,6 +265,13 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     requestJump() {
       queueJump();
     },
+    /** True when a jump was pressed and not used yet. Clears it. */
+    consumeJump() {
+      if (jumpQueued <= 0) return false;
+      jumpQueued = 0;
+      jumpBuffer = 0;
+      return true;
+    },
     setStick(x, y) {
       stick.x = x;
       stick.y = y;

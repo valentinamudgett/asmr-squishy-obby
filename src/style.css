@@ -307,7 +307,7 @@ button, input { font: inherit; }
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 
-#settings-open, #settings-close, #hud-menu, #shop-close, #coaster-shop-close, #coaster-undo, .toggle, .segment button, .chip, #jump {
+#settings-open, #settings-close, #hud-menu, #shop-close, #coaster-shop-close, #coaster-bots-close, #coaster-undo, #coaster-remove-all, .toggle, .segment button, .chip, #jump {
   border: 0;
   cursor: pointer;
   color: var(--ink);
@@ -749,7 +749,7 @@ body.can-act #action-button { display: block; }
 body.can-act #action-prompt { display: block; }
 body.show-touch #action-prompt { display: none; }
 
-#coaster-undo {
+#coaster-undo, #coaster-remove-all {
   display: block;
   width: 100%;
   margin-top: 8px;
@@ -761,12 +761,16 @@ body.show-touch #action-prompt { display: none; }
   font-weight: 800;
 }
 
-#coaster-undo:disabled {
+#coaster-remove-all {
+  background: #8f2d4a;
+}
+
+#coaster-undo:disabled, #coaster-remove-all:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-#coaster-undo[hidden], #coaster-parts .shop-item[hidden] {
+#coaster-undo[hidden], #coaster-remove-all[hidden], #coaster-parts .shop-item[hidden] {
   display: none;
 }
 
@@ -828,13 +832,13 @@ body.show-touch #action-prompt { display: none; }
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-#settings, #boot, #shop, #coaster-shop {
+#settings, #boot, #shop, #coaster-shop, #coaster-bots, #tower-shop {
   position: fixed;
   inset: 0;
   z-index: 5;
 }
 
-#shop, #coaster-shop {
+#shop, #coaster-shop, #coaster-bots, #tower-shop {
   z-index: 6;
   display: grid;
   place-items: center;
@@ -1938,7 +1942,7 @@ body.show-touch .chat { bottom: calc(164px + env(safe-area-inset-bottom)); }
 
 .start-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 16px;
 }
@@ -2019,6 +2023,11 @@ body.show-touch .chat { bottom: calc(164px + env(safe-area-inset-bottom)); }
   box-shadow: 0 11px 24px rgba(122, 92, 255, 0.28);
 }
 
+.play-tower {
+  background: linear-gradient(135deg, #3ec6ff, #7a6bff);
+  box-shadow: 0 11px 24px rgba(62, 150, 230, 0.32);
+}
+
 .rewards-card {
   position: fixed;
   top: max(20px, env(safe-area-inset-top));
@@ -2079,6 +2088,9 @@ body.show-touch .chat { bottom: calc(164px + env(safe-area-inset-bottom)); }
 
 body.start-open #hud,
 body.start-open #hint,
+body.start-open #tower-pay,
+body.start-open #tower-map,
+body.start-open #tower-hud,
 body.start-open .touch-ui,
 body.start-open .social-buttons,
 body.start-open .chat {
@@ -2106,7 +2118,7 @@ body.title-open .players-panel { z-index: 8; }
 }
 
 #settings { display: grid; place-items: end; }
-#settings[hidden], #boot[hidden], #shop[hidden], #coaster-shop[hidden], #toast[hidden], #hint[hidden], #tutorial[hidden], #debug[hidden] {
+#settings[hidden], #boot[hidden], #shop[hidden], #coaster-shop[hidden], #coaster-bots[hidden], #tower-shop[hidden], #tower-pay[hidden], #tower-map[hidden], #tower-hud[hidden], #tower-place-picker[hidden], #tower-sky-picker[hidden], #toast[hidden], #hint[hidden], #tutorial[hidden], #debug[hidden] {
   display: none !important;
 }
 
@@ -2167,6 +2179,16 @@ body.title-open .players-panel { z-index: 8; }
   background: #f4fbe9;
 }
 
+.shop-item.is-worn {
+  background: #fff1f6;
+  box-shadow: inset 0 0 0 3px #e23b78;
+}
+
+.shop-item.is-worn button:disabled {
+  color: white;
+  background: #e23b78;
+}
+
 .shop-item button:disabled {
   color: #3d6b32;
   background: #e7f6df;
@@ -2176,6 +2198,12 @@ body.title-open .players-panel { z-index: 8; }
 .shop-emoji {
   font-size: 1.4rem;
   line-height: 1;
+}
+
+.bot-track {
+  font-size: 1.05rem;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
 }
 
 .shop-swatch {
@@ -2213,7 +2241,7 @@ body.title-open .players-panel { z-index: 8; }
 .sheet-head { justify-content: space-between; margin-bottom: 10px; }
 .sheet h2 { font-size: 1.6rem; }
 
-#settings-close, #shop-close, #coaster-shop-close, .toggle, .chip, .segment button {
+#settings-close, #shop-close, #coaster-shop-close, #coaster-bots-close, .toggle, .chip, .segment button {
   border-radius: 999px;
   padding: 10px 14px;
   background: white;
@@ -3082,3 +3110,293 @@ body.show-touch #coaster-place { bottom: calc(164px + env(safe-area-inset-bottom
 
 #coaster-place-remove { color: white; background: #e5484d; box-shadow: none; }
 #coaster-place-done { color: white; background: linear-gradient(135deg, #df75a9, #9d79d5); box-shadow: none; }
+
+.tower-pay {
+  position: fixed;
+  left: calc(16px + env(safe-area-inset-left));
+  top: calc(86px + env(safe-area-inset-top));
+  z-index: 3;
+  width: min(210px, calc(100vw - 32px));
+  margin: 0;
+  padding: 12px 14px 10px;
+  border-radius: 20px;
+  color: #4d315f;
+  background: rgba(255, 252, 255, 0.88);
+  box-shadow: 0 12px 28px rgba(80, 40, 90, 0.18);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.tower-pay p { margin: 0; }
+
+.tower-pay p:first-child {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.tower-pay-amount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px !important;
+  font-size: 1.7rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.tower-pay-amount .coin-glyph { width: 22px; height: 22px; }
+
+#tower-jump-note,
+.tower-pay p[data-i18n="tower.higher"] {
+  color: #8a6180;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+#tower-wins {
+  margin-top: 8px !important;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.tower-wing-photo {
+  width: 100%;
+  height: 84px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #f4efe8;
+}
+
+#tower-shop .shop-sheet {
+  max-height: min(88vh, 860px);
+  overflow: auto;
+}
+
+.tower-jump-amount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 6px !important;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.tower-jump-amount .coin-glyph { width: 16px; height: 16px; }
+
+.tower-map {
+  position: fixed;
+  right: calc(12px + env(safe-area-inset-right));
+  top: calc(76px + env(safe-area-inset-top));
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: 132px;
+  margin: 0;
+  padding: 10px 10px 12px;
+  border-radius: 20px;
+  color: #4d315f;
+  background: rgba(255, 252, 255, 0.88);
+  box-shadow: 0 12px 28px rgba(80, 40, 90, 0.18);
+  text-align: center;
+}
+
+.tower-map p { margin: 0; }
+
+.tower-map p:first-child {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+#tower-map-place {
+  margin-top: 2px !important;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #8a6180;
+}
+
+.tower-map-col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  margin-top: 8px;
+}
+
+.tower-map-top {
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.tower-map-stage {
+  position: relative;
+  flex: 1;
+  align-self: stretch;
+  width: 100%;
+  min-height: 0;
+}
+
+.tower-sil {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.tower-map[data-place="eiffel"] .tower-sil[data-shape="eiffel"],
+.tower-map[data-place="lighthouse"] .tower-sil[data-shape="lighthouse"],
+.tower-map[data-place="ice"] .tower-sil[data-shape="ice"],
+.tower-map[data-place="volcano"] .tower-sil[data-shape="volcano"] {
+  display: block;
+}
+
+#tower-map-you {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #ff4d8d;
+  box-shadow: 0 2px 6px rgba(80, 20, 40, 0.35);
+  transform: translate(-50%, 50%);
+}
+
+#tower-map-height {
+  margin-top: 8px !important;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.tower-hud {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.tower-hud-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+#tower-auto {
+  border: 0;
+  border-radius: 18px;
+  padding: 12px 22px;
+  color: #4d315f;
+  background: #fff;
+  box-shadow: 0 5px 0 #d9c8df, 0 12px 24px rgba(28, 10, 24, 0.2);
+  font-size: 1.05rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#tower-auto[aria-pressed="true"] {
+  color: white;
+  background: linear-gradient(135deg, #3ecf8e, #1fa971);
+  box-shadow: 0 5px 0 #127a4e, 0 12px 24px rgba(20, 80, 50, 0.28);
+}
+
+.tower-hud-slot {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+}
+
+.tower-hud-slot > button {
+  border: 0;
+  border-radius: 18px;
+  padding: 10px 16px;
+  color: white;
+  background: linear-gradient(135deg, #5b4dff, #49c2ff);
+  box-shadow: 0 5px 0 #3a2ea8, 0 12px 24px rgba(28, 10, 24, 0.2);
+  font-size: 1rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#tower-place-open {
+  background: linear-gradient(135deg, #e23b78, #ffb347);
+  box-shadow: 0 5px 0 #a12658, 0 12px 24px rgba(28, 10, 24, 0.2);
+}
+
+#tower-place-picker,
+#tower-sky-picker {
+  width: min(260px, calc(100vw - 32px));
+  max-height: min(360px, 48vh);
+  overflow: auto;
+  padding: 10px;
+  border-radius: 18px;
+  background: var(--cream);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px #c9b6ff, 0 12px 28px rgba(28, 10, 24, 0.22);
+  text-align: left;
+}
+
+#tower-place-picker p,
+#tower-sky-picker p {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.tower-place-option,
+#tower-sky-picker .coaster-sky-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--ink);
+  background: white;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+#tower-sky-picker .coaster-sky-option {
+  grid-template-columns: 42px 1fr;
+}
+
+.tower-place-option strong,
+#tower-sky-picker .coaster-sky-option strong { display: block; font-size: 0.92rem; }
+
+.tower-place-option small,
+#tower-sky-picker .coaster-sky-option small {
+  display: block;
+  font-weight: 700;
+  opacity: 0.7;
+  font-size: 0.75rem;
+}
+
+#tower-sky-picker .coaster-sky-option[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 3px #ff4d8d;
+}
+
+body.theme-halloween .play-tower,
+body.theme-thanksgiving .play-tower,
+body.theme-christmas .play-tower,
+body.theme-valentines .play-tower {
+  background: linear-gradient(135deg, #3ec6ff, #7a6bff);
+  box-shadow: 0 11px 24px rgba(62, 150, 230, 0.32);
+}

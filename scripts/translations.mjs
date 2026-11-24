@@ -12,6 +12,7 @@ for (const file of await readdir(srcDir)) {
   // Keys passed through a formatter, a zone table, or returned for a later t() call.
   keys.push(...[...code.matchAll(/\bfmt\("([^"]+)"/g)].map((match) => match[1]));
   keys.push(...[...code.matchAll(/\bnameKey: "([^"]+)"/g)].map((match) => match[1]));
+  keys.push(...[...code.matchAll(/\bhintKey: "([^"]+)"/g)].map((match) => match[1]));
   keys.push(...[...code.matchAll(/\breturn "((?:toast|zone|map)\.[^"]+)"/g)].map((match) => match[1]));
 }
 

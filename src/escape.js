@@ -2196,17 +2196,63 @@ function buildSite(scene, origin, { graphics, audio }) {
   // 10. The road. Open air, with walls so you stay on it, and a dead end the police catch you against.
   const RF = ARENA_FLOOR;
   box(84, RF - 0.4, -5, ROAD_END, RF, 5, M.asphalt);
-  box(84, RF, -5.4, ROAD_END, RF + 2.4, -5, M.trim);
-  box(84, RF, 5, ROAD_END, RF + 2.4, 5.4, M.trim);
+  // The lava stretch is open on both sides. Walls stay on the rest of the road.
+  box(84, RF, -5.4, 108, RF + 2.4, -5, M.trim);
+  box(140, RF, -5.4, ROAD_END, RF + 2.4, -5, M.trim);
+  box(84, RF, 5, 108, RF + 2.4, 5.4, M.trim);
+  box(140, RF, 5, ROAD_END, RF + 2.4, 5.4, M.trim);
   box(ROAD_END, RF, -5.4, ROAD_END + 0.4, RF + 2.4, 5.4, M.trim);
   for (let x = 90; x < ROAD_END; x += 8) {
+    if (x >= 108 && x < 140) continue;
     box(x, RF + 0.02, -0.15, x + 3, RF + 0.06, 0.15, M.stripe, { solid: false, camera: false });
   }
   for (let x = 96; x < ROAD_END; x += 18) {
+    if (x >= 108 && x < 140) continue;
     lamp(x, RF + 4.2, -4.2, 0.8, 0.8);
     lamp(x, RF + 4.2, 4.2, 0.8, 0.8);
   }
   sign(t("prison.road"), 88, RF + 3.2, -4.9, 0, 2.6, 0.6, "#2f3640", "#ffd23f");
+
+  // Open lava beside the road. Nothing stands up here: no side walls, blocks, or cliffs. The lava is only a look.
+  const canyonGlow = lavaTexture(scene, "prisonCanyonGlow", 256, 6, [40, 4, 2], [255, 190, 70]);
+  const canyonCrust = lavaTexture(scene, "prisonCanyonCrust", 128, 13, [70, 12, 6], [255, 90, 30]);
+  canyonGlow.uScale = 32 / 7;
+  canyonGlow.vScale = 3.85 / 7;
+  canyonCrust.uScale = 32 / 16;
+  canyonCrust.vScale = 3.85 / 16;
+  const canyonLava = new StandardMaterial("prisonCanyonLava", scene);
+  canyonLava.emissiveTexture = canyonGlow;
+  canyonLava.diffuseTexture = canyonCrust;
+  canyonLava.specularColor = new Color3(0.25, 0.12, 0.05);
+  canyonLava.specularPower = 12;
+  const grid = new DynamicTexture("prisonCanyonGrid", { width: 128, height: 128 }, scene, true);
+  const gridCtx = grid.getContext();
+  gridCtx.fillStyle = "#3e4650";
+  gridCtx.fillRect(0, 0, 128, 128);
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      gridCtx.fillStyle = (col + row) % 2 === 0 ? "#8b949e" : "#6e7782";
+      gridCtx.fillRect(col * 16 + 1, row * 16 + 1, 14, 14);
+    }
+  }
+  grid.update();
+  grid.wrapU = 1;
+  grid.wrapV = 1;
+  grid.uScale = 32 / 0.85;
+  grid.vScale = 3.4 / 0.85;
+  const gridLook = new StandardMaterial("prisonCanyonGridMat", scene);
+  gridLook.diffuseTexture = grid;
+  gridLook.emissiveColor = new Color3(0.12, 0.13, 0.14);
+  gridLook.specularColor = Color3.Black();
+  owned.push(canyonGlow, canyonCrust, canyonLava, grid, gridLook);
+  const deck = MeshBuilder.CreateGround("prisonCanyonDeck", { width: 32, height: 3.4 }, scene);
+  deck.position.set(124, RF + 0.045, 0);
+  add(deck, gridLook, { camera: false });
+  for (const side of [-1, 1]) {
+    const lava = MeshBuilder.CreateGround("prisonCanyonLava", { width: 32, height: 3.85 }, scene);
+    lava.position.set(124, RF + 0.02, side * 3.475);
+    add(lava, canyonLava, { camera: false });
+  }
 
   // 11. The laundry, south of the road. You arrive here after the police catch you.
   box(148, RF - 0.4, -26, 166, RF, -12, M.tile);
@@ -2402,6 +2448,8 @@ function buildSite(scene, origin, { graphics, audio }) {
       const flash = Math.sin(time * 12) > 0;
       sirens[0].emissiveColor.copyFrom(flash ? sirens[0].metadata.on : sirens[0].metadata.off);
       sirens[1].emissiveColor.copyFrom(flash ? sirens[1].metadata.off : sirens[1].metadata.on);
+      canyonGlow.uOffset = time * 0.02;
+      canyonCrust.uOffset = -time * 0.012;
       for (const mesh of props) {
         if (mesh.name === "prison-cellmate") mesh.position.y = Math.abs(Math.sin(time * 5)) * 0.15;
       }

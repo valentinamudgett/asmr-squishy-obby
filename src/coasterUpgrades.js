@@ -915,9 +915,12 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
       if (score <= 1 && (!near || score < near.score)) near = { kind: "track", along, score, x: p.x, y: p.y, z: p.z, heading: p.heading };
     }
     if (near && (!best || near.along <= best.along + 1.5)) best = near;
-    // A block under the pointer stacks even when the ride rails are the closer empty spot.
+    // A block under the pointer stacks from its top, or is selected to pick up, even when the rails are closer.
     if (stacked) return stacked;
-    if (hit?.hit && (!best || hit.distance <= best.along + 0.6)) return { kind: "decor", record: hit.pickedMesh.metadata.coasterDecor };
+    if (hit?.hit) {
+      const record = hit.pickedMesh.metadata.coasterDecor;
+      if (record?.type === "block" || !best || hit.distance <= best.along + 0.6) return { kind: "decor", record };
+    }
     if (best?.kind === "deck") {
       const lifted = offerStack(Math.round(best.x / BUILD_GRID) * BUILD_GRID, Math.round(best.z / BUILD_GRID) * BUILD_GRID);
       if (lifted) return lifted;
@@ -940,7 +943,7 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
 
   /**
    * Where a block or fence in hand sits on the pile at `x, z`.
-   * Clicking any face of a block counts, so the pile grows without a perfect hit on the top.
+   * Used when the pointer is on the top of a block. A click on the side selects that block instead.
    */
   function offerStack(x, z) {
     if (!pick || (pick !== "block" && pick !== "fence") || state.decor[pick] <= 0 || chosen) return null;
@@ -952,15 +955,33 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     return { kind: "stackFull", reason: column.blocks >= STACK_MAX ? "tall" : "taken" };
   }
 
-  /** Clicking a block, while a block or fence is in hand, builds on top of that pile. */
+  /** True when the pointer hit the top of a block, which is where the next piece sits. */
+  function clickOnTop(hit, record) {
+    if (Number.isInteger(hit.faceId)) {
+      const normal = hit.getNormal(true);
+      if (normal) return normal.y > 0.55;
+    }
+    const point = hit.pickedPoint;
+    if (!point) return false;
+    return point.y - origin.y - record.y >= BLOCK_H - 0.07;
+  }
+
+  /** Clicking the top of a block, while a block, fence, or ceiling is in hand, builds on that pile. */
   function stackSpot(hit) {
     const record = hit.pickedMesh.metadata?.coasterDecor;
     if (!record || record.type !== "block") return null;
+    // The sides select the block, same as clicking any other decoration. Only the top adds a piece.
+    if (!clickOnTop(hit, record)) return null;
+    // A ceiling, fence, or block is already on this one: select it so those come back to the bag too.
+    if (restingOn(record).length > 0) return null;
     // A ceiling sits on the block you clicked, not on the ground beside it.
     if (pick === "ceiling" && state.decor.ceiling > 0 && !chosen) {
       return { kind: "stack", x: record.x, y: round(record.y + BLOCK_H), z: record.z };
     }
-    return offerStack(record.x, record.z);
+    const offered = offerStack(record.x, record.z);
+    // A full pile, or one that already has something on top, can't take another piece: select the block.
+    if (!offered || offered.kind === "stackFull") return null;
+    return offered;
   }
 
   function poseFor(type, target) {
@@ -1071,18 +1092,41 @@ export function bindCoasterUpgrades(scene, coaster, { coins, blip, onCoins }) {
     paintBar(t("upgrade.placed").replace("{name}", t(decorById(record.type).nameKey)));
   }
 
-  function removeChosen() {
-    if (!chosen) return;
-    const record = chosen;
+  /** Puts one placed decoration back in the bag and takes its mesh out of the world. */
+  function takeBack(record) {
     const index = state.placed.indexOf(record);
-    if (index >= 0) state.placed.splice(index, 1);
+    if (index < 0) return;
+    state.placed.splice(index, 1);
     placedKits.get(record)?.dispose();
     placedKits.delete(record);
     state.decor[record.type] += 1;
-    coaster.saveUpgrades();
-    chosen = null;
+    if (chosen === record) chosen = null;
+  }
+
+  /** Decorations standing on this block, or higher in the same pile. Track pieces are not included. */
+  function restingOn(block) {
+    const floor = block.y + BLOCK_H - 0.08;
+    const found = [];
+    for (const record of state.placed) {
+      if (record === block || record.track === true) continue;
+      if (Math.abs(record.x - block.x) > 0.25 || Math.abs(record.z - block.z) > 0.25) continue;
+      if (record.y < floor) continue;
+      found.push(record);
+    }
+    return found;
+  }
+
+  function removeChosen() {
+    if (!chosen) return;
+    const record = chosen;
+    if (record.type === "block") {
+      const above = restingOn(record).sort((a, b) => b.y - a.y);
+      for (const item of above) takeBack(item);
+    }
+    takeBack(record);
     pick = record.type;
     marker.setEnabled(false);
+    coaster.saveUpgrades();
     blip?.("clank");
     paintBar(t("upgrade.pickedUp").replace("{name}", t(decorById(record.type).nameKey)));
   }

@@ -80,7 +80,7 @@ const SEASON_COVERS = [
  * are meshes parked on the sky sphere, far past the track, with no colliders.
  * Leaving the yard (or picking Space) puts the usual look back and does not touch the obby backdrop.
  */
-export function bindCoasterSky(scene, coaster, world, graphics) {
+export function bindCoasterSky(scene, coaster, world, graphics, tower) {
   const root = new TransformNode("coaster-sky", scene);
   const groups = {
     carnival: buildCarnival(scene, root),
@@ -98,12 +98,17 @@ export function bindCoasterSky(scene, coaster, world, graphics) {
   const open = document.querySelector("#coaster-sky-open");
   const picker = document.querySelector("#coaster-sky-picker");
   const list = document.querySelector("#coaster-sky-list");
+  const towerOpen = document.querySelector("#tower-sky-open");
+  const towerPicker = document.querySelector("#tower-sky-picker");
+  const towerList = document.querySelector("#tower-sky-list");
   const glyph = open?.querySelector("[data-sky-glyph]");
+  const towerGlyph = towerOpen?.querySelector("[data-sky-glyph]");
   let current = isCoasterSky(coaster.upgrades.sky) ? coaster.upgrades.sky : "space";
   // Visibility we borrowed from a holiday sky, put back the moment this sky steps aside.
   const covered = [];
 
-  if (list) {
+  const fill = (host) => {
+    if (!host) return;
     for (const sky of COASTER_SKIES) {
       const button = document.createElement("button");
       button.type = "button";
@@ -122,15 +127,29 @@ export function bindCoasterSky(scene, coaster, world, graphics) {
       copy.append(name, hint);
       button.append(swatch, copy);
       button.addEventListener("click", () => choose(sky.id));
-      list.append(button);
+      host.append(button);
     }
-  }
+  };
+  fill(list);
+  fill(towerList);
   open?.addEventListener("click", () => {
     if (!picker) return;
     open.blur();
     const show = picker.hidden;
     picker.hidden = !show;
     open.setAttribute("aria-expanded", String(show));
+  });
+  towerOpen?.addEventListener("click", () => {
+    if (!towerPicker) return;
+    towerOpen.blur();
+    const show = towerPicker.hidden;
+    towerPicker.hidden = !show;
+    towerOpen.setAttribute("aria-expanded", String(show));
+    if (show) {
+      const places = document.querySelector("#tower-place-picker");
+      if (places) places.hidden = true;
+      document.querySelector("#tower-place-open")?.setAttribute("aria-expanded", "false");
+    }
   });
   paint();
 
@@ -148,9 +167,12 @@ export function bindCoasterSky(scene, coaster, world, graphics) {
   function paint() {
     const sky = COASTER_SKIES.find((item) => item.id === current) ?? COASTER_SKIES[0];
     if (glyph) glyph.textContent = sky.emoji;
-    list?.querySelectorAll("[data-sky]").forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.sky === current));
-    });
+    if (towerGlyph) towerGlyph.textContent = sky.emoji;
+    for (const host of [list, towerList]) {
+      host?.querySelectorAll("[data-sky]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.sky === current));
+      });
+    }
   }
 
   function yardMode(id) {
@@ -180,11 +202,17 @@ export function bindCoasterSky(scene, coaster, world, graphics) {
     },
     /** After holiday skies update, so a coaster sky stays in front of them. */
     finish(active, time) {
-      if (picker && (!active || coaster.riding)) {
+      const coasterOn = coaster.active;
+      const towerOn = Boolean(tower?.active);
+      if (picker && (!coasterOn || coaster.riding)) {
         picker.hidden = true;
         open?.setAttribute("aria-expanded", "false");
       }
-      const id = active ? current : "space";
+      if (towerPicker && !towerOn) {
+        towerPicker.hidden = true;
+        towerOpen?.setAttribute("aria-expanded", "false");
+      }
+      const id = (active || towerOn) ? current : "space";
       const show = id !== "space";
       uncover();
       if (!show) {

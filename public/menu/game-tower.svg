@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ad8ff"/>
+      <stop offset="1" stop-color="#ffe4f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <ellipse cx="280" cy="160" rx="90" ry="36" fill="#fff" opacity="0.85"/>
+  <ellipse cx="980" cy="120" rx="120" ry="42" fill="#fff" opacity="0.8"/>
+  <rect x="0" y="560" width="1280" height="160" fill="#b7f0c8"/>
+  <rect x="560" y="150" width="160" height="420" rx="18" fill="#ffb7d5"/>
+  <rect x="530" y="130" width="220" height="36" rx="10" fill="#fff6ea"/>
+  <rect x="600" y="96" width="80" height="40" rx="8" fill="#ffd23f"/>
+  <text x="640" y="124" text-anchor="middle" font-family="Arial Black, Arial" font-size="28" fill="#5a3b16">1 WIN</text>
+  <rect x="508" y="180" width="18" height="370" rx="6" fill="#c9844a"/>
+  <rect x="754" y="180" width="18" height="370" rx="6" fill="#c9844a"/>
+  <g fill="#ffd23f">
+    <rect x="508" y="210" width="264" height="14" rx="4"/>
+    <rect x="508" y="270" width="264" height="14" rx="4"/>
+    <rect x="508" y="330" width="264" height="14" rx="4"/>
+    <rect x="508" y="390" width="264" height="14" rx="4"/>
+    <rect x="508" y="450" width="264" height="14" rx="4"/>
+    <rect x="508" y="510" width="264" height="14" rx="4"/>
+  </g>
+  <g transform="translate(180,430)">
+    <rect x="0" y="70" width="220" height="130" rx="8" fill="#e7b07a"/>
+    <polygon points=" -16,70 110,8 236,70" fill="#ff6fa5"/>
+    <rect x="78" y="120" width="64" height="80" fill="#8a5a32"/>
+    <rect x="16" y="18" width="188" height="48" rx="8" fill="#fff6ea" stroke="#e23b78" stroke-width="6"/>
+    <text x="110" y="52" text-anchor="middle" font-family="Arial Black, Arial" font-size="32" fill="#e23b78">WINGS</text>
+  </g>
+  <g transform="translate(860,470)">
+    <ellipse cx="70" cy="78" rx="46" ry="18" fill="#7dcea0"/>
+    <path d="M70 70 C20 20, 10 50, 24 78 C40 40, 70 48, 70 70Z" fill="#ff8ad4"/>
+    <path d="M70 70 C120 20, 130 50, 116 78 C100 40, 70 48, 70 70Z" fill="#7ec8ff"/>
+    <circle cx="70" cy="48" r="22" fill="#ffd7b5"/>
+  </g>
+</svg>

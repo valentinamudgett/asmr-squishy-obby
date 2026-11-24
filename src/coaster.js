@@ -1,6 +1,7 @@
 import {
   Color3,
   DynamicTexture,
+  Material,
   Mesh,
   MeshBuilder,
   PhysicsBody,
@@ -64,6 +65,31 @@ const BELT_LANE_OFFSET = 0.38;
 const BELT_RETURN = 0.02;
 /** Once the outbound lane drops you on the build spot, it leaves you alone this far back so you can press E. */
 const BELT_PARK = 1.4;
+/** Open car at the end of the catwalk. It climbs this far above the higher of the end and the deck. */
+const LIFT_SKY = 52;
+/** Cruise speed. The first and last stretch ease off so the car doesn't jerk. */
+const LIFT_SPEED = 8.2;
+const LIFT_WIDE = 1.7;
+const LIFT_DEEP = 1.7;
+/** Where the car sets you down on the deck, clear of the ride ring and the arch. */
+const LIFT_LAND = { x: -2.2, z: 13.6 };
+/**
+ * Lobby on the right of the deck. Doors face the yard (-x). The window faces off the right edge.
+ * Kept inside the smallest platform, clear of the shack, the booth, and the track gap.
+ */
+const YARD_LIFT = { x: 15.4, z: 8.8, yaw: -Math.PI / 2 };
+const LOBBY_WIDE = 6.8;
+const LOBBY_DEEP = 4.6;
+const LOBBY_TALL = 5.2;
+/** Meters between the elevator's lower stop and its upper floor. */
+const LIFT_FLOOR = 14;
+const PLAYER_KEY = "asmr-squishy-obby:player";
+/**
+ * The coaster you can ride that bots built. Past the largest deck (x = 42)
+ * and clear of your own rails, which leave the front at x = 0.
+ */
+const BOT_RIDE_X = 160;
+const BOT_RIDE_Z = -36;
 /** The first starter piece is a straight, so the catwalk can step off the deck edge here. */
 const WALK_START_Z = 17;
 const BUILD_REACH = 1.7;
@@ -78,6 +104,13 @@ export const PARTS = [
   { id: "right", cost: 700, nameKey: "coaster.right", emoji: "↪️" },
   { id: "hill", cost: 1200, nameKey: "coaster.hill", emoji: "⛰️" },
   { id: "loop", cost: 2000, nameKey: "coaster.loop", emoji: "🔄" },
+  { id: "bunny", cost: 900, nameKey: "coaster.bunny", emoji: "🐰" },
+  { id: "helix", cost: 1600, nameKey: "coaster.helix", emoji: "🌀" },
+  { id: "cork", cost: 2200, nameKey: "coaster.cork", emoji: "🌪️" },
+  { id: "zerog", cost: 2400, nameKey: "coaster.zerog", emoji: "💫" },
+  { id: "immel", cost: 2600, nameKey: "coaster.immel", emoji: "⤴️" },
+  { id: "cobra", cost: 3000, nameKey: "coaster.cobra", emoji: "🐍" },
+  { id: "brake", cost: 600, nameKey: "coaster.brake", emoji: "🛑" },
 ];
 
 const MAX_OWNED = 99;
@@ -89,19 +122,27 @@ export const PARTS_SHACK = { x: SHACK_X, z: SHACK_Z };
 
 /** Ticket booth on the right of the path to the ride, clear of the shack, decor, and exit. */
 const BUSINESS = { x: 8.6, z: 3.2, reach: 2.35 };
+/**
+ * Where you stand to look at coasters bots are building. The models sit a few meters to the left;
+ * the reach covers that row without meeting the shack or the ride.
+ */
+export const BOT_YARD = { x: -11, z: 7.5, reach: 6.2 };
 const ZONES = [
   { id: "ride", x: 0, z: 10.2, reach: 2.9 },
   { id: "shop", x: SHACK_X, z: SHACK_Z + 3.3, reach: 2.6 },
   { id: "decor", x: DECOR_SPOT.x, z: DECOR_SPOT.z, reach: DECOR_SPOT.reach },
   { id: "exit", x: 0, z: -13.2, reach: 2.9 },
   { id: "business", x: BUSINESS.x, z: BUSINESS.z, reach: BUSINESS.reach },
+  { id: "bots", x: BOT_YARD.x, z: BOT_YARD.z, reach: BOT_YARD.reach },
 ];
 
 /**
  * Your own rollercoaster. The yard is saved in this browser and is not shared online.
  * A short hill is already built. Parts are bought at the parts shack on the deck and kept until you
- * add them: the catwalk has two moving lanes, one out to the end and one back to the deck, and from
- * the end you click a joint on the track to put a part in, or click a part to take it off. A ride goes out and back.
+ * add them: the catwalk's inner lane runs out to the end. Click a joint to put a part in, or
+ * click a part to take it off. Your own ride runs out and back and finishes in the cart at the station.
+ * A board on the left shows coasters bots are building. Riding one starts at their station,
+ * off to the right of the yard, and pays the same.
  */
 export function createCoaster(scene) {
   const saved = loadLayout();
@@ -117,6 +158,9 @@ export function createCoaster(scene) {
   let tool = null;
   let active = false;
   let riding = false;
+  // While set, the cart runs this bot track. Your layout and save stay on your own rails.
+  // Guest riders have their own coaster and are not moved onto this lap.
+  let botRide = null;
   let travel = 0;
   let travelDir = 1;
   let action = null;
@@ -160,6 +204,21 @@ export function createCoaster(scene) {
   // True while the return lane is finishing the step from the planks onto the deck.
   let beltHoming = false;
   const beltOut = { x: 0, y: 0, z: 0, heading: 0 };
+  // Open mover. `liftOn` while Up is carrying you from its pad up to the build cap.
+  let liftOn = false;
+  let moverAt = null;
+  let liftS = 0;
+  let liftLen = 1;
+  let liftFace = 0;
+  let liftPts = [];
+  let liftDist = [0];
+  let liftPad = null;
+  let liftBody = null;
+  const liftPose = { position: new Vector3(), heading: 0 };
+  // A vertical elevator trip. Not the old sky-car path.
+  let homeOn = false;
+  let liftTrip = null;
+  let shownSky = "";
   const picks = { pieces: [], joints: [] };
   const lastFoot = { x: 0, y: 0, z: 0, known: false };
   const glow = new StandardMaterial("coaster-pick-glow", scene);
@@ -168,11 +227,26 @@ export function createCoaster(scene) {
   glow.alpha = 0.5;
 
   const beltLook = createBeltLook(scene);
+  const liftLook = createLiftLook(scene);
   buildYard(scene, mats);
+  const yardLift = buildElevator(
+    scene,
+    liftLook,
+    "coaster-yard-lift",
+    OX + YARD_LIFT.x,
+    OY,
+    OZ + YARD_LIFT.z,
+    YARD_LIFT.yaw,
+    false,
+  );
+  yardLift.setDoors(1);
+  yardLift.showSky(chosenBackdrop());
+  shownSky = chosenBackdrop();
   const gate = buildBusiness(scene, mats);
   gate.paint(open);
   let deckKit = buildDeck(scene, mats, deckTier(upgrades.deck));
   const marker = buildMarker(scene, mats);
+  const liftCar = buildLiftCar(scene, mats);
   rebuild(false);
 
   function rebuild(persist = true) {
@@ -205,10 +279,11 @@ export function createCoaster(scene) {
     layTrack(scene, points, mats, trackMeshes);
     if (persist) save();
     placeCart(0);
+    if (!liftOn) parkMover();
   }
 
   function placeCart(bob) {
-    const pose = sampleAt(travel);
+    const pose = poseAt(travel);
     const face = riding && travelDir < 0 ? pose.heading + Math.PI : pose.heading;
     cart.position.set(OX + pose.x, OY + pose.y + bob, OZ + pose.z);
     cart.rotationQuaternion = Quaternion.RotationYawPitchRoll(face, 0, 0);
@@ -232,32 +307,76 @@ export function createCoaster(scene) {
     };
   }
 
-  function sampleAt(distance) {
-    if (points.length === 0) return { x: 0, y: RAIL_Y, z: 12.2, heading: 0, pitch: 0 };
-    const s = Math.max(0, Math.min(length, distance));
-    if (points.length === 1 || length <= 0) return points[0];
+  function sampleCurve(pts, curve, total, distance) {
+    if (pts.length === 0) return { x: 0, y: RAIL_Y, z: 12.2, heading: 0, pitch: 0, pace: 1 };
+    const s = Math.max(0, Math.min(total, distance));
+    if (pts.length === 1 || total <= 0) return pts[0];
     let lo = 0;
-    let hi = dist.length - 1;
+    let hi = curve.length - 1;
     while (lo < hi - 1) {
       const mid = (lo + hi) >> 1;
-      if (dist[mid] <= s) lo = mid;
+      if (curve[mid] <= s) lo = mid;
       else hi = mid;
     }
-    const span = dist[lo + 1] - dist[lo] || 1;
-    const t = (s - dist[lo]) / span;
-    const a = points[lo];
-    const b = points[Math.min(points.length - 1, lo + 1)];
+    const span = curve[lo + 1] - curve[lo] || 1;
+    const t = (s - curve[lo]) / span;
+    const a = pts[lo];
+    const b = pts[Math.min(pts.length - 1, lo + 1)];
     return {
       x: a.x + (b.x - a.x) * t,
       y: a.y + (b.y - a.y) * t,
       z: a.z + (b.z - a.z) * t,
       heading: lerpAngle(a.heading, b.heading, t),
       pitch: a.pitch + (b.pitch - a.pitch) * t,
+      pace: (a.pace ?? 1) + ((b.pace ?? 1) - (a.pace ?? 1)) * t,
     };
+  }
+
+  function sampleAt(distance) {
+    return sampleCurve(points, dist, length, distance);
+  }
+
+  /** The cart's curve: a bot coaster while you are riding one, otherwise your own rails. */
+  function poseAt(distance) {
+    if (!(botRide && riding)) return sampleAt(distance);
+    return sampleCurve(botRide.points, botRide.dist, botRide.length, distance);
+  }
+
+  function clearBotRide() {
+    if (!botRide) return;
+    for (const mesh of botRide.meshes) {
+      mesh.physicsBody?.shape?.dispose();
+      mesh.physicsBody?.dispose();
+      mesh.dispose(false, false);
+    }
+    for (const item of botRide.owned ?? []) item.dispose();
+    botRide = null;
+    if (!riding) {
+      travel = 0;
+      travelDir = 1;
+    }
   }
 
   function stand(x, z, heading = 0, y = 0) {
     return { position: new Vector3(OX + x, OY + y + FOOT_OFFSET + 0.08, OZ + z), heading };
+  }
+
+  /** Where a finished ride lets you off: the bot coaster's far pad, or the end of your catwalk. */
+  function rideDrop() {
+    if (botRide?.land) return stand(botRide.land.x, botRide.land.z, botRide.land.heading, botRide.land.y);
+    if (!spot) return null;
+    return stand(spot.x, spot.z, spot.heading, spot.y);
+  }
+
+  /** A floor under a bot-coaster stop. `floorY` is the top, in yard-local meters. */
+  function plantBotStop(x, z, floorY, wide, deep) {
+    const mesh = MeshBuilder.CreateBox("coaster-bot-stop", { width: wide, height: 0.8, depth: deep }, scene);
+    mesh.position.set(OX + x, OY + floorY - 0.4, OZ + z);
+    mesh.material = mats.cream;
+    mesh.isPickable = false;
+    mesh.computeWorldMatrix(true);
+    addStatic(scene, mesh, wide, 0.8, deep);
+    return mesh;
   }
 
   /** Which piece's catwalk you're on (`cap` past the end), or null on the deck. */
@@ -430,22 +549,37 @@ export function createCoaster(scene) {
       return seatPose(distance, returning);
     },
     /**
-     * Footsteps for the guest line, in world space (avatar-root height).
-     * A straight aisle up the deck, a step beside each decoration, then the catwalk
-     * out through every piece and back to the station.
+     * A walk through this yard, in world space (avatar-root height).
+     * Visiting riders do not use it. They line up on their own coaster (see coasterRiders.js).
      */
     parade() {
       return guestParade();
     },
     /**
-     * One step of a guest cart on the same sample and pace as ride()
+     * True when feet at this world point (avatar-root height) have walked through the
+     * "BUILD AT THE END" arch onto the catwalk. The deck side of that sign is still false.
+     * The player's own step does not call this. Visiting riders do not use it either.
+     */
+    throughBuildArch(x, y, z) {
+      if (lane.length < 2) return false;
+      const hit = projectLane(x - OX, y - OY, z - OZ);
+      if (!hit || hit.before) return false;
+      // Guest feet sit about FOOT_OFFSET above the planks. The poles are the edges.
+      if (hit.vert > 1.35 || hit.vert < -0.45) return false;
+      if (hit.horiz > WALK_WIDTH * 0.55) return false;
+      return true;
+    },
+    /**
+     * One step along these rails at the same pace as ride()
      * (9 m/s, faster downhill up to 20, a crawl on a near-vertical climb).
      * `trip` is `{ travel, dir }`. The player's cart is not moved. `done` means the lap is over:
      * back at the station, or stopped on the platform when the track ends there.
+     * Visiting riders do not call this. Their train runs on its own coaster.
      */
     advanceGuest(trip, dt) {
       if (!(dt > 0) || length < 4) return null;
-      const speed = rideSpeed(sampleAt(trip.travel).pitch, trip.dir);
+      const guest = sampleAt(trip.travel);
+      const speed = rideSpeed(guest.pitch, trip.dir, guest.pace);
       trip.travel += trip.dir * speed * dt;
       let done = false;
       if (trip.dir > 0 && trip.travel >= length) {
@@ -498,6 +632,7 @@ export function createCoaster(scene) {
       riding = false;
       travel = 0;
       travelDir = 1;
+      clearBotRide();
       save();
       return stand(0, -2, 0);
     },
@@ -511,6 +646,14 @@ export function createCoaster(scene) {
       lastFoot.known = false;
       beltParked = false;
       beltHoming = false;
+      liftOn = false;
+      homeOn = false;
+      parkMover();
+      liftTrip = null;
+      yardLift.level = 0;
+      yardLift.setDoors(1);
+      yardLift.setRise(0);
+      clearBotRide();
       tool = null;
       showTool();
       save();
@@ -577,6 +720,32 @@ export function createCoaster(scene) {
       else if (where && where.piece >= r) moveTo(sideSpot(joints[where.piece === r ? r : where.piece - 1], 0));
       return partById(piece.id);
     },
+    /**
+     * Takes every added piece off in one go. There is no cap: 3, 40, or more all come off.
+     * Coins for each one are refunded by the parts shack. The free starter (n === 0) stays,
+     * so a ride still exists. Bought pieces come off even when they match a starter shape.
+     */
+    removeAll() {
+      if (riding || homeOn) return null;
+      const where = whereOnTrack();
+      let count = 0;
+      let coins = 0;
+      for (let i = layout.length - 1; i >= 0; i -= 1) {
+        const piece = layout[i];
+        if (!(piece.n > 0)) continue;
+        const part = partById(piece.id);
+        if (part) coins += part.cost;
+        layout.splice(i, 1);
+        count += 1;
+      }
+      if (!count) return null;
+      if (!layout.some((piece) => piece.n === 0)) layout.push(...starterTrack());
+      tool = null;
+      showTool();
+      rebuild(true);
+      if (where) moveTo(spot);
+      return { count, coins };
+    },
     /** Opens the yard for riders, or closes it so it is yours alone. Saved in this browser. */
     toggleBusiness() {
       open = !open;
@@ -584,9 +753,93 @@ export function createCoaster(scene) {
       save();
       return open;
     },
+    /**
+     * Rides a bot's part list on their station, off to the right of the yard.
+     * Your saved track is not replaced. Reaching the far end pays, same as your own ride.
+     */
+    rideBot(ids) {
+      if (!active || riding || liftOn || homeOn) return false;
+      const known = new Set(PARTS.map((part) => part.id));
+      const parts = (Array.isArray(ids) ? ids : []).filter((id) => known.has(id));
+      if (parts.length < 2) return false;
+      const track = buildTrack(parts);
+      const measured = measurePoints(track.points);
+      if (measured.length < 4) return false;
+      clearBotRide();
+      const shifted = track.points.map((point) => ({
+        ...point,
+        x: point.x + BOT_RIDE_X,
+        z: point.z + BOT_RIDE_Z,
+      }));
+      const meshes = [];
+      const owned = [];
+      layTrack(scene, shifted, mats, meshes, mats.mint);
+      const start = shifted[0];
+      const end = shifted[shifted.length - 1];
+      const floorY = Math.max(0, end.y - RAIL_Y);
+      meshes.push(plantBotStop(start.x, start.z - 2.2, 0, 8, 7));
+      meshes.push(plantBotStop(end.x, end.z, floorY, 5.5, 5.5));
+      const ahead = 1.25 + LOBBY_DEEP / 2;
+      const botLift = buildElevator(
+        scene,
+        liftLook,
+        "coaster-bot-lift",
+        OX + end.x + Math.sin(end.heading) * ahead,
+        OY + floorY,
+        OZ + end.z + Math.cos(end.heading) * ahead,
+        end.heading + Math.PI,
+        true,
+      );
+      botLift.setDoors(1);
+      botLift.showSky(shownSky || chosenBackdrop());
+      meshes.push(botLift.root, ...botLift.upperMeshes);
+      owned.push(...botLift.owned);
+      const sign = makeSign(
+        scene,
+        null,
+        "coaster-bot-ride",
+        t("coaster.botRideSign"),
+        OX + start.x - 4.6,
+        OY + 2.5,
+        OZ + start.z,
+        -Math.PI / 2,
+        3.2,
+        0.8,
+        "#7dcea0",
+        "#163326",
+      );
+      meshes.push(...sign.meshes);
+      owned.push(...sign.owned);
+      const balloon = MeshBuilder.CreateSphere("coaster-bot-ride-balloon", { diameter: 0.7, segments: 12 }, scene);
+      balloon.position.set(OX + start.x - 4.2, OY + 3.7, OZ + start.z + 1.4);
+      balloon.material = mats.gold;
+      balloon.isPickable = false;
+      meshes.push(balloon);
+      botRide = {
+        points: shifted,
+        dist: measured.dist,
+        length: measured.length,
+        meshes,
+        owned,
+        land: { x: end.x, z: end.z, y: floorY, heading: end.heading },
+        elevator: botLift,
+        liftAt: { ...botLift.doorSpot(), reach: 2.9 },
+      };
+      tool = null;
+      showTool();
+      riding = true;
+      travel = 0;
+      travelDir = 1;
+      return true;
+    },
     act() {
+      if (action === "moverUp") return beginMoverUp() ? "moverUp" : null;
+      if (action === "liftUp" || action === "liftDown") {
+        return beginFloorRide(action === "liftUp" ? 1 : -1) ? action : null;
+      }
       if (action === "ride") {
         if (riding || length < 4) return null;
+        clearBotRide();
         tool = null;
         showTool();
         riding = true;
@@ -598,41 +851,113 @@ export function createCoaster(scene) {
     },
     /**
      * While you ride, the capsule center to carry. Call before the player update.
-     * `hold` freezes the car (menus). Finishing the trip home queues a `paid` event.
+     * `hold` freezes the car (menus). Your own coaster goes out and comes back: you stay
+     * in the cart the whole way and the lap ends at the station. A bot coaster still
+     * lets you off at its far end, where its elevator is.
      */
     ride(dt, hold) {
       if (!active || !riding) return null;
-      if (!hold) {
-        const pose = sampleAt(travel);
-        const speed = rideSpeed(pose.pitch, travelDir);
-        travel += travelDir * speed * dt;
-        if (travelDir > 0 && travel >= length) {
-          travel = length;
-          if (platformEnd) {
-            riding = false;
-            events.push({ type: "paid" });
-          } else travelDir = -1;
-        } else if (travelDir < 0 && travel <= 0) {
-          travel = 0;
-          travelDir = 1;
-          riding = false;
-          events.push({ type: "paid" });
-        }
-      }
-      const seated = riding;
-      const pose = seated || travel > 0 ? sampleAt(travel) : sampleAt(0);
-      const face = travelDir < 0 && seated ? pose.heading + Math.PI : pose.heading;
-      const position = new Vector3(OX + pose.x, OY + pose.y + (seated ? SIT_SEAT : SEAT), OZ + pose.z);
-      if (seated) {
+      const own = !botRide;
+      const along = own ? length : botRide.length;
+      const carry = (pose, sitting) => {
+        const face = own && travelDir < 0 ? pose.heading + Math.PI : pose.heading;
+        const position = new Vector3(OX + pose.x, OY + pose.y + SIT_SEAT, OZ + pose.z);
         position.x -= Math.sin(face) * SIT_BACK;
         position.z -= Math.cos(face) * SIT_BACK;
+        return { position, heading: face, sitting };
+      };
+      if (!hold) {
+        const sample = poseAt(travel);
+        const speed = rideSpeed(sample.pitch, own ? travelDir : 1, sample.pace);
+        if (own) {
+          travel += travelDir * speed * dt;
+          if (travelDir > 0 && travel >= along) {
+            travel = along;
+            travelDir = -1;
+          } else if (travelDir < 0 && travel <= 0) {
+            travel = 0;
+            travelDir = 1;
+            riding = false;
+            events.push({ type: "paid" });
+            return carry(poseAt(0), true);
+          }
+        } else {
+          travel += speed * dt;
+          if (travel >= along) {
+            const drop = rideDrop();
+            riding = false;
+            travel = 0;
+            travelDir = 1;
+            events.push({ type: "paid" });
+            if (!drop) return null;
+            events.push({ type: "move", ...drop });
+            return { position: drop.position, heading: drop.heading, sitting: false };
+          }
+        }
       }
-      return { position, heading: face, sitting: seated };
+      return carry(poseAt(travel), true);
+    },
+    /**
+     * Vertical elevator trip. Up carries you to the upper floor and leaves you there.
+     * Down brings you back to the lower stop. From the bot coaster, the direction that
+     * faces the yard platform finishes inside the yard lobby instead. Not the sky car.
+     */
+    elevator(dt, hold) {
+      if (liftOn && active) {
+        if (liftBody) dropLiftPad();
+        if (!hold && dt > 0) liftS = Math.min(liftLen, liftS + liftSpeed() * dt);
+        const pose = sampleLift(liftS);
+        placeLift(pose);
+        const done = liftS >= liftLen - 0.02;
+        if (done) {
+          liftOn = false;
+          const dock = liftDock();
+          moverAt = dock;
+          placeLift(dock);
+          plantLiftPad(dock);
+          liftPose.position.set(OX + spot.x, OY + spot.y + FOOT_OFFSET + 0.08, OZ + spot.z);
+          liftPose.heading = spot.heading;
+        } else {
+          liftPose.position.set(OX + pose.x, OY + pose.y + FOOT_OFFSET + 0.08, OZ + pose.z);
+          liftPose.heading = pose.heading;
+        }
+        return { position: liftPose.position, heading: liftPose.heading, sitting: false };
+      }
+      if (!homeOn || !liftTrip) return null;
+      if (!hold && dt > 0) liftTrip.t += dt;
+      const trip = liftTrip;
+      const k = Math.min(1, trip.t / trip.duration);
+      const ease = k * k * (3 - 2 * k);
+      const door = k < 0.18 ? 1 - k / 0.18 : k > 0.82 ? (k - 0.82) / 0.18 : 0;
+      trip.lift.setDoors(door);
+      const y = trip.fromY + (trip.toY - trip.fromY) * ease;
+      trip.lift.setRise(y - trip.lift.floorY);
+      const slide = Math.min(1, k / 0.22);
+      const x = trip.fromX + (trip.x - trip.fromX) * slide;
+      const z = trip.fromZ + (trip.z - trip.fromZ) * slide;
+      if (k < 1) return stand(x, z, trip.heading, y);
+      homeOn = false;
+      liftTrip = null;
+      if (trip.arriveHome) {
+        trip.lift.level = 0;
+        trip.lift.setRise(0);
+        trip.lift.setDoors(1);
+        yardLift.level = 0;
+        yardLift.setRise(0);
+        yardLift.setDoors(1);
+        const home = yardLift.inside();
+        return stand(home.x, home.z, home.heading, 0);
+      }
+      trip.lift.level = trip.toLevel;
+      trip.lift.setRise(trip.toLevel * LIFT_FLOOR);
+      trip.lift.setDoors(1);
+      const here = trip.lift.inside();
+      return stand(here.x, here.z, here.heading, trip.lift.floorY + trip.toLevel * LIFT_FLOOR);
     },
     /**
      * One step of the catwalk, in world meters. The track side carries you out to the build spot.
-     * The outer side carries you back and sets you down on the deck by the arch.
-     * Nothing in the air, while a tool is out, or while you push against that lane.
+     * Nothing pulls you back to the deck. Nothing in the air, while a tool is out, or while you
+     * push against the outbound lane.
      */
     beltStep(foot, wish, dt) {
       if (!active || riding || tool || lane.length < 2 || !(dt > 0)) return null;
@@ -657,22 +982,8 @@ export function createCoaster(scene) {
       const goingBack = hit.side > BELT_RETURN;
       const stopS = Math.max(BELT_START, laneLength - WALK_CAP / 2);
       if (goingBack) {
-        if (along > 1) return null;
-        beltParked = false;
-        if (hit.s <= 0.45) {
-          beltHoming = true;
-          const home = beltHome(hit, dt);
-          if (!home) beltHoming = false;
-          return home;
-        }
-        const speed = Math.max(0, BELT_SPEED - Math.max(0, -along));
-        if (speed < 0.05) return null;
-        const dest = hit.s - Math.min(0.45, speed * dt);
-        if (dest <= 0.45) {
-          beltHoming = true;
-          return beltHome(hit, dt);
-        }
-        return beltDelta(hit, dest, true);
+        beltHoming = false;
+        return null;
       }
       beltHoming = false;
       if (along < -1) return null;
@@ -693,9 +1004,15 @@ export function createCoaster(scene) {
       if (dest >= stopS - 1e-3) beltParked = true;
       return beltDelta(hit, dest, false);
     },
-    /** Parks the car, picks the nearby prompt, and returns events (`paid`). */
+    /** Parks the car, picks the nearby prompt, and returns events (`paid`, `move`). */
     update(_dt, foot, time = 0) {
       beltLook.scroll(time);
+      const sky = chosenBackdrop();
+      if (sky !== shownSky) {
+        shownSky = sky;
+        yardLift.showSky(sky);
+        botRide?.elevator?.showSky(sky);
+      }
       const bob = riding ? 0 : Math.sin(time * 2.2) * 0.035;
       placeCart(bob);
       cartLook.tick(time);
@@ -703,7 +1020,7 @@ export function createCoaster(scene) {
         const pulse = 1 + Math.sin(time * 5) * 0.12;
         for (const ball of picks.joints) ball.scaling.setAll((ball.metadata.coasterJoint === tool.joint ? 1.35 : 1) * pulse);
       }
-      if (!active || riding || !foot) action = null;
+      if (!active || riding || homeOn || liftOn || !foot) action = null;
       else {
         const x = foot.x - OX;
         const z = foot.z - OZ;
@@ -717,6 +1034,9 @@ export function createCoaster(scene) {
         if (Math.abs(y - spot.y) < 2.2 && dx * dx + dz * dz <= BUILD_REACH * BUILD_REACH) action = "build";
         else action = y > -1.6 && y < 4 ? zoneAt(x, z) : null;
         if (action === "business") action = open ? "closeBusiness" : "openBusiness";
+        if (botRide?.elevator && nearCar(botRide.elevator, x, y, z)) action = liftChoice(botRide.elevator, true);
+        else if (nearCar(yardLift, x, y, z)) action = liftChoice(yardLift, false);
+        else if (action !== "build" && canMoverUp() && onMover(x, y, z)) action = "moverUp";
       }
       return events.splice(0);
     },
@@ -935,6 +1255,561 @@ function sampleLane(s) {
     beltOut.heading = Math.atan2(backX, backZ);
     return beltOut;
   }
+
+  /** The car sits just past the cap, open side facing back along the planks. */
+  function liftDock() {
+    const end = lane[lane.length - 1] ?? { x: WALK_SIDE, y: 0, z: WALK_START_Z + WALK_CAP };
+    const prev = lane[Math.max(0, lane.length - 2)] ?? end;
+    const dx = end.x - prev.x;
+    const dz = end.z - prev.z;
+    const span = Math.hypot(dx, dz) || 1;
+    const nose = LIFT_DEEP / 2;
+    return {
+      x: end.x + (dx / span) * nose,
+      y: end.y,
+      z: end.z + (dz / span) * nose,
+      heading: Math.atan2(dx, dz),
+    };
+  }
+
+  /** Deck pad, clear of the ride ring. Up boards here when the build cap is above the deck. */
+  function moverBoard() {
+    return { x: LIFT_LAND.x, y: 0, z: LIFT_LAND.z, heading: 0 };
+  }
+
+  function canMoverUp() {
+    return Boolean(moverAt && spot && spot.y > moverAt.y + 1.2);
+  }
+
+  function onMover(x, y, z) {
+    if (!moverAt || Math.abs(y - moverAt.y) > 0.8) return false;
+    const cos = Math.cos(moverAt.heading);
+    const sin = Math.sin(moverAt.heading);
+    const dx = x - moverAt.x;
+    const dz = z - moverAt.z;
+    const lx = dx * cos - dz * sin;
+    const lz = dx * sin + dz * cos;
+    return Math.abs(lx) <= LIFT_WIDE * 0.48 && Math.abs(lz) <= LIFT_DEEP * 0.48;
+  }
+
+  /**
+   * Rise from the pad to the build-cap height, then slide over onto the cap.
+   * The car stays up there with the player.
+   */
+  function beginMoverUp() {
+    if (riding || homeOn || liftOn || !canMoverUp()) return false;
+    const from = moverAt;
+    const top = { x: from.x, y: spot.y, z: from.z };
+    const end = { x: spot.x, y: spot.y, z: spot.z };
+    liftPts = [{ x: from.x, y: from.y, z: from.z }, top];
+    if (Math.hypot(end.x - top.x, end.z - top.z) > 0.35) liftPts.push(end);
+    liftDist = [0];
+    for (let i = 1; i < liftPts.length; i += 1) {
+      const a = liftPts[i - 1];
+      const b = liftPts[i];
+      liftDist.push(liftDist[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+    }
+    liftLen = liftDist[liftDist.length - 1] || 1;
+    liftS = 0;
+    liftFace = from.heading;
+    liftOn = true;
+    dropLiftPad();
+    return true;
+  }
+
+  function liftSpeed() {
+    const edge = Math.min(8, liftLen * 0.18);
+    let along = 1;
+    if (liftS < edge) along = liftS / edge;
+    else if (liftS > liftLen - edge) along = Math.max(0, (liftLen - liftS) / edge);
+    return 1.6 + (LIFT_SPEED - 1.6) * along;
+  }
+
+  function sampleLift(s) {
+    const c = Math.max(0, Math.min(liftLen, s));
+    let lo = 0;
+    let hi = liftDist.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (liftDist[mid] <= c) lo = mid;
+      else hi = mid;
+    }
+    const span = (liftDist[lo + 1] ?? liftLen) - liftDist[lo] || 1;
+    const t = (c - liftDist[lo]) / span;
+    const a = liftPts[lo];
+    const b = liftPts[Math.min(liftPts.length - 1, lo + 1)];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    if (Math.hypot(dx, dz) > 0.25) liftFace = Math.atan2(dx, dz);
+    return { x: a.x + dx * t, y: a.y + dy * t, z: a.z + dz * t, heading: liftFace };
+  }
+
+  function placeLift(pose) {
+    liftCar.root.position.set(OX + pose.x, OY + pose.y, OZ + pose.z);
+    liftCar.root.rotation.y = pose.heading;
+  }
+
+  function dropLiftPad() {
+    liftBody?.shape?.dispose();
+    liftBody?.dispose();
+    liftBody = null;
+    liftPad?.dispose();
+    liftPad = null;
+  }
+
+  function plantLiftPad(pose) {
+    dropLiftPad();
+    const pad = MeshBuilder.CreateBox("coaster-lift-pad", { width: LIFT_WIDE, height: 0.18, depth: LIFT_DEEP }, scene);
+    pad.position.set(OX + pose.x, OY + pose.y - 0.09, OZ + pose.z);
+    pad.rotation.y = pose.heading;
+    pad.isVisible = false;
+    pad.isPickable = false;
+    pad.computeWorldMatrix(true);
+    const shape = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(LIFT_WIDE, 0.18, LIFT_DEEP), scene);
+    shape.material = { friction: 0.92, restitution: 0 };
+    const body = new PhysicsBody(pad, PhysicsMotionType.STATIC, false, scene);
+    body.shape = shape;
+    body.setMassProperties({ mass: 0 });
+    body.disablePreStep = true;
+    liftPad = pad;
+    liftBody = body;
+  }
+
+  /** Where the mover waits. On the deck when the build cap is up there, otherwise beside the cap. */
+  function parkMover(at) {
+    if (liftOn) return;
+    const pose = at ?? (spot && spot.y > 1.2 ? moverBoard() : liftDock());
+    moverAt = pose;
+    placeLift(pose);
+    plantLiftPad(pose);
+  }
+
+  function parkLift() {
+    parkMover();
+  }
+
+  /** Hollywood, New York, or Lava: the yard sky if it is one of those, otherwise the start-menu background. */
+  function chosenBackdrop() {
+    const sky = upgrades.sky;
+    if (sky === "hollywood" || sky === "newyork" || sky === "lava") return sky;
+    try {
+      const data = JSON.parse(localStorage.getItem(PLAYER_KEY) ?? "{}");
+      if (data.background === "newyork" || data.background === "lava") return data.background;
+    } catch {
+      // A broken preference just shows the sunset city.
+    }
+    return "hollywood";
+  }
+
+  /** Standing in the car or at its doors, on the floor the car is parked at. */
+  function nearCar(lift, x, y, z) {
+    if (!lift) return false;
+    const y0 = lift.floorY + lift.level * LIFT_FLOOR;
+    if (Math.abs(y - y0) > 1.8) return false;
+    const inside = lift.inside();
+    const door = lift.doorSpot();
+    return (x - inside.x) ** 2 + (z - inside.z) ** 2 < 11.6 || (x - door.x) ** 2 + (z - door.z) ** 2 < 6.8;
+  }
+
+  /** Up at the bottom, Down at the top. From the bot stop, the way toward the platform wins. */
+  function liftChoice(lift, bot) {
+    if (!bot) return lift.level > 0 ? "liftDown" : "liftUp";
+    const landY = botRide.land.y;
+    if (lift.level <= 0 && landY < -1.5) return "liftUp";
+    if (lift.level <= 0 && landY > 1.5) return "liftDown";
+    return lift.level > 0 ? "liftDown" : "liftUp";
+  }
+
+  /** Close the doors and carry the player to the other stop. `dir` is 1 up, -1 down. */
+  function beginFloorRide(dir) {
+    if (riding || homeOn || !lastFoot.known) return false;
+    const { x, y, z } = lastFoot;
+    const botLift = botRide?.elevator ?? null;
+    const lift = botLift && nearCar(botLift, x, y, z) ? botLift : nearCar(yardLift, x, y, z) ? yardLift : null;
+    if (!lift) return false;
+    const bot = lift === botLift;
+    const landY = bot ? botRide.land.y : 0;
+    const at = lift.level;
+    let toLevel = at;
+    let arriveHome = false;
+    if (dir > 0) {
+      if (at >= 1) return false;
+      if (bot && landY < -1.5) arriveHome = true;
+      else toLevel = 1;
+    } else if (bot && at === 0 && landY > 1.5) {
+      arriveHome = true;
+    } else if (bot && at >= 1 && landY <= 1.5) {
+      // The yard platform is below this upper floor, so Down finishes there.
+      arriveHome = true;
+    } else if (at <= 0) {
+      return false;
+    } else {
+      toLevel = 0;
+    }
+    const into = lift.inside();
+    const fromY = lift.floorY + at * LIFT_FLOOR;
+    const toY = arriveHome ? 0 : lift.floorY + toLevel * LIFT_FLOOR;
+    const span = Math.abs(toY - fromY);
+    liftTrip = {
+      lift,
+      x: into.x,
+      z: into.z,
+      heading: into.heading,
+      fromX: x,
+      fromZ: z,
+      fromY,
+      toY,
+      toLevel,
+      arriveHome,
+      t: 0,
+      duration: Math.min(3.6, Math.max(1.7, 0.65 + span / 9)),
+    };
+    homeOn = true;
+    return true;
+  }
+}
+
+/**
+ * Open observation car. No roof, and the sides are clear glass, so the sky stays visible.
+ * The -z side is the entrance, which faces back along the catwalk when the car is parked.
+ */
+function buildLiftCar(scene, mats) {
+  const root = new TransformNode("coaster-elevator", scene);
+  const wide = LIFT_WIDE;
+  const deep = LIFT_DEEP;
+  const floor = MeshBuilder.CreateBox("coaster-lift-floor", { width: wide, height: 0.16, depth: deep }, scene);
+  floor.parent = root;
+  floor.position.y = -0.08;
+  floor.material = mats.pink;
+  floor.isPickable = false;
+
+  const glass = new StandardMaterial("coaster-lift-glass", scene);
+  glass.diffuseColor = Color3.FromHexString("#ffe4f0");
+  glass.emissiveColor = Color3.FromHexString("#ffd0e4").scale(0.35);
+  glass.specularColor = new Color3(0.25, 0.25, 0.28);
+  glass.alpha = 0.14;
+  glass.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  glass.backFaceCulling = false;
+
+  const panel = (name, w, h, d, x, y, z) => {
+    const mesh = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+    mesh.parent = root;
+    mesh.position.set(x, y, z);
+    mesh.material = glass;
+    mesh.isPickable = false;
+    return mesh;
+  };
+  const rail = (name, w, h, d, x, y, z) => {
+    const mesh = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+    mesh.parent = root;
+    mesh.position.set(x, y, z);
+    mesh.material = mats.cream;
+    mesh.isPickable = false;
+    return mesh;
+  };
+  // Back and sides only. Looking through them, and up past the rails, is open sky.
+  panel("coaster-lift-glass-back", wide - 0.12, 1.35, 0.04, 0, 0.78, deep / 2 - 0.05);
+  panel("coaster-lift-glass-left", 0.04, 1.35, deep - 0.12, -(wide / 2) + 0.05, 0.78, 0.04);
+  panel("coaster-lift-glass-right", 0.04, 1.35, deep - 0.12, wide / 2 - 0.05, 0.78, 0.04);
+  rail("coaster-lift-rail-back", wide, 0.08, 0.08, 0, 1.05, deep / 2 - 0.04);
+  rail("coaster-lift-rail-left", 0.08, 0.08, deep, -(wide / 2) + 0.04, 1.05, 0);
+  rail("coaster-lift-rail-right", 0.08, 0.08, deep, wide / 2 - 0.04, 1.05, 0);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const post = MeshBuilder.CreateCylinder("coaster-lift-post", { height: 1.15, diameter: 0.08, tessellation: 8 }, scene);
+    post.parent = root;
+    post.position.set(x * (wide / 2 - 0.06), 0.57, z * (deep / 2 - 0.06));
+    post.material = mats.cream;
+    post.isPickable = false;
+  }
+  const ring = MeshBuilder.CreateTorus("coaster-lift-ring", { diameter: 1.15, thickness: 0.045, tessellation: 28 }, scene);
+  ring.parent = root;
+  ring.position.y = 0.02;
+  ring.rotation.x = Math.PI / 2;
+  ring.material = mats.gold;
+  ring.isPickable = false;
+  // The open side is -z. The Up sign faces the player standing at the entrance.
+  makeSign(scene, root, "coaster-mover-up", t("coaster.moverUp"), 0, 1.15, -(deep / 2 + 0.04), 0, 0.72, 0.38, "#3a2433", "#ffe0b0");
+  return { root, glass };
+}
+
+/** Marble, steel, plants, and the three skies the window can show. Shared by both elevators. */
+function createLiftLook(scene) {
+  const marbleTex = new DynamicTexture("coaster-marble", { width: 128, height: 128 }, scene, true);
+  const mctx = marbleTex.getContext();
+  mctx.fillStyle = "#5a463e";
+  mctx.fillRect(0, 0, 128, 128);
+  mctx.strokeStyle = "#8d766c";
+  mctx.lineWidth = 3;
+  for (let i = 0; i < 12; i += 1) {
+    mctx.beginPath();
+    mctx.moveTo(0, (i * 18) % 128);
+    mctx.bezierCurveTo(36, i * 9, 80, 24 + i * 7, 128, (i * 27) % 128);
+    mctx.stroke();
+  }
+  mctx.strokeStyle = "#3a2e2a";
+  mctx.lineWidth = 2;
+  for (let i = 0; i < 6; i += 1) {
+    mctx.beginPath();
+    mctx.moveTo((i * 22) % 128, 0);
+    mctx.bezierCurveTo(40 + i * 4, 40, 20, 80, (i * 30) % 128, 128);
+    mctx.stroke();
+  }
+  marbleTex.update();
+  const marble = new StandardMaterial("coaster-marble-mat", scene);
+  marble.diffuseTexture = marbleTex;
+  marble.diffuseColor = new Color3(0.62, 0.62, 0.62);
+  marble.emissiveColor = new Color3(0.08, 0.06, 0.05);
+  marble.specularColor = new Color3(0.22, 0.2, 0.18);
+
+  const perfTex = new DynamicTexture("coaster-perf", { width: 64, height: 64 }, scene, true);
+  const pctx = perfTex.getContext();
+  pctx.fillStyle = "#3c414a";
+  pctx.fillRect(0, 0, 64, 64);
+  pctx.fillStyle = "#1c1e24";
+  for (let y = 4; y < 64; y += 8) {
+    for (let x = 4; x < 64; x += 8) {
+      pctx.beginPath();
+      pctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      pctx.fill();
+    }
+  }
+  perfTex.update();
+  const perf = new StandardMaterial("coaster-perf-mat", scene);
+  perf.diffuseTexture = perfTex;
+  perf.emissiveTexture = perfTex;
+  perf.emissiveColor = new Color3(0.16, 0.17, 0.2);
+  perf.specularColor = new Color3(0.2, 0.2, 0.22);
+
+  const skies = {
+    hollywood: skyMaterial(scene, "coaster-win-hollywood", paintHollywoodSky(scene)),
+    newyork: skyMaterial(scene, "coaster-win-newyork", new Texture("/new-york.webp", scene, false, true)),
+    lava: skyMaterial(scene, "coaster-win-lava", paintLavaSky(scene)),
+  };
+
+  const steel = plainMaterial(scene, "coaster-lift-steel", "#c5ccd4", 0.28);
+  steel.specularColor = new Color3(0.62, 0.66, 0.7);
+  steel.specularPower = 48;
+  const steelDark = plainMaterial(scene, "coaster-lift-steel-dark", "#8e969e", 0.16);
+  const warm = plainMaterial(scene, "coaster-lift-warm", "#ffe0b0", 0.9);
+  const glass = new StandardMaterial("coaster-lift-window", scene);
+  glass.diffuseColor = new Color3(0.85, 0.9, 0.95);
+  glass.emissiveColor = new Color3(0.15, 0.16, 0.18);
+  glass.alpha = 0.12;
+  glass.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  glass.backFaceCulling = false;
+
+  return {
+    marble,
+    marbleGray: plainMaterial(scene, "coaster-lift-marble-gray", "#8a8178", 0.12),
+    perf,
+    steel,
+    steelDark,
+    pale: plainMaterial(scene, "coaster-lift-pale", "#e4e1da", 0.16),
+    floorDark: plainMaterial(scene, "coaster-lift-floor", "#2a2c30", 0.04),
+    stone: plainMaterial(scene, "coaster-lift-stone", "#c4b09a", 0.14),
+    wood: plainMaterial(scene, "coaster-lift-wood", "#5c4032", 0.08),
+    trim: plainMaterial(scene, "coaster-lift-trim", "#b7bdc6", 0.2),
+    ink: plainMaterial(scene, "coaster-lift-ink", "#2a2422", 0.05),
+    leaf: plainMaterial(scene, "coaster-lift-leaf", "#2f6b45", 0.12),
+    pot: plainMaterial(scene, "coaster-lift-pot", "#241e1c", 0.05),
+    warm,
+    glass,
+    skies,
+  };
+}
+
+function skyMaterial(scene, name, texture) {
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+  const material = new StandardMaterial(name, scene);
+  material.diffuseColor = Color3.Black();
+  material.emissiveTexture = texture;
+  material.emissiveColor = Color3.White();
+  material.specularColor = Color3.Black();
+  material.disableLighting = true;
+  material.backFaceCulling = false;
+  material.fogEnabled = false;
+  return material;
+}
+
+function paintHollywoodSky(scene) {
+  const texture = new DynamicTexture("coaster-hollywood-sky", { width: 256, height: 256 }, scene, true);
+  const ctx = texture.getContext();
+  const g = ctx.createLinearGradient(0, 256, 0, 0);
+  g.addColorStop(0, "#4a2030");
+  g.addColorStop(0.22, "#d15b72");
+  g.addColorStop(0.4, "#ffc6aa");
+  g.addColorStop(0.55, "#ffd4c6");
+  g.addColorStop(0.75, "#ffb7c9");
+  g.addColorStop(1, "#ffe0bf");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = "#c4a090";
+  ctx.beginPath();
+  ctx.ellipse(128, 196, 150, 34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  [[28, 70], [58, 98], [92, 62], [128, 112], [166, 76], [200, 90], [230, 64]].forEach(([x, bh], i) => {
+    ctx.fillStyle = i % 2 ? "#f3e2d2" : "#e7cfc6";
+    ctx.fillRect(x, 190 - bh, 22, bh);
+    ctx.fillStyle = "#c45a48";
+    ctx.fillRect(x - 2, 186 - bh, 26, 8);
+  });
+  texture.update();
+  return texture;
+}
+
+function paintLavaSky(scene) {
+  const texture = new DynamicTexture("coaster-lava-sky", { width: 256, height: 256 }, scene, true);
+  const ctx = texture.getContext();
+  const g = ctx.createLinearGradient(0, 256, 0, 0);
+  g.addColorStop(0, "#1e0608");
+  g.addColorStop(0.28, "#5a1420");
+  g.addColorStop(0.42, "#d8565a");
+  g.addColorStop(0.52, "#ffb08a");
+  g.addColorStop(0.7, "#ffc6dd");
+  g.addColorStop(1, "#7fb0ff");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = "#ffb08a";
+  for (let i = 0; i < 8; i += 1) ctx.fillRect(16 + i * 30, 198 + (i % 3) * 8, 16, 3);
+  texture.update();
+  return texture;
+}
+
+/**
+ * Lobby outside (marble, steel doors, two plants) and a windowed car inside.
+ * `floorPhysics` is for the bot-coaster stop, which is not standing on the deck.
+ * Local +z is the door side. The window is the back wall.
+ */
+function buildElevator(scene, look, name, x, y, z, yaw, floorPhysics) {
+  const root = new TransformNode(name, scene);
+  root.position.set(x, y, z);
+  root.rotation.y = yaw;
+  root.computeWorldMatrix(true);
+  const wide = LOBBY_WIDE;
+  const deep = LOBBY_DEEP;
+  const tall = LOBBY_TALL;
+  const baseY = y;
+  const piece = (id, w, h, d, px, py, pz, material, { solid = false, block = false } = {}) => {
+    const mesh = MeshBuilder.CreateBox(`${name}-${id}`, { width: w, height: h, depth: d }, scene);
+    mesh.parent = root;
+    mesh.position.set(px, py, pz);
+    mesh.material = material;
+    mesh.isPickable = false;
+    if (block) mesh.metadata = { blocksCamera: true };
+    if (solid) addStatic(scene, mesh, w, h, d);
+    return mesh;
+  };
+  if (floorPhysics) piece("floor-hit", wide, 0.24, deep, 0, -0.12, 0, look.floorDark, { solid: true });
+  piece("floor", wide - 0.16, 0.04, deep - 0.16, 0, 0.03, -0.05, look.floorDark);
+  piece("apron", wide + 0.6, 0.04, 1.6, 0, 0.02, deep / 2 + 0.85, look.stone);
+  const sideW = wide / 2 - 1.12;
+  piece("front-l", sideW, tall, 0.16, -(1.12 + sideW / 2), tall / 2, deep / 2 - 0.08, look.marble, { solid: true, block: true });
+  piece("front-r", sideW, tall, 0.16, 1.12 + sideW / 2, tall / 2, deep / 2 - 0.08, look.marble, { solid: true, block: true });
+  piece("side-l", 0.14, tall, deep, -wide / 2 + 0.07, tall / 2, 0, look.pale, { solid: true, block: true });
+  piece("side-r", 0.14, tall, deep, wide / 2 - 0.07, tall / 2, 0, look.marbleGray, { solid: true, block: true });
+  piece("sill", wide - 0.2, 1.22, 0.16, 0, 0.61, -deep / 2 + 0.08, look.perf, { solid: true, block: true });
+  piece("header", wide, tall - 4.7, 0.16, 0, (4.7 + tall) / 2, -deep / 2 + 0.08, look.marble, { solid: true, block: true });
+  piece("ceiling", wide, 0.1, deep, 0, tall - 0.05, 0, look.pale, { block: true });
+  piece("perf-l", 0.04, 1.12, deep - 0.5, -wide / 2 + 0.18, 0.6, 0, look.perf);
+  piece("perf-r", 0.04, 1.12, deep - 0.5, wide / 2 - 0.18, 0.6, 0, look.perf);
+  piece("rail-back", wide - 0.6, 0.06, 0.06, 0, 1.12, -deep / 2 + 0.32, look.trim);
+  piece("rail-l", 0.06, 0.06, deep - 0.9, -wide / 2 + 0.3, 1.12, -0.1, look.trim);
+  piece("rail-r", 0.06, 0.06, deep - 0.9, wide / 2 - 0.3, 1.12, -0.1, look.trim);
+  piece("door-2", 1.15, 3.15, 0.06, -2.35, 1.62, deep / 2 + 0.02, look.steelDark);
+  for (let i = 0; i < 7; i += 1) {
+    piece(`slat-${i}`, 0.08, 3.4, 0.08, 1.72 + i * 0.16, 1.95, deep / 2 + 0.04, look.wood);
+  }
+  piece("panel", 0.16, 0.62, 0.05, 1.38, 1.4, deep / 2 + 0.06, look.ink);
+  piece("btn-a", 0.07, 0.07, 0.03, 1.38, 1.55, deep / 2 + 0.1, look.warm);
+  piece("btn-b", 0.07, 0.07, 0.03, 1.38, 1.22, deep / 2 + 0.1, look.warm);
+  const upSign = makeSign(scene, root, `${name}-up`, t("coaster.liftUpBtn"), 1.62, 1.55, deep / 2 + 0.16, 0, 0.42, 0.22, "#2a2422", "#ffe0b0");
+  const downSign = makeSign(scene, root, `${name}-down`, t("coaster.liftDownBtn"), 1.62, 1.22, deep / 2 + 0.16, 0, 0.42, 0.22, "#2a2422", "#ffe0b0");
+  piece("cove", 3.2, 0.08, 0.14, 0, tall - 0.32, deep / 2 - 0.32, look.warm);
+  piece("spot-a", 0.7, 0.05, 0.28, -1.05, tall - 0.16, -0.15, look.warm);
+  piece("spot-b", 0.7, 0.05, 0.28, 1.05, tall - 0.16, -0.15, look.warm);
+  const view = MeshBuilder.CreatePlane(`${name}-view`, { width: wide - 1.2, height: 3.35 }, scene);
+  view.parent = root;
+  view.position.set(0, 3.05, -deep / 2 + 0.16);
+  view.material = look.skies.hollywood;
+  view.isPickable = false;
+  view.applyFog = false;
+  const glass = MeshBuilder.CreatePlane(`${name}-glass`, { width: wide - 1.2, height: 3.35 }, scene);
+  glass.parent = root;
+  glass.position.set(0, 3.05, -deep / 2 + 0.22);
+  glass.material = look.glass;
+  glass.isPickable = false;
+  for (const fx of [-0.25, 0, 0.25]) {
+    piece("mullion", 0.06, 3.3, 0.05, fx * (wide - 1.5), 3.05, -deep / 2 + 0.28, look.trim);
+  }
+  const left = piece("door-l", 1.02, 3.15, 0.07, -0.52, 1.62, deep / 2 - 0.02, look.steel);
+  const right = piece("door-r", 1.02, 3.15, 0.07, 0.52, 1.62, deep / 2 - 0.02, look.steel);
+  const grow = (px, pz) => {
+    const pot = MeshBuilder.CreateCylinder(`${name}-pot`, { height: 0.5, diameter: 0.42, tessellation: 8 }, scene);
+    pot.parent = root;
+    pot.position.set(px, 0.28, pz);
+    pot.material = look.pot;
+    pot.isPickable = false;
+    const leaf = MeshBuilder.CreateSphere(`${name}-leaf`, { diameter: 0.72, segments: 8 }, scene);
+    leaf.parent = root;
+    leaf.position.set(px, 1.05, pz);
+    leaf.material = look.leaf;
+    leaf.isPickable = false;
+    const top = MeshBuilder.CreateSphere(`${name}-leaf-top`, { diameter: 0.5, segments: 8 }, scene);
+    top.parent = root;
+    top.position.set(px + 0.12, 1.48, pz);
+    top.material = look.leaf;
+    top.isPickable = false;
+  };
+  grow(-2.55, deep / 2 + 0.95);
+  grow(2.55, deep / 2 + 0.95);
+  const sign = makeSign(scene, root, `${name}-sign`, t("coaster.elevatorSign"), 0, tall - 0.55, deep / 2 + 0.14, 0, 2.4, 0.46, "#3a332f", "#fff8f2");
+  const upper = MeshBuilder.CreateBox(`${name}-upper`, { width: wide - 0.4, height: 0.22, depth: deep + 3 }, scene);
+  const shift = 1.35;
+  upper.position.set(x + Math.sin(yaw) * shift, y + LIFT_FLOOR - 0.11, z + Math.cos(yaw) * shift);
+  upper.rotation.y = yaw;
+  upper.material = look.stone;
+  upper.isPickable = false;
+  upper.computeWorldMatrix(true);
+  addStatic(scene, upper, wide - 0.4, 0.22, deep + 3);
+  const railZ = deep / 2 + 2.7;
+  const rail = MeshBuilder.CreateBox(`${name}-upper-rail`, { width: wide - 0.5, height: 0.9, depth: 0.12 }, scene);
+  rail.position.set(x + Math.sin(yaw) * railZ, y + LIFT_FLOOR + 0.45, z + Math.cos(yaw) * railZ);
+  rail.rotation.y = yaw;
+  rail.material = look.trim;
+  rail.isPickable = false;
+  rail.computeWorldMatrix(true);
+  addStatic(scene, rail, wide - 0.5, 0.9, 0.12);
+  const spot = (lz) => {
+    const wx = root.position.x + Math.sin(yaw) * lz;
+    const wz = root.position.z + Math.cos(yaw) * lz;
+    return { x: wx - OX, y: baseY - OY, z: wz - OZ, heading: yaw + Math.PI };
+  };
+  return {
+    root,
+    level: 0,
+    floorY: y - OY,
+    upperMeshes: [upper, rail],
+    owned: [...sign.owned, ...upSign.owned, ...downSign.owned],
+    setDoors(open) {
+      const o = Math.max(0, Math.min(1, open));
+      left.position.x = -0.52 - o * 0.7;
+      right.position.x = 0.52 + o * 0.7;
+    },
+    setRise(dy) {
+      root.position.y = baseY + dy;
+    },
+    showSky(id) {
+      view.material = look.skies[id] ?? look.skies.hollywood;
+    },
+    doorSpot() {
+      return spot(deep / 2);
+    },
+    inside() {
+      return spot(-0.45);
+    },
+  };
 }
 
 /**
@@ -950,12 +1825,13 @@ export function bindCoasterShop(coaster, { coins, blip, onCoins, onDone }) {
   const note = document.querySelector("#coaster-shop-note");
   const status = document.querySelector("#coaster-shop-status");
   const undo = document.querySelector("#coaster-undo");
+  const removeAll = document.querySelector("#coaster-remove-all");
   const badge = document.querySelector("#coaster-coins");
   const bar = document.querySelector("#coaster-tool");
   const barText = document.querySelector("#coaster-tool-text");
   const barGo = document.querySelector("#coaster-tool-go");
   const barCancel = document.querySelector("#coaster-tool-cancel");
-  if (!root || !list || !undo || !bar || !barText || !barGo || !barCancel) {
+  if (!root || !list || !undo || !removeAll || !bar || !barText || !barGo || !barCancel) {
     return { get open() { return false; }, show() {}, close() {}, tick() {} };
   }
   let open = false;
@@ -1078,6 +1954,8 @@ export function bindCoasterShop(coaster, { coins, blip, onCoins, onDone }) {
     undo.hidden = !building;
     undo.disabled = coaster.partsAdded <= 0 || coaster.riding;
     undo.textContent = `🗑️ ${t("coaster.remove")}`;
+    removeAll.disabled = coaster.partsAdded <= 0 || coaster.riding;
+    removeAll.textContent = `🗑️ ${t("coaster.removeAll")}`;
   }
 
   function setOpen(next, nextMode = mode) {
@@ -1097,6 +1975,21 @@ export function bindCoasterShop(coaster, { coins, blip, onCoins, onDone }) {
   undo.addEventListener("click", () => {
     if (!coaster.startRemoving()) return;
     setOpen(false);
+    showBar();
+  });
+  removeAll.addEventListener("click", () => {
+    if (coaster.riding) return;
+    const result = coaster.removeAll();
+    if (!result) {
+      paint(t("coaster.removeAllNone"));
+      return;
+    }
+    if (result.coins > 0) refundCoins(coins, result.coins);
+    onCoins?.();
+    blip?.("thump");
+    const message = t("coaster.removedAll").replace("{n}", String(result.count)).replace("{coins}", String(result.coins));
+    paint(message);
+    onDone?.(message, null);
     showBar();
   });
   window.addEventListener("keydown", (event) => {
@@ -1194,15 +2087,25 @@ function lerpAngle(from, to, t) {
   return from + delta * t;
 }
 
+function measurePoints(list) {
+  const curve = [0];
+  for (let i = 1; i < list.length; i += 1) {
+    const a = list[i - 1];
+    const b = list[i];
+    curve.push(curve[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+  }
+  return { dist: curve, length: curve[curve.length - 1] || 0 };
+}
+
 /**
  * Rail points, plus the catwalk's center line: one node per piece end (tagged with its piece), and
  * the arc on turns. Straight-up towers and straight-down drops add a spiral beside the rails.
  * `joints[k]` is where piece k starts, and the last one is the track end. `spans[k]` is the first
  * and last point of piece k.
  */
-function buildTrack(ids) {
+export function buildTrack(ids) {
   const pose = { x: 0, y: RAIL_Y, z: 12.2, heading: 0 };
-  const points = [{ x: pose.x, y: pose.y, z: pose.z, heading: pose.heading, pitch: 0 }];
+  const points = [{ x: pose.x, y: pose.y, z: pose.z, heading: pose.heading, pitch: 0, pace: 1 }];
   const walk = [{ x: 0, y: RAIL_Y, z: WALK_START_Z, heading: 0, piece: 0 }];
   const joints = [{ ...pose }];
   const spans = [];
@@ -1213,9 +2116,11 @@ function buildTrack(ids) {
     spans.push([from - 1, points.length - 1]);
     joints.push({ ...pose });
     if (id === "up" || id === "down") appendUpWalk(walk, started, pose, piece);
+    else if (id === "immel") appendImmelWalk(walk, started, pose, piece);
     else {
-      // Hills and loops end at the height they started, so the catwalk runs level past them.
-      const nodes = id === "left" || id === "right" ? points.slice(from) : points.slice(-1);
+      // Hills, loops, and the other elements that finish near their own height get one
+      // straight catwalk to the end. A helix has to be followed, or the walk would cut the spiral.
+      const nodes = id === "left" || id === "right" || id === "helix" ? points.slice(from) : points.slice(-1);
       for (const node of nodes) walk.push({ x: node.x, y: node.y, z: node.z, heading: node.heading, piece });
     }
   });
@@ -1266,14 +2171,21 @@ function appendPiece(id, pose, points) {
   else if (id === "loop") appendLoop(points, pose);
   else if (id === "left") appendTurn(points, pose, -1);
   else if (id === "right") appendTurn(points, pose, 1);
+  else if (id === "bunny") appendHill(points, pose, 8, 2.2);
+  else if (id === "helix") appendHelix(points, pose);
+  else if (id === "cork") appendCorkscrew(points, pose);
+  else if (id === "zerog") appendZeroG(points, pose);
+  else if (id === "immel") appendImmelmann(points, pose);
+  else if (id === "cobra") appendCobra(points, pose);
+  else if (id === "brake") appendBrake(points, pose);
 }
 
-function pushPoint(points, x, y, z, heading) {
+function pushPoint(points, x, y, z, heading, pace = 1) {
   const prev = points[points.length - 1];
   const dy = y - prev.y;
   const horiz = Math.hypot(x - prev.x, z - prev.z);
   if (horiz < 0.04 && Math.abs(dy) < 0.04) return;
-  points.push({ x, y, z, heading, pitch: Math.atan2(dy, Math.max(0.001, horiz)) });
+  points.push({ x, y, z, heading, pitch: Math.atan2(dy, Math.max(0.001, horiz)), pace });
 }
 
 function takeEnd(points, pose) {
@@ -1284,7 +2196,7 @@ function takeEnd(points, pose) {
   pose.heading = end.heading;
 }
 
-function appendLine(points, pose, length, rise) {
+function appendLine(points, pose, length, rise, pace = 1) {
   const steps = Math.max(2, Math.round(length / STEP));
   const y1 = Math.min(RAIL_MAX, Math.max(RAIL_MIN, pose.y + rise));
   for (let i = 1; i <= steps; i += 1) {
@@ -1295,6 +2207,7 @@ function appendLine(points, pose, length, rise) {
       pose.y + (y1 - pose.y) * t,
       pose.z + Math.cos(pose.heading) * length * t,
       pose.heading,
+      pace,
     );
   }
   takeEnd(points, pose);
@@ -1302,6 +2215,10 @@ function appendLine(points, pose, length, rise) {
 
 /** How tall a straight-up tower tries to be, before the rail ceiling. */
 const UP_RISE = 72;
+/** Straight down. The mild Drop falls 4.6. This shaft is a long vertical fall. */
+const DOWN_DROP = 48;
+/** Lowest a straight-down piece may reach, well under the usual rail floor. */
+const DOWN_FLOOR = -64;
 /** Crawl speed on a near-vertical climb. Downhill still uses the boost in rideSpeed. */
 const CLIMB_CRAWL = 2.8;
 /** Forward drift so each span stays a real segment. Small enough that the tower still looks vertical. */
@@ -1311,16 +2228,18 @@ const UP_SLOPE = 28 * Math.PI / 180;
 /** Least rise between stacked loops, so a rail doesn't poke through the deck above it. */
 const UP_CLEAR = 1.45;
 
-/** Pace along the rails. Downhill speeds up; a near-vertical climb crawls. */
-function rideSpeed(pitch, dir) {
+/** Pace along the rails. Downhill speeds up; a near-vertical climb crawls. Brake runs pass a pace under 1. */
+function rideSpeed(pitch, dir, pace = 1) {
   const slope = -Math.sin(pitch) * dir;
-  const speed = Math.min(20, 9 + Math.max(0, slope) * 8);
+  let speed = Math.min(20, 9 + Math.max(0, slope) * 8);
   // Hills and the shallow climb stay under 80°. A straight-up tower, and the ride back up a
   // straight drop, sit past 88° and crawl instead of shooting up the wall.
   const climbing = (dir > 0 && pitch > 80 * Math.PI / 180) || (dir < 0 && pitch < -80 * Math.PI / 180);
-  if (!climbing) return speed;
-  const steep = Math.min(1, (Math.abs(pitch) - 80 * Math.PI / 180) / (8 * Math.PI / 180));
-  return speed + (CLIMB_CRAWL - speed) * steep;
+  if (climbing) {
+    const steep = Math.min(1, (Math.abs(pitch) - 80 * Math.PI / 180) / (8 * Math.PI / 180));
+    speed += (CLIMB_CRAWL - speed) * steep;
+  }
+  return speed * Math.min(1, Math.max(0.25, pace || 1));
 }
 
 function appendUp(points, pose) {
@@ -1342,9 +2261,9 @@ function appendUp(points, pose) {
   takeEnd(points, pose);
 }
 
-/** Rails go straight down, the mirror of the straight-up tower, until the rail floor. */
+/** A long straight drop, much farther than the mild Drop, then the next piece starts at the bottom. */
 function appendDown(points, pose) {
-  const target = Math.min(RAIL_MAX, Math.max(RAIL_MIN, pose.y - UP_RISE));
+  const target = Math.max(DOWN_FLOOR, pose.y - DOWN_DROP);
   const room = pose.y - target;
   // A shorter leftover would stack the catwalk closer than a person can stand.
   const drop = room >= UP_CLEAR ? room : 0;
@@ -1399,9 +2318,7 @@ function appendUpSpiral(walk, start, end, piece, rise, turns) {
   }
 }
 
-function appendHill(points, pose) {
-  const length = 14;
-  const peak = 5.6;
+function appendHill(points, pose, length = 14, peak = 5.6) {
   const steps = Math.max(2, Math.round(length / STEP));
   const y0 = pose.y;
   for (let i = 1; i <= steps; i += 1) {
@@ -1439,8 +2356,7 @@ function appendLoop(points, pose) {
   takeEnd(points, pose);
 }
 
-function appendTurn(points, pose, dir) {
-  const radius = 6;
+function appendTurn(points, pose, dir, radius = 6) {
   const steps = 12;
   const rx = Math.cos(pose.heading);
   const rz = -Math.sin(pose.heading);
@@ -1457,9 +2373,194 @@ function appendTurn(points, pose, dir) {
   takeEnd(points, pose);
 }
 
-function layTrack(scene, points, mats, trackMeshes) {
+/** How much a brake run slows the cart. 1 is a normal piece. */
+const BRAKE_PACE = 0.34;
+
+/** A long, slightly rising straight. Gold ties mark it, and the cart eases off. */
+function appendBrake(points, pose) {
+  const room = RAIL_MAX - pose.y;
+  appendLine(points, pose, 16, room >= 1.5 ? 1.3 : 0, BRAKE_PACE);
+}
+
+/**
+ * One turn of a descending spiral, off to the left of the catwalk. Near the rail floor it
+ * stops short of a full circle so it can't land on itself.
+ */
+function appendHelix(points, pose) {
+  const radius = 5.5;
+  const dropRoom = Math.max(0, pose.y - RAIL_MIN - 0.5);
+  const full = dropRoom >= 6.5;
+  const sweeps = full ? 1 : 0.75;
+  const drop = full ? Math.min(7.2, dropRoom) : Math.min(2.4, dropRoom);
+  const steps = Math.max(8, Math.round(28 * sweeps));
+  const dir = -1;
+  const rx = Math.cos(pose.heading);
+  const rz = -Math.sin(pose.heading);
+  const cx = pose.x + rx * radius * dir;
+  const cz = pose.z + rz * radius * dir;
+  const ox = pose.x - cx;
+  const oz = pose.z - cz;
+  const y0 = pose.y;
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const a = Math.PI * 2 * sweeps * t;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a) * dir;
+    pushPoint(
+      points,
+      cx + ox * cos + oz * sin,
+      y0 - drop * t,
+      cz - ox * sin + oz * cos,
+      pose.heading + dir * a,
+    );
+  }
+  takeEnd(points, pose);
+}
+
+/** A barrel roll stretched along the track. It leaves facing the same way, at the same height. */
+function appendCorkscrew(points, pose) {
+  const length = 12;
+  const radius = 2.15;
+  if (RAIL_MAX - pose.y < radius * 2 + 0.45) {
+    appendLine(points, pose, 8, 0);
+    return;
+  }
+  const steps = 32;
+  const fx = Math.sin(pose.heading);
+  const fz = Math.cos(pose.heading);
+  const right = lateral(pose.heading, 1);
+  const y0 = pose.y;
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const angle = t * Math.PI * 2;
+    const side = Math.sin(angle) * radius;
+    const lift = (1 - Math.cos(angle)) * radius;
+    pushPoint(
+      points,
+      pose.x + fx * length * t + right.x * side,
+      y0 + lift,
+      pose.z + fz * length * t + right.z * side,
+      pose.heading,
+    );
+  }
+  takeEnd(points, pose);
+}
+
+/** A hill with a roll over the crest. The ends meet the straight track. */
+function appendZeroG(points, pose) {
+  const length = 16;
+  const hill = 3.1;
+  const roll = 1.45;
+  if (RAIL_MAX - pose.y < hill + roll * 2 + 0.45) {
+    appendLine(points, pose, 8, 0);
+    return;
+  }
+  const steps = 36;
+  const fx = Math.sin(pose.heading);
+  const fz = Math.cos(pose.heading);
+  const right = lateral(pose.heading, 1);
+  const y0 = pose.y;
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const crest = Math.sin(t * Math.PI);
+    const angle = t * Math.PI * 2;
+    const side = Math.sin(angle) * roll * crest;
+    const lift = crest * hill + (1 - Math.cos(angle)) * roll * crest;
+    pushPoint(
+      points,
+      pose.x + fx * length * t + right.x * side,
+      y0 + lift,
+      pose.z + fz * length * t + right.z * side,
+      pose.heading,
+    );
+  }
+  takeEnd(points, pose);
+}
+
+/**
+ * Half a loop, leaned away from the catwalk, then a level quarter turn at the top.
+ * The exit sits off to the side so the walk up to it stays a gentle ramp.
+ */
+function appendImmelmann(points, pose) {
+  const radius = 3.1;
+  if (RAIL_MAX - pose.y < radius * 2 + 0.5) {
+    appendLine(points, pose, 8, 0);
+    return;
+  }
+  const steps = 22;
+  const fx = Math.sin(pose.heading);
+  const fz = Math.cos(pose.heading);
+  const right = lateral(pose.heading, 1);
+  const y0 = pose.y;
+  const h0 = pose.heading;
+  for (let i = 1; i <= steps; i += 1) {
+    const theta = Math.PI * (i / steps);
+    const slide = -4.2 * (1 - Math.cos(theta)) / 2;
+    pushPoint(
+      points,
+      pose.x + fx * radius * Math.sin(theta) + right.x * slide,
+      y0 + radius * (1 - Math.cos(theta)),
+      pose.z + fz * radius * Math.sin(theta) + right.z * slide,
+      h0 + theta,
+    );
+  }
+  takeEnd(points, pose);
+  appendTurn(points, pose, 1, 8.6);
+}
+
+/**
+ * The exit sits up and off to the side. A straight plank from the entrance would cut
+ * through the half loop, so the catwalk climbs forward first, clear of the rails,
+ * then crosses over to the exit at the top.
+ */
+function appendImmelWalk(walk, start, end, piece) {
+  const rise = end.y - start.y;
+  const run = Math.max(4, Math.abs(rise) / Math.tan(UP_SLOPE));
+  walk.push({
+    x: start.x + Math.sin(start.heading) * run,
+    y: end.y,
+    z: start.z + Math.cos(start.heading) * run,
+    heading: start.heading,
+    piece,
+  });
+  walk.push({ x: end.x, y: end.y, z: end.z, heading: end.heading, piece });
+}
+
+/** Two hills that swing out to either side, then rejoin the line facing the way you came in. */
+function appendCobra(points, pose) {
+  const length = 14;
+  const peak = 3.5;
+  const sway = 3.1;
+  if (RAIL_MAX - pose.y < peak + 0.45) {
+    appendLine(points, pose, 8, 0);
+    return;
+  }
+  const steps = 40;
+  const fx = Math.sin(pose.heading);
+  const fz = Math.cos(pose.heading);
+  const right = lateral(pose.heading, 1);
+  const y0 = pose.y;
+  const h0 = pose.heading;
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const theta = t * Math.PI * 2;
+    const wave = Math.sin(theta);
+    const heading = h0 + (Math.PI * (1 - Math.cos(theta))) / 2;
+    pushPoint(
+      points,
+      pose.x + fx * length * t + right.x * sway * wave,
+      y0 + peak * wave * wave,
+      pose.z + fz * length * t + right.z * sway * wave,
+      heading,
+    );
+  }
+  takeEnd(points, pose);
+}
+
+function layTrack(scene, points, mats, trackMeshes, railMat = mats.rail) {
   const rails = [];
   const ties = [];
+  const brakes = [];
   const poles = [];
   for (let i = 0; i < points.length - 1; i += 1) {
     const a = points[i];
@@ -1470,6 +2571,9 @@ function layTrack(scene, points, mats, trackMeshes) {
     span(scene, rails, 0.14, 0.1, a.x - aSide.x, a.y + 0.08, a.z - aSide.z, b.x - bSide.x, b.y + 0.08, b.z - bSide.z);
     if (i % 2 === 0) {
       span(scene, ties, 1.2, 0.08, a.x - aSide.x, a.y, a.z - aSide.z, a.x + aSide.x, a.y, a.z + aSide.z);
+      if ((a.pace ?? 1) < 0.75) {
+        span(scene, brakes, 0.72, 0.07, a.x - aSide.x * 0.55, a.y + 0.18, a.z - aSide.z * 0.55, a.x + aSide.x * 0.55, a.y + 0.18, a.z + aSide.z * 0.55);
+      }
     }
     if (i % 5 === 0 && !onDeck(a)) {
       const hang = 4.8;
@@ -1479,8 +2583,9 @@ function layTrack(scene, points, mats, trackMeshes) {
       poles.push(pole);
     }
   }
-  adopt(scene, "coaster-rails", rails, mats.rail, trackMeshes);
+  adopt(scene, "coaster-rails", rails, railMat, trackMeshes);
   adopt(scene, "coaster-ties", ties, mats.tie, trackMeshes);
+  adopt(scene, "coaster-brakes", brakes, mats.gold, trackMeshes);
   adopt(scene, "coaster-poles", poles, mats.pole, trackMeshes);
   const end = points[points.length - 1];
   if (end) {
@@ -1494,8 +2599,8 @@ function layTrack(scene, points, mats, trackMeshes) {
 }
 
 /**
- * The catwalk out to the track end, with a flat cap past it to build from. Two arrow lanes share
- * the planks: toward the track they run out to the cap, and the outer lane runs back to the deck.
+ * The catwalk out to the track end, with a flat cap past it to build from. The inner lane runs
+ * out to the cap. Nothing at the end carries you back to the deck.
  * Floor and side rails are solid, so you can only fall off by jumping over a rail. Slopes are 30
  * degrees at most (climbs and drops), inside the player's slope limit.
  */
@@ -1564,12 +2669,7 @@ function layWalk(scene, lane, mats, beltLook) {
       posts.push(pole);
     }
   }
-  // A gate across the far end of the cap.
-  const last = lane[lane.length - 1];
-  const gate = new Vector3(last.x, last.y, last.z);
-  solid(gate.add(up.scale(WALK_RAIL / 2)), rotation, WALK_WIDTH, WALK_RAIL, 0.1);
-  bars.push(walkBox(scene, gate.add(up.scale(WALK_RAIL - 0.04)), rotation, WALK_WIDTH, 0.08, 0.1));
-  bars.push(walkBox(scene, gate.add(up.scale(WALK_RAIL * 0.5)), rotation, WALK_WIDTH, 0.06, 0.06));
+  // The far end is open onto the sky elevator. Its floor continues the cap.
 
   adopt(scene, "coaster-walk-floor", floors, mats.plank, meshes);
   adopt(scene, "coaster-belt-out", outStrips, beltLook.out, meshes);
