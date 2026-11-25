@@ -3248,6 +3248,27 @@ body.show-touch #coaster-place { bottom: calc(164px + env(safe-area-inset-bottom
   height: 100%;
 }
 
+.tower-map[data-place="eiffel"] {
+  width: 196px;
+  padding: 0 0 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.tower-map[data-place="eiffel"] > p:not(#tower-map-height),
+.tower-map[data-place="eiffel"] .tower-map-top {
+  display: none;
+}
+
+.tower-map[data-place="eiffel"] #tower-map-height {
+  color: white;
+  text-shadow: 0 1px 2px #152433, 0 0 4px #152433;
+}
+
+.tower-map[data-place="eiffel"] #tower-map-you {
+  left: 34%;
+}
+
 .tower-map[data-place="eiffel"] .tower-sil[data-shape="eiffel"],
 .tower-map[data-place="lighthouse"] .tower-sil[data-shape="lighthouse"],
 .tower-map[data-place="ice"] .tower-sil[data-shape="ice"],

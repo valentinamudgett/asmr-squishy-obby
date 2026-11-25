@@ -1,6 +1,10 @@
 import { Matrix, Vector3 } from "@babylonjs/core";
 
 const COINS_KEY = "asmr-squishy-obby:coins";
+/** coaster.js SAVE_KEY. Read here so a real yard is not treated as the old free gift. */
+const COASTER_KEY = "asmr-squishy-obby:coaster";
+/** coaster.js STARTER, in order. Pieces past this, or with n > 0, were bought. */
+const COASTER_STARTER = ["straight", "hill", "straight"];
 /** Coins paid the first time each level is reached. */
 export const LEVEL_COINS = 5;
 /** Paid once, the first time the climb reaches the rollercoaster. */
@@ -30,11 +34,13 @@ export function loadCoins() {
     const claimed = cleanClaimed(data.claimed);
     const coasterPurse = data.coasterPurse === true;
     // An earlier build topped every wallet up to 5,000 on launch and stamped `purse`.
-    // Give that starter gift back when the balance is still exactly 5,000 and checkpoint
-    // earnings are nowhere near it. Real balances above that, and the level-150 purse, stay.
+    // Take that gift back only while it is still untouched: exactly 5,000, checkpoint
+    // earnings under 500, and no coaster purchases. Five rides also land on 5,000, and
+    // parts, a longer track, or upgrades mean this balance may be real. If the yard
+    // save cannot be read, keep the coins. Saving below drops `purse`, so this runs once.
     if (data.purse === true && !coasterPurse && coins === COASTER_PURSE) {
       const earned = claimed.length * LEVEL_COINS;
-      if (earned < 500) coins = earned;
+      if (earned < 500 && coasterGiftUntouched()) coins = earned;
     }
     const state = { coins, claimed, coasterPurse };
     saveCoins(state);
@@ -88,6 +94,62 @@ export function topUpCoins(state, amount) {
   if (state.coins >= amount) return;
   state.coins = amount;
   saveCoins(state);
+}
+
+/**
+ * True only when the coaster save is missing or is still the free starter yard.
+ * Any bought part, extra track, or upgrade returns false so the 5,000 is kept.
+ * A save we cannot understand also returns false.
+ */
+function coasterGiftUntouched() {
+  let raw;
+  try {
+    raw = localStorage.getItem(COASTER_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) return true;
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  if (ownsCoasterParts(data.owned)) return false;
+  if (Array.isArray(data.extra) && data.extra.length > 0) return false;
+  if (!trackIsStarter(data.track)) return false;
+  if (hasCoasterUpgrades(data.upgrades)) return false;
+  return true;
+}
+
+function ownsCoasterParts(owned) {
+  if (owned == null) return false;
+  if (typeof owned !== "object" || Array.isArray(owned)) return true;
+  return Object.values(owned).some((value) => Number(value) > 0);
+}
+
+function trackIsStarter(track) {
+  if (!Array.isArray(track) || track.length !== COASTER_STARTER.length) return false;
+  return track.every((piece, index) => {
+    if (!piece || piece.id !== COASTER_STARTER[index]) return false;
+    const n = Number(piece.n);
+    return !Number.isFinite(n) || n <= 0;
+  });
+}
+
+function hasCoasterUpgrades(upgrades) {
+  if (upgrades == null) return false;
+  if (typeof upgrades !== "object" || Array.isArray(upgrades)) return true;
+  if (Number(upgrades.deck) > 0) return true;
+  if (typeof upgrades.cart === "string" && upgrades.cart !== "classic") return true;
+  if (Array.isArray(upgrades.carts) && upgrades.carts.some((id) => id && id !== "classic")) return true;
+  if (Array.isArray(upgrades.placed) && upgrades.placed.length > 0) return true;
+  if (typeof upgrades.sky === "string" && upgrades.sky !== "space") return true;
+  const decor = upgrades.decor;
+  if (decor == null) return false;
+  if (typeof decor !== "object" || Array.isArray(decor)) return true;
+  return Object.values(decor).some((value) => Number(value) > 0);
 }
 
 function cleanClaimed(value) {

@@ -57,7 +57,7 @@ import { SONGS } from "./songs.js";
 import { smoothstep } from "./geometry.js";
 import { createPlayer, FOOT_OFFSET, STAIR_RUN } from "./player.js";
 import { createPrison, FREEDOM_LEVEL, isPrisonLevel, PRISON_LEVEL } from "./prison.js";
-import { hairColorKey, isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, tryBuy } from "./rewards.js";
+import { hairColorKey, isOwned, itemKey, loadWallet, priceOf, SHOP_GROUPS, SHOP_ITEMS, tryBuy } from "./rewards.js";
 import { createShopkeepers } from "./shopkeepers.js";
 import { bindSocial } from "./social.js";
 import { createWorld } from "./world.js";
@@ -476,7 +476,8 @@ async function bootGame() {
   const preview = createPreview(document.querySelector("#preview"));
   preview.avatar.apply(look);
   bootProgress.set(0.92);
-  const syncMenuMusic = () => audio.setMenuMusic(ui.startOpen || ui.settingsOpen);
+  const syncMenuMusic = () =>
+    audio.setMenuMusic(ui.startOpen || ui.settingsOpen || yardShop.open || yardUpgrades.open || yardBots.open);
   bindSettings(
     preview,
     graphics,
@@ -741,6 +742,7 @@ async function bootGame() {
     yardShop.close();
     yardUpgrades.close();
     wingShop.close();
+    syncMenuMusic();
     if (tower.active) tower.leave();
   }
   function finishCoasterFade() {
@@ -795,6 +797,7 @@ async function bootGame() {
         nextToast = null;
       }
       else if (kind === "exit") beginCoasterFade("leave");
+      if (kind === "bots" || kind === "shop" || kind === "build" || kind === "decor") syncMenuMusic();
       return;
     }
     if (coasterGate) beginCoasterFade("enter");
@@ -1191,6 +1194,7 @@ async function bootGame() {
     yardShop.tick();
     yardBots.tick(dt);
     yardUpgrades.tick(dt, clock, ui.startOpen || ui.settingsOpen || yardShop.open || yardBots.open);
+    syncMenuMusic();
     coasterGate = !escape.active && !coaster.active && frame.grounded && coursePad?.role === "checkpoint" && coursePad.level === COASTER_LEVEL;
     const menus = ui.startOpen || ui.settingsOpen || yardShop.open || yardUpgrades.open || yardBots.open || wingShop.open;
     if (shooting.take() && !menus && !gameOver) escape.shoot();
@@ -1672,6 +1676,11 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
   const costumeBox = document.querySelector("#costumes");
   const bowButton = document.querySelector("#bow");
   const policeButton = document.querySelector("#police");
+  const accessoryButtons = [
+    ["necklace", document.querySelector("#necklace"), "accessory.necklaceOn", "accessory.necklaceOff"],
+    ["headband", document.querySelector("#headband"), "accessory.headbandOn", "accessory.headbandOff"],
+    ["bracelet", document.querySelector("#bracelet"), "accessory.braceletOn", "accessory.braceletOff"],
+  ];
   const heldBox = document.querySelector("#held");
   const qualityBox = document.querySelector("#quality");
 
@@ -1687,6 +1696,8 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
   };
 
   const canUse = (kind, id) => isOwned(wallet, itemKey(kind, id));
+  const accessorySold = (id) => SHOP_ITEMS.some((item) => item.key === itemKey("extra", id));
+  const accessoryOwned = (id) => !accessorySold(id) || canUse("extra", id);
   const lockTitle = (kind, id) => {
     const key = itemKey(kind, id);
     return canUse(kind, id) ? "" : `${t("shop.locked")} · ${coinCount(priceOf(key))}`;
@@ -1803,6 +1814,13 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
     look.bow = !look.bow;
     publish();
   });
+  for (const [id, button] of accessoryButtons) {
+    button.addEventListener("click", () => {
+      if (!accessoryOwned(id)) return;
+      look[id] = !look[id];
+      publish();
+    });
+  }
   policeButton.addEventListener("click", () => {
     look.police = !look.police;
     publish();
@@ -1843,6 +1861,9 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
   publish();
 
   function publish() {
+    for (const [id] of accessoryButtons) {
+      if (!accessoryOwned(id)) look[id] = false;
+    }
     saveLook(look);
     preview.avatar.apply(look);
     avatar.apply(look);
@@ -1898,6 +1919,15 @@ function bindSettings(preview, graphics, avatar, syncMenuMusic, onSong, onLook) 
     bowButton.title = bowOwned ? "" : lockTitle("extra", "bow");
     bowButton.setAttribute("aria-pressed", String(look.bow));
     bowButton.textContent = bowOwned ? (look.bow ? "Bow on" : "Bow off") : `${t("shop.bow")} · ${coinCount(priceOf("extra:bow"))}`;
+    for (const [id, button, onKey, offKey] of accessoryButtons) {
+      const owned = accessoryOwned(id);
+      button.disabled = !owned;
+      button.title = owned ? "" : lockTitle("extra", id);
+      button.setAttribute("aria-pressed", String(Boolean(look[id])));
+      button.textContent = owned
+        ? t(look[id] ? onKey : offKey)
+        : `${t("shop.locked")} · ${coinCount(priceOf(itemKey("extra", id)))}`;
+    }
     policeButton.setAttribute("aria-pressed", String(look.police));
     policeButton.textContent = look.police ? t("studio.policeOn") : t("studio.policeOff");
     document.querySelectorAll("#quality button").forEach((button) => {

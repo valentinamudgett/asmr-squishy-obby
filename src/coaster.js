@@ -475,7 +475,7 @@ export function createCoaster(scene) {
     get riding() {
       return riding;
     },
-    /** True while the yard is open for business and the regulars may ride. */
+    /** True while the yard is open for business. Regulars ride their own hill only while this is false. */
     get open() {
       return open;
     },
@@ -564,8 +564,8 @@ export function createCoaster(scene) {
       if (lane.length < 2) return false;
       const hit = projectLane(x - OX, y - OY, z - OZ);
       if (!hit || hit.before) return false;
-      // Guest feet sit about FOOT_OFFSET above the planks. The poles are the edges.
-      if (hit.vert > 1.35 || hit.vert < -0.45) return false;
+      // Feet stand on the planks, a few centimeters up. The poles are the edges.
+      if (hit.vert > 0.45 || hit.vert < -0.45) return false;
       if (hit.horiz > WALK_WIDTH * 0.55) return false;
       return true;
     },
@@ -758,13 +758,16 @@ export function createCoaster(scene) {
      * Your saved track is not replaced. Reaching the far end pays, same as your own ride.
      */
     rideBot(ids) {
-      if (!active || riding || liftOn || homeOn) return false;
+      if (!active || riding || homeOn) return false;
+      // A stale sky-car flag must not swallow the click. If they are actually in that car, it finishes first.
+      if (liftOn && aboardMover()) return false;
       const known = new Set(PARTS.map((part) => part.id));
       const parts = (Array.isArray(ids) ? ids : []).filter((id) => known.has(id));
       if (parts.length < 2) return false;
       const track = buildTrack(parts);
       const measured = measurePoints(track.points);
       if (measured.length < 4) return false;
+      cancelMover();
       clearBotRide();
       const shifted = track.points.map((point) => ({
         ...point,
@@ -839,6 +842,9 @@ export function createCoaster(scene) {
       }
       if (action === "ride") {
         if (riding || length < 4) return null;
+        // The car passing a station must not start a second ride. A stale trip is cancelled so it cannot resume.
+        if (liftOn && aboardMover()) return null;
+        cancelMover();
         clearBotRide();
         tool = null;
         showTool();
@@ -911,12 +917,9 @@ export function createCoaster(scene) {
         const done = liftS >= liftLen - 0.02;
         if (done) {
           liftOn = false;
-          const dock = liftDock();
-          moverAt = dock;
-          placeLift(dock);
-          plantLiftPad(dock);
-          liftPose.position.set(OX + spot.x, OY + spot.y + FOOT_OFFSET + 0.08, OZ + spot.z);
-          liftPose.heading = spot.heading;
+          parkMover();
+          liftPose.position.set(OX + LIFT_LAND.x, OY + FOOT_OFFSET + 0.08, OZ + LIFT_LAND.z);
+          liftPose.heading = 0;
         } else {
           liftPose.position.set(OX + pose.x, OY + pose.y + FOOT_OFFSET + 0.08, OZ + pose.z);
           liftPose.heading = pose.heading;
@@ -1020,7 +1023,7 @@ export function createCoaster(scene) {
         const pulse = 1 + Math.sin(time * 5) * 0.12;
         for (const ball of picks.joints) ball.scaling.setAll((ball.metadata.coasterJoint === tool.joint ? 1.35 : 1) * pulse);
       }
-      if (!active || riding || homeOn || liftOn || !foot) action = null;
+      if (!active || !foot) action = null;
       else {
         const x = foot.x - OX;
         const z = foot.z - OZ;
@@ -1029,14 +1032,18 @@ export function createCoaster(scene) {
         lastFoot.y = y;
         lastFoot.z = z;
         lastFoot.known = true;
-        const dx = x - spot.x;
-        const dz = z - spot.z;
-        if (Math.abs(y - spot.y) < 2.2 && dx * dx + dz * dz <= BUILD_REACH * BUILD_REACH) action = "build";
-        else action = y > -1.6 && y < 4 ? zoneAt(x, z) : null;
-        if (action === "business") action = open ? "closeBusiness" : "openBusiness";
-        if (botRide?.elevator && nearCar(botRide.elevator, x, y, z)) action = liftChoice(botRide.elevator, true);
-        else if (nearCar(yardLift, x, y, z)) action = liftChoice(yardLift, false);
-        else if (action !== "build" && canMoverUp() && onMover(x, y, z)) action = "moverUp";
+        // While the sky car is carrying you, ignore ride, shop, and bot prompts on the deck it has left.
+        if (riding || homeOn || liftOn) action = null;
+        else if (onMover(x, y, z)) action = "moverUp";
+        else {
+          const dx = x - spot.x;
+          const dz = z - spot.z;
+          if (Math.abs(y - spot.y) < 2.2 && dx * dx + dz * dz <= BUILD_REACH * BUILD_REACH) action = "build";
+          else action = y > -1.6 && y < 4 ? zoneAt(x, z) : null;
+          if (action === "business") action = open ? "closeBusiness" : "openBusiness";
+          if (botRide?.elevator && nearCar(botRide.elevator, x, y, z)) action = liftChoice(botRide.elevator, true);
+          else if (nearCar(yardLift, x, y, z)) action = liftChoice(yardLift, false);
+        }
       }
       return events.splice(0);
     },
@@ -1272,15 +1279,6 @@ function sampleLane(s) {
     };
   }
 
-  /** Deck pad, clear of the ride ring. Up boards here when the build cap is above the deck. */
-  function moverBoard() {
-    return { x: LIFT_LAND.x, y: 0, z: LIFT_LAND.z, heading: 0 };
-  }
-
-  function canMoverUp() {
-    return Boolean(moverAt && spot && spot.y > moverAt.y + 1.2);
-  }
-
   function onMover(x, y, z) {
     if (!moverAt || Math.abs(y - moverAt.y) > 0.8) return false;
     const cos = Math.cos(moverAt.heading);
@@ -1292,17 +1290,39 @@ function sampleLane(s) {
     return Math.abs(lx) <= LIFT_WIDE * 0.48 && Math.abs(lz) <= LIFT_DEEP * 0.48;
   }
 
+  /** True when the sky car is moving and the player's feet are still in it. */
+  function aboardMover() {
+    if (!liftOn || !lastFoot.known) return false;
+    const pose = sampleLift(liftS);
+    const dx = lastFoot.x - pose.x;
+    const dy = lastFoot.y - pose.y;
+    const dz = lastFoot.z - pose.z;
+    return dx * dx + dy * dy + dz * dz <= 9;
+  }
+
+  /** Drop a sky-car trip and put the car back at the end of the catwalk. */
+  function cancelMover() {
+    if (!liftOn) return;
+    liftOn = false;
+    liftS = 0;
+    parkMover();
+  }
+
   /**
-   * Rise from the pad to the build-cap height, then slide over onto the cap.
-   * The car stays up there with the player.
+   * From the real end of the built track: up into the sky, across the whole
+   * way back, then down onto the deck. A longer coaster is a longer cruise.
    */
   function beginMoverUp() {
-    if (riding || homeOn || liftOn || !canMoverUp()) return false;
-    const from = moverAt;
-    const top = { x: from.x, y: spot.y, z: from.z };
-    const end = { x: spot.x, y: spot.y, z: spot.z };
-    liftPts = [{ x: from.x, y: from.y, z: from.z }, top];
-    if (Math.hypot(end.x - top.x, end.z - top.z) > 0.35) liftPts.push(end);
+    if (riding || homeOn || liftOn || !moverAt) return false;
+    const from = liftDock();
+    const peak = Math.max(from.y, 0) + LIFT_SKY;
+    const land = { x: LIFT_LAND.x, y: 0, z: LIFT_LAND.z };
+    liftPts = [
+      { x: from.x, y: from.y, z: from.z },
+      { x: from.x, y: peak, z: from.z },
+      { x: land.x, y: peak, z: land.z },
+      land,
+    ];
     liftDist = [0];
     for (let i = 1; i < liftPts.length; i += 1) {
       const a = liftPts[i - 1];
@@ -1376,10 +1396,10 @@ function sampleLane(s) {
     liftBody = body;
   }
 
-  /** Where the mover waits. On the deck when the build cap is up there, otherwise beside the cap. */
+  /** The car waits just past the current end. Adding or removing a part moves it. */
   function parkMover(at) {
     if (liftOn) return;
-    const pose = at ?? (spot && spot.y > 1.2 ? moverBoard() : liftDock());
+    const pose = at ?? liftDock();
     moverAt = pose;
     placeLift(pose);
     plantLiftPad(pose);
@@ -2545,15 +2565,17 @@ function appendCobra(points, pose) {
     const t = i / steps;
     const theta = t * Math.PI * 2;
     const wave = Math.sin(theta);
-    const heading = h0 + (Math.PI * (1 - Math.cos(theta))) / 2;
-    pushPoint(
-      points,
-      pose.x + fx * length * t + right.x * sway * wave,
-      y0 + peak * wave * wave,
-      pose.z + fz * length * t + right.z * sway * wave,
-      heading,
-    );
+    const x = pose.x + fx * length * t + right.x * sway * wave;
+    const y = y0 + peak * wave * wave;
+    const z = pose.z + fz * length * t + right.z * sway * wave;
+    const prev = points[points.length - 1];
+    // Heading is the way this sample actually moves, so the rails stay under the wheels.
+    const heading = Math.atan2(x - prev.x, z - prev.z);
+    pushPoint(points, x, y, z, heading);
   }
+  // The side sway is still sliding as the line rejoins, but the exit has always faced h0.
+  const end = points[points.length - 1];
+  if (end) end.heading = h0;
   takeEnd(points, pose);
 }
 

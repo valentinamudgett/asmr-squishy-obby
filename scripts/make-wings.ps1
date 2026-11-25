@@ -26,8 +26,9 @@ public static class WingPhotoMaker {
         if (seen[i]) return;
         int p = y * stride + x * 4;
         int b = bytes[p], gg = bytes[p + 1], r = bytes[p + 2];
-        bool dark = r < 48 && gg < 48 && b < 48;
-        bool light = r > 240 && gg > 240 && b > 240;
+        int darkCut = mode == "both" ? 60 : 48;
+        bool dark = r < darkCut && gg < darkCut && b < darkCut;
+        bool light = r > 236 && gg > 236 && b > 236;
         bool hit = mode == "dark" ? dark : mode == "light" ? light : (dark || light);
         if (!hit) return;
         seen[i] = true;
@@ -96,77 +97,66 @@ public static class WingPhotoMaker {
     }
   }
 
+  static Color Mix(Color a, Color b, float t) {
+    t = Math.Max(0f, Math.Min(1f, t));
+    return Color.FromArgb(
+      (int)(a.R + (b.R - a.R) * t),
+      (int)(a.G + (b.G - a.G) * t),
+      (int)(a.B + (b.B - a.B) * t));
+  }
+
   static void Feather(Graphics g, Color a, Color b) {
-    using (var brush = new LinearGradientBrush(new Rectangle(-280, -180, 560, 280), a, b, 20f))
-    using (var pen = new Pen(Color.FromArgb(90, 40, 24, 32), 2f)) {
-      for (int side = -1; side <= 1; side += 2) {
-        var state = g.Save();
-        g.ScaleTransform(side, 1);
-        for (int i = 0; i < 8; i++) {
-          float ang = -78 + i * 18;
-          var s = g.Save();
-          g.RotateTransform(ang);
-          float len = 250 - i * 8;
-          g.FillEllipse(brush, 16, -16, len, 34);
-          g.DrawEllipse(pen, 16, -16, len, 34);
-          g.Restore(s);
+    PaintFeathers(g, a, b, 16, 148f);
+  }
+
+  static void PaintFeathers(Graphics g, Color a, Color b, int count, float reach) {
+    for (int side = -1; side <= 1; side += 2) {
+      var state = g.Save();
+      g.ScaleTransform(side, 1);
+      for (int i = 0; i < count; i++) {
+        float t = i / (float)(count - 1);
+        float ang = -78f + t * 150f;
+        float len = reach * (0.62f + (float)Math.Sin(t * Math.PI) * 0.48f);
+        float half = 5.5f + (float)Math.Sin(t * Math.PI) * 7f;
+        var saved = g.Save();
+        g.RotateTransform(ang);
+        using (var path = new GraphicsPath()) {
+          path.AddBezier(6, 0, len * 0.28f, -half, len * 0.72f, -half * 0.45f, len, 0);
+          path.AddBezier(len, 0, len * 0.72f, half * 0.45f, len * 0.28f, half, 6, 0);
+          var root = Mix(a, Color.Black, 0.18f);
+          var tip = Mix(b, Color.White, 0.22f + t * 0.15f);
+          using (var brush = new LinearGradientBrush(new PointF(6, -half), new PointF(len, half), root, tip))
+            g.FillPath(brush, path);
+          using (var pen = new Pen(Color.FromArgb(170, Mix(a, Color.Black, 0.45f)), 1.15f))
+            g.DrawLine(pen, 10, 0, len - 6, 0);
         }
-        g.Restore(state);
+        g.Restore(saved);
       }
+      g.Restore(state);
     }
   }
 
   static void Butterfly(Graphics g, Color a, Color b) {
-    using (var brush = new LinearGradientBrush(new Rectangle(-260, -160, 520, 300), a, b, 90f))
-    using (var spot = new SolidBrush(Color.FromArgb(180, 255, 236, 160))) {
+    PaintFeathers(g, a, b, 12, 130f);
+    using (var spot = new SolidBrush(Color.FromArgb(210, 255, 214, 120))) {
       foreach (int side in new[] { -1, 1 }) {
-        g.FillEllipse(brush, side < 0 ? -250 : 20, -150, 230, 170);
-        g.FillEllipse(brush, side < 0 ? -210 : 30, 0, 180, 130);
-        g.FillEllipse(spot, side < 0 ? -160 : 90, -90, 28, 22);
-        g.FillEllipse(spot, side < 0 ? -120 : 70, 40, 18, 16);
+        g.FillEllipse(spot, side < 0 ? -120 : 70, -50, 22, 16);
+        g.FillEllipse(spot, side < 0 ? -90 : 48, 28, 14, 12);
       }
     }
+    PaintFeathers(g, Mix(b, Color.White, 0.2f), a, 8, 90f);
   }
 
   static void Flame(Graphics g, Color a, Color b) {
-    using (var brush = new LinearGradientBrush(new Rectangle(-240, -180, 480, 280), b, a, 90f)) {
-      foreach (int side in new[] { -1, 1 }) {
-        var state = g.Save();
-        g.ScaleTransform(side, 1);
-        var path = new GraphicsPath();
-        path.AddBezier(10, 20, 40, -160, 180, -40, 230, 10);
-        path.AddBezier(230, 10, 120, 40, 40, 80, 10, 20);
-        g.FillPath(brush, path);
-        path.Dispose();
-        g.Restore(state);
-      }
-    }
+    PaintFeathers(g, a, b, 14, 170f);
   }
 
   static void Crystal(Graphics g, Color a, Color b) {
-    using (var brush = new LinearGradientBrush(new Rectangle(-240, -160, 480, 280), a, b, 40f))
-    using (var pen = new Pen(Color.FromArgb(160, 255, 255, 255), 2f)) {
-      foreach (int side in new[] { -1, 1 }) {
-        PointF[] pts = side < 0
-          ? new[] { new PointF(-20, 10), new PointF(-230, -20), new PointF(-120, -140), new PointF(-40, -30) }
-          : new[] { new PointF(20, 10), new PointF(230, -20), new PointF(120, -140), new PointF(40, -30) };
-        g.FillPolygon(brush, pts);
-        g.DrawPolygon(pen, pts);
-      }
-    }
+    PaintFeathers(g, a, b, 12, 150f);
   }
 
   static void Bolt(Graphics g, Color a, Color b) {
-    using (var brush = new LinearGradientBrush(new Rectangle(-240, -160, 480, 260), a, b, 0f)) {
-      foreach (int side in new[] { -1, 1 }) {
-        float s = side;
-        PointF[] pts = {
-          new PointF(s * 20, 30), new PointF(s * 90, -20), new PointF(s * 50, -20),
-          new PointF(s * 220, -150), new PointF(s * 120, 0), new PointF(s * 170, 0), new PointF(s * 20, 30)
-        };
-        g.FillPolygon(brush, pts);
-      }
-    }
+    PaintFeathers(g, a, b, 13, 175f);
   }
 }
 "@

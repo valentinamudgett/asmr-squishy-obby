@@ -40,9 +40,10 @@ const PLAZA_TOP = 0.8;
  * size, so the tower's feet stay put and the body, ladder, and landing stretch upward.
  */
 const CROWN_TOP = 1872;
-const DECK_W = 144;
-const DECK_D = 168;
-const DECK_H = 5.6;
+/** A small pad at the top, just big enough to stand on after the climb. */
+const DECK_W = 8;
+const DECK_D = 8;
+const DECK_H = 0.8;
 const TOWER_Z = 16;
 const BASE_HALF = 50.4;
 const LADDER_X = 0;
@@ -172,7 +173,7 @@ export function createTower(scene, graphics) {
   wingMat.useAlphaFromDiffuseTexture = true;
   wingMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
   // Shoulder-sized pair on the back. The photo spreads left and right; it does not cover the face.
-  const wingPlane = MeshBuilder.CreatePlane("tower-wing-card", { width: 1.15, height: 0.62 }, scene);
+  const wingPlane = MeshBuilder.CreatePlane("tower-wing-card", { width: 1.45, height: 0.82 }, scene);
   wingPlane.parent = wingRoot;
   wingPlane.position.set(0, 0, -0.32);
   wingPlane.rotation.y = Math.PI;

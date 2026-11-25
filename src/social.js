@@ -1,5 +1,5 @@
 import { cleanText } from "./filter.js";
-import { loadFriends, saveFriends, snapshotLook } from "./friends.js";
+import { loadFriends, MAX_FRIENDS, saveFriends, snapshotLook } from "./friends.js";
 import { t } from "./i18n.js";
 import { CHAT_MAX } from "./online.js";
 
@@ -160,6 +160,10 @@ export function bindSocial({ online, bots, ui, onSay, notify }) {
 
   function addFriend(player) {
     if (!player.id || isFriend(player.id)) return;
+    if (friends.length >= MAX_FRIENDS) {
+      notify(t("friends.full"));
+      return;
+    }
     const friend = { id: player.id, name: player.name, look: player.look, photo: "" };
     friends.unshift(friend);
     saveFriends(friends);

@@ -29,6 +29,17 @@ export { hexToColor3 };
 const HIP_Y = 0.5;
 // Flip around the chest so the feet and head trade places instead of spinning around the toes.
 const FLIP_PIVOT = 0.7;
+// Visible yaw, lean, and landing settle. Physics speeds are unchanged; these only move the mesh.
+const TURN_TAU = 0.045;
+const TORSO_TAU = 0.05;
+const LEAN_TAU = 0.06;
+const STRETCH_TAU = 0.04;
+const TRICK_TAU = 0.04;
+const LAND_TAU = 0.032;
+const JUMP_SQUAT = 0.16;
+const JUMP_STRETCH = 0.11;
+const SQUAT_TIME = 0.06;
+const STRETCH_TIME = 0.1;
 const SHOULDER_Y = 0.96;
 const HEAD_Y = 1.19;
 const HEAD_HALF = 0.18;
@@ -320,6 +331,16 @@ export function buildAvatar(scene) {
   let danceTime = 0;
   let danceLoop = false;
   let danceBlend = 0;
+  let visualYaw = null;
+  let torsoYaw = 0;
+  let leanPitch = 0;
+  let shownStretch = 0;
+  let airT = 0;
+  let wasAirborne = false;
+  let flipPitch = 0;
+  let flipSpin = 0;
+  let shownWave = 0;
+  let trickKind = null;
   let height = (HEAD_Y + HEAD_HALF + 0.05) * BUILDS.kid.scale;
 
   const shape = (age, boy) => {
@@ -463,7 +484,13 @@ export function buildAvatar(scene) {
       }
       danceBlend += ((move ? 1 : 0) - danceBlend) * Math.min(1, dt * 8);
       const turnToCamera = pose.faceAngle === undefined ? 0 : wrapAngle(pose.faceAngle - pose.facing);
-      root.rotation.y = pose.facing + turnToCamera * danceBlend;
+      const aimYaw = pose.facing + turnToCamera * danceBlend;
+      if (visualYaw === null) visualYaw = aimYaw;
+      else visualYaw = lerpAngle(visualYaw, aimYaw, 1 - Math.exp(-dt / TURN_TAU));
+      root.rotation.y = visualYaw;
+      const yawLag = wrapAngle(aimYaw - visualYaw);
+      const torsoTarget = Math.max(-0.4, Math.min(0.4, yawLag * 0.5));
+      torsoYaw += (torsoTarget - torsoYaw) * (1 - Math.exp(-dt / TORSO_TAU));
       squash += (0 - squash) * Math.min(1, dt * 7);
       const airborne = pose.airborne;
       walkBlend += ((pose.moving && !airborne ? 1 : 0) - walkBlend) * Math.min(1, dt * 10);
@@ -478,9 +505,17 @@ export function buildAvatar(scene) {
       arms[1].pivot.rotation.set(armSwing - pump - airBlend * 2.6, 0, 0.08 + airBlend * 0.35 + breathe);
       legs[0].pivot.rotation.set(legSwing - airBlend * 0.45, 0, 0);
       legs[1].pivot.rotation.set(-legSwing + airBlend * 0.25, 0, 0);
-      let stretch = airborne ? 0.1 : -squash;
+      const poseAir = Boolean(airborne) && !pose.sitting;
+      if (poseAir && !wasAirborne) airT = 0;
+      if (poseAir) airT += dt;
+      wasAirborne = poseAir;
+      const stretchTarget = poseAir ? airStretchTarget(airT) : -squash;
+      shownStretch += (stretchTarget - shownStretch) * (1 - Math.exp(-dt / STRETCH_TAU));
+      let stretch = shownStretch;
+      const leanTarget = poseAir ? 0.4 : 0.2 * runBlend;
+      leanPitch += (leanTarget - leanPitch) * (1 - Math.exp(-dt / LEAN_TAU));
       body.position.y = Math.abs(Math.sin(phase)) * (0.04 + 0.05 * runBlend) * walkBlend;
-      body.rotation.set(0.2 * runBlend, 0, 0);
+      body.rotation.set(leanPitch, torsoYaw, 0);
       headNode.rotation.set(-0.12 * runBlend, 0, Math.sin(phase * 0.5) * 0.04 * walkBlend);
       const flying = Boolean(pose.flying);
       costumes.update({ time: pose.time, walk: walkBlend, run: runBlend, air: airBlend, flying });
@@ -528,13 +563,21 @@ export function buildAvatar(scene) {
 
       const trick = pose.trick ?? null;
       const trickP = trick ? Math.min(1, Math.max(0, pose.trickP ?? 0)) : 0;
-      const wave = trick ? Math.sin(trickP * Math.PI) : 0;
+      const trickLive = Boolean(trick) && airborne;
+      if (trickLive) trickKind = trick;
+      const waveTarget = trickLive ? Math.sin(trickP * Math.PI) : 0;
+      shownWave += (waveTarget - shownWave) * (1 - Math.exp(-dt / (trickLive ? TRICK_TAU : LAND_TAU)));
+      if (!trickLive && shownWave < 0.004) {
+        shownWave = 0;
+        trickKind = null;
+      }
+      const wave = shownWave;
       const blendPose = (node, x, y, z, amount) => {
         node.rotation.x += (x - node.rotation.x) * amount;
         node.rotation.y += (y - node.rotation.y) * amount;
         node.rotation.z += (z - node.rotation.z) * amount;
       };
-      if (trick === "spin") {
+      if (trickKind === "spin") {
         blendPose(arms[0].pivot, -0.2, 0, -2.2, wave);
         blendPose(arms[1].pivot, -0.2, 0, 2.2, wave);
         blendPose(legs[0].pivot, 0.2, 0, -0.28, wave);
@@ -549,13 +592,25 @@ export function buildAvatar(scene) {
       }
 
       const eased = trickP * trickP * (3 - 2 * trickP);
-      const turns = eased * Math.PI * 2;
-      const pitch = trick === "front" ? turns : trick === "back" ? -turns : 0;
-      const spin = trick === "spin" ? turns : 0;
+      const wantPitch = trickLive && trick === "front" ? eased * Math.PI * 2 : trickLive && trick === "back" ? -eased * Math.PI * 2 : 0;
+      const wantSpin = trickLive && trick === "spin" ? eased * Math.PI * 2 : 0;
+      if (trickLive) {
+        const follow = 1 - Math.exp(-dt / TRICK_TAU);
+        flipPitch += (wantPitch - flipPitch) * follow;
+        flipSpin += (wantSpin - flipSpin) * follow;
+      } else {
+        flipPitch = wrapAngle(flipPitch);
+        flipSpin = wrapAngle(flipSpin);
+        const settle = 1 - Math.exp(-dt / LAND_TAU);
+        flipPitch += (0 - flipPitch) * settle;
+        flipSpin += (0 - flipSpin) * settle;
+        if (Math.abs(flipPitch) < 0.008) flipPitch = 0;
+        if (Math.abs(flipSpin) < 0.008) flipSpin = 0;
+      }
       const pivot = FLIP_PIVOT * rig.scaling.y;
-      const cos = Math.cos(pitch);
-      const sin = Math.sin(pitch);
-      rig.rotation.set(pitch, spin, 0);
+      const cos = Math.cos(flipPitch);
+      const sin = Math.sin(flipPitch);
+      rig.rotation.set(flipPitch, flipSpin, 0);
       rig.position.set(0, rigLift + pivot * (1 - cos), -pivot * sin);
 
       const hold = held.id && !armed ? (1 - flyBlend) * (1 - hangBlend) * (1 - danceBlend) * (1 - wave) : 0;
@@ -596,6 +651,17 @@ export function buildAvatar(scene) {
 
 function wrapAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function lerpAngle(from, to, t) {
+  return from + wrapAngle(to - from) * t;
+}
+
+/** Squash on takeoff, then stretch. Starts at 0 so a jump doesn't pop the body scale. */
+function airStretchTarget(t) {
+  if (t < SQUAT_TIME) return -JUMP_SQUAT * smoothstep(0, SQUAT_TIME, t);
+  const rise = smoothstep(SQUAT_TIME, SQUAT_TIME + STRETCH_TIME, t);
+  return -JUMP_SQUAT + (JUMP_STRETCH + JUMP_SQUAT) * rise;
 }
 
 function cloth(scene, name) {

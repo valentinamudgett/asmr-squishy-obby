@@ -158,6 +158,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     isSurfaceDynamic: false,
   };
   let groundPad = null;
+  // Pad the feet left, so a coyote jump still springs when that pad is a green dumpling.
+  let takeoffPad = null;
   let groundGap = 0;
   // The moving pad under the feet and where it was last frame. Its step is applied to the body directly.
   let ridePad = null;
@@ -319,6 +321,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       dip = 0;
       dipVel = 0;
       groundPad = null;
+      takeoffPad = null;
       ridePad = null;
       position.copyFrom(spot);
       snapCamera(spot);
@@ -486,10 +489,12 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       position.copyFrom(controller.getPosition());
       foot.set(position.x, position.y - FOOT_OFFSET, position.z);
       const pad = hooks.findPad(foot);
+      if (state === "ON_GROUND" && pad) takeoffPad = pad;
       const canJump = state === "ON_GROUND" || coyote > 0;
       const wantJump = allowInput && jumpQueued > 0 && canJump;
       let jumped = false;
       let doubleJumped = false;
+      let coyoteJump = false;
 
       const onStair = state === "ON_GROUND" && Boolean(pad?.stair);
       const climbing = onStair || (stairRun && !launched && state !== "ON_GROUND");
@@ -549,68 +554,83 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         if (previous === "ON_GROUND") airCarry = stairRun ? STAIR_RUN : AIR_BOOST;
         // Riding up a tread edge leaves upward speed behind. Drop it so the run settles on the tread.
         if (stairRun && !launched) next.y = Math.min(next.y, 0);
-        if (flying) {
-          flyTime += dt;
-          // Another press while flying lets go and drops you.
-          if (allowInput && jumpQueued > 0) {
-            takeQueuedJump();
-            land();
-          } else if (flyTime >= FLIGHT_SECONDS) land();
-        }
-        if (flying) {
-          const hover = Math.sin(flyTime * 2.4) * FLY_BOB;
-          next.y += (hover - next.y) * (1 - Math.exp(-6 * dt));
-          const glide = 1 - Math.exp(-4 * dt);
-          next.x += ((wish.x * FLY_SPEED) / MOVE_SPEED - next.x) * glide;
-          next.z += ((wish.z * FLY_SPEED) / MOVE_SPEED - next.z) * glide;
-        } else {
-          next.y += GRAVITY * dt;
-          const blend = 1 - Math.exp(-5.5 * dt);
-          next.x += (wish.x * airCarry - next.x) * blend;
-          next.z += (wish.z * airCarry - next.z) * blend;
-        }
-        if (allowInput && jumpQueued > 0 && airJumpLeft && launched && canFly) {
-          // Drop any extra buffered press so it can't end the flight on the next frame.
-          jumpQueued = 0;
-          jumpBuffer = 0;
-          flying = true;
-          flyTime = 0;
-          airJumpLeft = false;
-          stairRun = false;
-          coyote = 0;
-          trick = null;
-          trickTime = 0;
-          next.y = Math.max(next.y, FLY_LIFT);
-          doubleJumped = true;
-          hooks.onFly?.(true);
-        }
-        // One extra press after a jump. It pops higher and, if you're moving, carries farther.
-        if (allowInput && jumpQueued > 0 && airJumpLeft && launched) {
+        // Walked off a pad: the queued press is the ground jump, including a spring they just left.
+        // One press. The extra air jump waits for a later press, and a jump that already launched this fall does not get coyote.
+        const coyoteLaunch = allowInput && jumpQueued > 0 && coyote > 0 && !launched;
+        if (coyoteLaunch) {
           takeQueuedJump();
-          const carry = Math.max(airCarry, AIR_BOOST) * DOUBLE_CARRY;
-          airCarry = carry;
-          const rising = Math.max(0, next.y);
-          next.y = rising * 0.45 + DOUBLE_JUMP_SPEED;
-          if (wish.lengthSquared() > 0.2) {
-            next.x = wish.x * carry;
-            next.z = wish.z * carry;
-          } else {
-            const horiz = Math.hypot(next.x, next.z);
-            const target = MOVE_SPEED * carry;
-            if (horiz > 0.35 && target > horiz) {
-              const scale = target / horiz;
-              next.x *= scale;
-              next.z *= scale;
-            }
+          const spring = takeoffPad?.kind === "spring";
+          launch(spring ? SPRING_POP : JUMP_SPEED, spring ? SPRING_BOOST : AIR_BOOST, spring);
+          if (wish.lengthSquared() <= 0.2) {
+            next.x += rideVelocity.x;
+            next.z += rideVelocity.z;
           }
-          state = "START_JUMP";
-          launched = true;
-          airJumpLeft = false;
-          stairRun = false;
-          coyote = 0;
           jumped = true;
-          doubleJumped = true;
-          beginTrick();
+          coyoteJump = true;
+        } else {
+          if (flying) {
+            flyTime += dt;
+            // Another press while flying lets go and drops you.
+            if (allowInput && jumpQueued > 0) {
+              takeQueuedJump();
+              land();
+            } else if (flyTime >= FLIGHT_SECONDS) land();
+          }
+          if (flying) {
+            const hover = Math.sin(flyTime * 2.4) * FLY_BOB;
+            next.y += (hover - next.y) * (1 - Math.exp(-6 * dt));
+            const glide = 1 - Math.exp(-4 * dt);
+            next.x += ((wish.x * FLY_SPEED) / MOVE_SPEED - next.x) * glide;
+            next.z += ((wish.z * FLY_SPEED) / MOVE_SPEED - next.z) * glide;
+          } else {
+            next.y += GRAVITY * dt;
+            const blend = 1 - Math.exp(-5.5 * dt);
+            next.x += (wish.x * airCarry - next.x) * blend;
+            next.z += (wish.z * airCarry - next.z) * blend;
+          }
+          if (allowInput && jumpQueued > 0 && airJumpLeft && launched && canFly) {
+            // Drop any extra buffered press so it can't end the flight on the next frame.
+            jumpQueued = 0;
+            jumpBuffer = 0;
+            flying = true;
+            flyTime = 0;
+            airJumpLeft = false;
+            stairRun = false;
+            coyote = 0;
+            trick = null;
+            trickTime = 0;
+            next.y = Math.max(next.y, FLY_LIFT);
+            doubleJumped = true;
+            hooks.onFly?.(true);
+          }
+          // One extra press after a jump. It pops higher and, if you're moving, carries farther.
+          if (allowInput && jumpQueued > 0 && airJumpLeft && launched) {
+            takeQueuedJump();
+            const carry = Math.max(airCarry, AIR_BOOST) * DOUBLE_CARRY;
+            airCarry = carry;
+            const rising = Math.max(0, next.y);
+            next.y = rising * 0.45 + DOUBLE_JUMP_SPEED;
+            if (wish.lengthSquared() > 0.2) {
+              next.x = wish.x * carry;
+              next.z = wish.z * carry;
+            } else {
+              const horiz = Math.hypot(next.x, next.z);
+              const target = MOVE_SPEED * carry;
+              if (horiz > 0.35 && target > horiz) {
+                const scale = target / horiz;
+                next.x *= scale;
+                next.z *= scale;
+              }
+            }
+            state = "START_JUMP";
+            launched = true;
+            airJumpLeft = false;
+            stairRun = false;
+            coyote = 0;
+            jumped = true;
+            doubleJumped = true;
+            beginTrick();
+          }
         }
       }
 
@@ -627,13 +647,19 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         dipVel = 0;
         hooks.onLand(pad, impact);
       }
-      if (jumped && pad && !justLanded && mute <= 0) hooks.onJump(pad);
+      if (jumped && !justLanded && mute <= 0) {
+        const jumpPad = coyoteJump ? (takeoffPad ?? pad) : pad;
+        if (jumpPad) hooks.onJump(jumpPad);
+      }
 
       const speed = Math.hypot(next.x, next.z);
       const looked = lookedAround;
-      if (trick && !trickFresh) {
-        // Finish the flip quickly once the feet are back on a pad.
-        trickTime += dt * (state === "ON_GROUND" ? 4 : 1);
+      if (state === "ON_GROUND") {
+        // The mesh eases upright on its own. Clearing the trick here keeps the next hop from resuming it.
+        trick = null;
+        trickTime = 0;
+      } else if (trick && !trickFresh) {
+        trickTime += dt;
         if (trickTime >= TRICK_SECONDS) trickTime = TRICK_SECONDS;
       }
       const trickOut = trick;

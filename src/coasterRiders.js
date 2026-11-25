@@ -45,11 +45,12 @@ function trainCount(length) {
 }
 
 /**
- * While the yard is open for business and you're online, regulars from the bot crowd
- * line up at their own coaster, left of the platform, and ride that hill.
- * Closed, they leave. Each has their own cart. The front car goes out and back;
- * the rest follow one gap behind. A lap that gets the front car home pays the yard once.
- * Only this player sees them. No physics: the line, the carts, and the rails are scenery.
+ * While you're in the yard, online, and your own coaster is closed, regulars from the
+ * bot crowd line up at their coaster, left of the platform, and ride that hill.
+ * Open for business, they leave it alone. Each has their own cart. The front car
+ * goes out and back; the rest follow one gap behind. A lap that gets the front car
+ * home pays the yard once. Only this player sees them. No physics: the line, the
+ * carts, and the rails are scenery.
  */
 export function createCoasterRiders(scene, graphics, coaster) {
   const roster = coasterGuests(MAX_TRAIN);
@@ -142,7 +143,8 @@ export function createCoasterRiders(scene, graphics, coaster) {
     const seat = seatAt(0, false);
     const homeX = seat.footX + DOCK.x * SIDE;
     const homeZ = seat.footZ + DOCK.z * SIDE;
-    const y = origin.y + FOOT_OFFSET + 0.08;
+    // Pad top is origin.y. The avatar root is the feet, so this is only a little clearance.
+    const y = origin.y + 0.04;
     const fx = Math.sin(seat.heading);
     const fz = Math.cos(seat.heading);
     const spots = [];
@@ -362,7 +364,7 @@ export function createCoasterRiders(scene, graphics, coaster) {
      * Returns false, and does not pay, when the lap is dropped.
      */
     update(dt, camera, time) {
-      if (!online || !coaster.active || !coaster.open) {
+      if (!online || !coaster.active || coaster.open) {
         if (shown) hide();
         return false;
       }

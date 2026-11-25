@@ -4,7 +4,7 @@ import { cleanLook } from "./look.js";
 import { cleanName } from "./online.js";
 
 const KEY = "asmr-squishy-obby:friends";
-const MAX_FRIENDS = 40;
+export const MAX_FRIENDS = 40;
 const PHOTO_SIZE = 128;
 const SETTLE_FRAMES = 90;
 

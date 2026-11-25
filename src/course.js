@@ -142,8 +142,9 @@ export function createCourse(scene, hooks = {}, fromLevel = 1, seed = Date.now()
 
     if (isRainbowSlot(index, PADS_PER_LEVEL)) {
       // Built only so plan/locate/hazards consume the same rolls, then swapped for stairs.
+      // A green spring in front of the flight stays a spring. Its mesh is already the green
+      // dumpling, and this gap was spaced with SPRING_POP, so land and jump still launch.
       if (stairGhosts.length === 0) stairAnchor = prev?.mesh ? prev : null;
-      if (stairAnchor?.kind === "spring") stairAnchor.kind = "firm";
       stairGhosts.push(snapshotPad(pad));
       chain = stairGhosts[stairGhosts.length - 1];
       discardPad(pad);

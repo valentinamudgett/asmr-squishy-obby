@@ -369,11 +369,78 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
   const pose = { x: 0, y: 0, z: 0, sink: 0, facing: 0, airborne: false, moving: false, running: false, hanging: false, trick: null, trickP: 0 };
 
   const topOf = (target) => target.mesh.position.y + target.thickness + 0.02;
-  const nextPad = (from, step) => {
-    const pads = course.pads;
-    if (step > 0) return pads.find((each) => each.index > from.index) ?? null;
-    for (let i = pads.length - 1; i >= 0; i -= 1) if (pads[i].index < from.index) return pads[i];
+  /** A tread still there to stand on. Faded stairs are gone and must not be hopped onto. */
+  const liveStep = (step) => Boolean(step && !step.gone && step.mesh?.isEnabled());
+  const flightWith = (step) => course.flights.find((flight) => flight.steps.includes(step)) ?? null;
+  const flightAt = (pad) => {
+    if (pad.flight?.steps?.length) return pad.flight;
+    const linked = course.flights.find((flight) => flight.anchorIndex === pad.index && flight.steps.length);
+    if (linked) return linked;
+    const next = course.pads.find((each) => each.index > pad.index);
+    if (!next) return null;
+    // Steps of a rainbow flight sit between the pad before it and the pad after it.
+    return (
+      course.flights.find((flight) => flight.steps.some((step) => step.index > pad.index && step.index < next.index)) ?? null
+    );
+  };
+  /** The stair flight that lands on this pad, when the pad before it still has one. */
+  const flightBefore = (pad) => {
+    if (!pad.afterStairs) return null;
+    for (let i = course.pads.length - 1; i >= 0; i -= 1) {
+      const each = course.pads[i];
+      if (each.index >= pad.index) continue;
+      return flightAt(each);
+    }
     return null;
+  };
+  const landingAfter = (flight) => course.pads.find((pad) => pad.index > flight.anchorIndex) ?? null;
+  /** The next tread ahead of `from`, or null when `from` is an ordinary pad with no stairs in front. */
+  const treadAhead = (from) => {
+    if (from.stair) {
+      const flight = flightWith(from);
+      if (!flight) return null;
+      const i = flight.steps.indexOf(from);
+      for (let j = i + 1; j < flight.steps.length; j += 1) if (liveStep(flight.steps[j])) return flight.steps[j];
+      return landingAfter(flight);
+    }
+    const flight = flightAt(from);
+    if (!flight) return null;
+    return flight.steps.find(liveStep) ?? null;
+  };
+  const treadBehind = (from) => {
+    if (from.stair) {
+      const flight = flightWith(from);
+      if (!flight) return null;
+      const i = flight.steps.indexOf(from);
+      for (let j = i - 1; j >= 0; j -= 1) if (liveStep(flight.steps[j])) return flight.steps[j];
+      return course.pads.find((pad) => pad.index === flight.anchorIndex) ?? null;
+    }
+    const flight = flightBefore(from);
+    if (!flight) return null;
+    for (let j = flight.steps.length - 1; j >= 0; j -= 1) if (liveStep(flight.steps[j])) return flight.steps[j];
+    return null;
+  };
+  /**
+   * The next pad a hop can actually land on. Rainbow stairs are walked tread to tread. Anything
+   * more than one pad away (the level 50 to 100 prison hole, or a flight whose treads are gone)
+   * is not a jump.
+   */
+  const nextPad = (from, step) => {
+    const tread = step > 0 ? treadAhead(from) : treadBehind(from);
+    if (tread) return tread;
+    const pads = course.pads;
+    let real = null;
+    if (step > 0) real = pads.find((each) => each.index > from.index) ?? null;
+    else {
+      for (let i = pads.length - 1; i >= 0; i -= 1) {
+        if (pads[i].index < from.index) {
+          real = pads[i];
+          break;
+        }
+      }
+    }
+    if (!real || Math.abs(real.index - from.index) > 1.5) return null;
+    return real;
   };
   const padFrom = (index) => course.pads.find((each) => each.index >= index) ?? course.pads[course.pads.length - 1];
   const between = ([low, high]) => low + Math.random() * (high - low);
@@ -526,7 +593,7 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
   }
 
   function jump(next) {
-    hopTo(next, Math.random() < skill.fail);
+    hopTo(next, !next.stair && Math.random() < skill.fail);
   }
 
   /**
@@ -543,7 +610,7 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
     if (teeter) {
       const next = teeter;
       teeter = null;
-      if (!next.removed && Math.random() > skill.chicken) jump(next);
+      if (!next.removed && !next.gone && Math.random() > skill.chicken) jump(next);
       else wait = between(skill.pause);
       return;
     }
@@ -553,8 +620,8 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
       return;
     }
     if (ahead >= 0 || (!hurry && Math.random() < skill.mill)) {
-      // Mill about on the pad.
-      const reach = Math.max(0.2, (pad.walkRadius ?? 1) * 0.5);
+      // Mill about on the pad. A tread is narrow, so the wander stays near its middle.
+      const reach = Math.max(0.2, (pad.stair ? 0.35 : (pad.walkRadius ?? 1)) * 0.5);
       const angle = Math.random() * Math.PI * 2;
       walk = { x: Math.sin(angle) * reach * Math.random(), z: Math.cos(angle) * reach * Math.random() };
       return;
@@ -564,7 +631,7 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
       wait = 0.5;
       return;
     }
-    if (!hurry && Math.random() < skill.teeter) {
+    if (!hurry && !pad.stair && Math.random() < skill.teeter) {
       // Creep to the edge facing the next pad and think about it.
       const dx = next.mesh.position.x - pad.mesh.position.x;
       const dz = next.mesh.position.z - pad.mesh.position.z;
@@ -837,7 +904,25 @@ function createRunner(scene, graphics, course, regular, onChat, speak, playerInd
       pose.y = from.y + (to.y - from.y) * p * p;
       pose.airborne = p < 1;
     } else if (leg.how === "lift") {
-      pose.y = from.y + (to.y - from.y) * p * p * (3 - 2 * p);
+      // Stay on the floor until the car has left the top, then ride that floor down.
+      const lava = jail.plan.lava;
+      const y = lava.floor();
+      if (!leg.riding) lava.lift();
+      if (y !== null) {
+        leg.riding = true;
+        pose.y = y;
+        p = 0;
+      } else if (leg.riding && lava.down()) {
+        pose.y = to.y;
+        p = 1;
+      } else {
+        pose.x = from.x;
+        pose.z = from.z;
+        pose.y = from.y;
+        leg.time = Math.max(0, leg.time - dt);
+        leg.riding = false;
+        p = 0;
+      }
     } else if (leg.how === "ride") {
       pose.facing = jail.plan.zip.at(leg.s, cablePoint);
       pose.x = cablePoint.x;
