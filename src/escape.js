@@ -7,7 +7,6 @@ import {
   PhysicsMotionType,
   PhysicsShapeBox,
   PhysicsShapeContainer,
-  PointLight,
   Quaternion,
   Ray,
   StandardMaterial,
@@ -15,6 +14,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { buildCapybara, POLICE_CAP_TOP } from "./capybara.js";
+import { buildLimestoneCave } from "./cave.js";
 import { contains, createSquishy, discardPad, stepSquish } from "./course.js";
 import { PAD_TOP } from "./foods.js";
 import { t } from "./i18n.js";
@@ -752,9 +752,10 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     return site.lava.cupboards.find((cupboard) => !cupboard.opened && Math.hypot(center.x - cupboard.front.x, center.z - cupboard.front.z) < CUPBOARD_REACH) ?? null;
   }
 
-  /** Standing in the elevator car while it's parked. */
+  /** Inside the parked car, from just under the floor up through a jump (about 2 m). */
   function inLift() {
-    return site.lift.parked && insideLift(center.x, center.z) && Math.abs(here.y - site.lift.y) < 0.5;
+    const dy = here.y - site.lift.y;
+    return site.lift.parked && insideLift(center.x, center.z) && dy > -0.5 && dy < 2;
   }
 
   /** Below the car, where it mustn't come down on you. */
@@ -1026,6 +1027,8 @@ export function createEscape(scene, { graphics, audio, avatar }) {
         /**
          * The lava room: a bot opens cupboard `index` for a look, unlocks the button to borrow the
          * cages, and takes the elevator down (it only goes if you're not in it or under it).
+         * `floor` is the car's world height once that ride has left the top, and `down` is true
+         * once it has reached the bottom.
          */
         lava: {
           open: (index) => site?.lava.peek(index),
@@ -1034,6 +1037,11 @@ export function createEscape(scene, { graphics, audio, avatar }) {
             if (site?.lift.atTop && !lifting && !inLift() && !underLift()) site.lift.go();
           },
           liftSeconds: LIFT_GATE_SECONDS + LIFT_SECONDS,
+          floor: () => {
+            if (!site?.lift.atTop || site.lift.y > LANDING.top - 0.05) return null;
+            return site.lift.y + origin.y;
+          },
+          down: () => Boolean(site && !site.lift.atTop && site.lift.y <= SQUISHY_FLOOR + 0.3),
         },
         soda: SODA_SPEED,
         zip: {
@@ -1333,9 +1341,7 @@ function buildSite(scene, origin, { graphics, audio }) {
   };
   const M = {
     concrete: material("concrete", "#7f868f"),
-    rock: material("rock", "#f4e3c8", 0.18),
     rockDark: material("rockDark", "#e09442", 0.26),
-    ember: material("ember", "#ffc56e", 0.8),
     trim: material("trim", "#4c5560"),
     floor: material("floor", "#5d6470"),
     tile: material("tile", "#a39d90"),
@@ -1910,7 +1916,8 @@ function buildSite(scene, origin, { graphics, audio }) {
   for (const x of [10, 20, 30, 40]) lamp(x, 30, 0, 2.4, 0.8);
   // Level 75's checkpoint, in a limestone cave at the southwest of this floor. The west mouth is
   // the zipline's way in (open under the cable); the east mouth is the way out onto the chase.
-  // Spikes, shelves, and the big mound are looks only, kept on the walls so the way through stays open.
+  // The walls and a few low rocks are plain boxes to bump into; cave.js draws the rock over them,
+  // with spikes, curtains, and the big mound kept on the walls so the way through stays open.
   {
     const floor = KILLER_FLOOR;
     const top = 22.6;
@@ -1920,173 +1927,28 @@ function buildSite(scene, origin, { graphics, audio }) {
     const t = 0.65;
     const zip0 = -5.8;
     const zip1 = -2.6;
-    const rock = { cast: true };
-    const dress = { solid: false, camera: false };
-    // Damp stone: a warm shine, not the flat gray of the rest of the prison.
-    for (const look of [M.rock, M.rockDark, M.ember]) {
-      look.specularColor = new Color3(0.72, 0.52, 0.28);
-      look.specularPower = 24;
-    }
-    box(x0, floor, -8, x0 + t, top, zip0, M.rock, rock);
-    box(x0, floor, zip1, x0 + t, top, zN, M.rock, rock);
-    box(x0, 21.4, zip0, x0 + t, top, zip1, M.rock, rock);
-    box(x0, floor, zN, 10.1, top, zN + t, M.rock, rock);
-    box(12.9, floor, zN, x1 + t, top, zN + t, M.rock, rock);
-    box(10.1, 20.8, zN, 12.9, top, zN + t, M.rock, rock);
-    box(x1, floor, -8, x1 + t, top, -6.6, M.rock, rock);
-    box(x1, 21, -6.6, x1 + t, top, zN, M.rock, rock);
-    box(x0, top, -8, x1 + t, top + 0.5, zN + t, M.rock, rock);
-    box(x0 + t, floor, -8, x1, top, -7.35, M.rock, rock);
-    box(7.15, floor, -2.4, 8.65, floor + 1.1, -1.05, M.rockDark, rock);
-    box(12.6, floor, -7.28, 14.15, floor + 0.85, -6.75, M.rockDark, rock);
-    box(8.5, top - 0.7, -7.25, 9.9, top, -6.7, M.rockDark, rock);
-    box(12.3, top - 0.55, -7.15, 13.7, top, -6.7, M.rock, rock);
-    box(9.9, top - 0.07, -4.7, 11.1, top, -3.7, M.ember, dress);
-    // Flowstone shelves: layered bumps on the walls and ceiling, clear of both mouths.
-    for (const [a, b, c, d, e, f, golden] of [
-      [7.4, 18.3, -7.35, 10.5, 18.7, -6.75, 0],
-      [10.0, 19.45, -7.35, 14.2, 19.9, -6.7, 1],
-      [7.5, 20.65, -7.35, 12.2, 21.1, -6.6, 0],
-      [11.6, 21.45, -7.35, 14.25, 22.0, -6.5, 1],
-      [7.05, 18.55, -7.25, 7.7, 19.1, -6.05, 1],
-      [7.05, 20.35, -7.2, 7.85, 20.85, -6.2, 0],
-      [7.05, 18.4, -2.35, 7.65, 18.9, -1.05, 0],
-      [7.05, 20.15, -2.15, 7.75, 20.65, -1.05, 1],
-      [7.05, 21.55, -5.65, 7.95, 22.55, -2.75, 1],
-      [7.35, 18.7, -1.4, 9.85, 19.15, -0.85, 0],
-      [7.5, 20.25, -1.25, 9.8, 20.7, -0.85, 1],
-      [13.1, 18.5, -1.45, 14.35, 19.0, -0.85, 1],
-      [13.15, 20.35, -1.3, 14.35, 20.8, -0.85, 0],
-      [10.1, 20.95, -1.35, 12.9, 21.45, -0.85, 0],
-      [10.25, 21.6, -1.2, 12.75, 22.5, -0.85, 1],
-      [13.7, 21.15, -6.2, 14.4, 21.65, -1.3, 0],
-      [13.55, 21.8, -5.4, 14.4, 22.55, -1.6, 1],
-      [8.1, 22.0, -6.4, 12.2, 22.6, -4.8, 0],
-      [11.2, 22.1, -4.5, 14.15, 22.6, -2.3, 1],
-      [8.4, 22.15, -3.6, 10.2, 22.6, -2.0, 1],
-    ]) box(a, b, c, d, e, f, golden ? M.rockDark : M.rock, dress);
-    // x, z, height, thick. Long ones hug the back wall; short ones over the path stay above a jump.
-    const hanging = [
-      [7.7, -7.05, 2.6, 0.55],
-      [8.4, -6.75, 1.5, 0.24],
-      [9.0, -7.1, 3.0, 0.7],
-      [9.7, -6.8, 1.7, 0.3],
-      [10.4, -7.05, 2.4, 0.48],
-      [11.2, -6.7, 1.4, 0.22],
-      [11.4, -7.0, 2.7, 0.5],
-      [12.7, -6.85, 1.6, 0.28],
-      [13.5, -7.05, 2.2, 0.44],
-      [14.05, -6.75, 1.2, 0.2],
-      [7.45, -1.7, 2.0, 0.38],
-      [7.6, -1.15, 1.2, 0.2],
-      [8.3, -1.2, 1.6, 0.28],
-      [13.55, -1.25, 1.8, 0.32],
-      [14.05, -1.7, 1.1, 0.2],
-      [13.9, -2.5, 0.85, 0.18],
-      [7.7, -6.4, 1.3, 0.26],
-      [14.1, -6.3, 1.1, 0.22],
-      [8.8, -5.5, 0.8, 0.2],
-      [9.5, -3.5, 0.55, 0.15],
-      [10.7, -5.7, 0.7, 0.18],
-      [11.5, -2.7, 0.5, 0.14],
-      [12.3, -4.7, 0.75, 0.2],
-      [12.9, -3.1, 0.6, 0.16],
-      [9.1, -2.5, 0.45, 0.13],
-      [10.2, -1.9, 0.4, 0.12],
+    const walls = [
+      [x0, floor, -8, x0 + t, top, zip0],
+      [x0, floor, zip1, x0 + t, top, zN],
+      [x0, 21.4, zip0, x0 + t, top, zip1],
+      [x0, floor, zN, 10.1, top, zN + t],
+      [12.9, floor, zN, x1 + t, top, zN + t],
+      [10.1, 20.8, zN, 12.9, top, zN + t],
+      [x1, floor, -8, x1 + t, top, -6.6],
+      [x1, 21, -6.6, x1 + t, top, zN],
+      [x0, top, -8, x1 + t, top + 0.5, zN + t],
+      [x0 + t, floor, -8, x1, top, -7.35],
     ];
-    const standing = [
-      [7.8, -7.0, 1.5, 0.5],
-      [8.7, -7.1, 0.7, 0.26],
-      [9.5, -6.95, 1.9, 0.5],
-      [10.6, -7.1, 1.0, 0.3],
-      [11.4, -7.0, 2.15, 0.5],
-      [12.2, -7.15, 0.8, 0.24],
-      [14.0, -7.05, 1.3, 0.36],
-      [7.4, -6.55, 0.9, 0.28],
-      [7.55, -1.55, 1.2, 0.4],
-      [7.75, -1.05, 0.45, 0.18],
-      [8.55, -1.2, 0.8, 0.32],
-      [9.35, -1.05, 0.4, 0.16],
-      [13.5, -1.2, 0.95, 0.34],
-      [14.1, -1.65, 0.5, 0.2],
+    const rocks = [
+      [7.15, floor, -2.4, 8.65, floor + 1.1, -1.05],
+      [12.6, floor, -7.28, 14.15, floor + 0.85, -6.75],
+      [8.5, top - 0.7, -7.25, 9.9, top, -6.7],
+      [12.3, top - 0.55, -7.15, 13.7, top, -6.7],
     ];
-    const spike = (x, z, height, thick, hang, index) => {
-      const tip = Math.max(0.05, thick * 0.14);
-      const mesh = MeshBuilder.CreateCylinder("caveSpike", {
-        height,
-        diameterTop: hang ? thick : tip,
-        diameterBottom: hang ? tip : thick,
-        tessellation: thick > 0.5 ? 8 : 6,
-      }, scene);
-      mesh.position.set(x, hang ? top - height / 2 : floor + height / 2, z);
-      mesh.rotation.x = ((index % 3) - 1) * 0.06;
-      mesh.rotation.z = ((index % 5) - 2) * 0.045;
-      add(mesh, index % 3 === 0 ? M.rock : M.rockDark, { camera: false });
-    };
-    hanging.forEach(([x, z, height, thick], index) => spike(x, z, height, thick, true, index));
-    standing.forEach(([x, z, height, thick], index) => spike(x, z, height, thick, false, index + 3));
-    const knob = (x, y, z, diameter, golden) => {
-      const mesh = MeshBuilder.CreateSphere("caveKnob", { diameter, segments: diameter > 1 ? 10 : 8 }, scene);
-      mesh.position.set(x, y, z);
-      add(mesh, golden ? M.rockDark : M.rock, { camera: false });
-    };
-    // The big rounded flowstone mound on the right as you ride in, plus knobs so the walls aren't flat.
-    for (const [x, y, z, diameter] of [
-      [13.15, floor + 0.5, -6.95, 1.7],
-      [13.8, floor + 0.75, -6.8, 1.45],
-      [12.7, floor + 0.35, -7.05, 1.15],
-      [13.45, floor + 1.2, -6.9, 1.05],
-      [14.05, floor + 0.3, -7.0, 0.9],
-      [12.95, floor + 0.9, -6.65, 0.8],
-    ]) knob(x, y, z, diameter, true);
-    for (const [x, y, z, diameter, golden] of [
-      [7.85, floor + 0.9, -1.7, 1.15, 0],
-      [8.4, floor + 0.5, -2.2, 0.85, 1],
-      [7.45, floor + 0.45, -1.35, 0.7, 0],
-      [8.2, 19.2, -7.15, 0.55, 0],
-      [9.4, 20.4, -7.2, 0.7, 1],
-      [10.8, 18.8, -7.1, 0.5, 0],
-      [12.0, 20.8, -7.2, 0.65, 1],
-      [13.6, 19.6, -7.15, 0.45, 0],
-      [11.5, 21.6, -7.05, 0.4, 1],
-      [7.2, 19.5, -6.7, 0.5, 0],
-      [7.25, 20.6, -6.4, 0.4, 1],
-      [7.2, 19.0, -1.5, 0.45, 0],
-      [7.3, 21.0, -1.2, 0.35, 0],
-      [8.8, 19.4, -1.05, 0.5, 1],
-      [9.5, 20.5, -1.0, 0.4, 0],
-      [13.6, 19.3, -1.05, 0.5, 0],
-      [13.9, 20.7, -1.15, 0.35, 1],
-      [9.0, 22.2, -5.8, 0.55, 0],
-      [11.5, 22.25, -6.2, 0.6, 1],
-      [12.6, 22.15, -3.6, 0.4, 0],
-      [8.6, 22.2, -3.2, 0.35, 1],
-      [13.2, 22.3, -2.0, 0.45, 0],
-    ]) knob(x, y, z, diameter, golden);
-    box(12.8, 19.05, -6.7, 13.7, 19.22, -6.4, M.ember, dress);
-    box(8.7, 20.85, -7.15, 9.7, 21.02, -6.75, M.ember, dress);
-    for (const [x, y, z, diameter] of [
-      [10.5, 22.3, -4.3, 0.32],
-      [8.4, 21.4, -6.9, 0.26],
-      [13.2, 19.5, -6.55, 0.3],
-      [12.2, 22.25, -2.6, 0.2],
-    ]) {
-      const mesh = MeshBuilder.CreateSphere("caveGlow", { diameter, segments: 8 }, scene);
-      mesh.position.set(x, y, z);
-      add(mesh, M.ember, { camera: false });
-    }
-    for (const [x, y, z, intensity, range] of [
-      [10.6, 21.0, -4.8, 2.1, 8.5],
-      [13.1, 19.3, -6.4, 1.5, 6.2],
-    ]) {
-      const light = new PointLight("caveGlow", new Vector3(x, y, z), scene);
-      light.parent = root;
-      light.diffuse = new Color3(1, 0.62, 0.24);
-      light.specular = new Color3(1, 0.78, 0.42);
-      light.intensity = intensity;
-      light.range = range;
-      owned.push(light);
-    }
+    for (const [a, b, c, d, e, f] of [...walls, ...rocks]) box(a, b, c, d, e, f, null);
+    const cave = buildLimestoneCave(scene, root, { floor, top, walls, rocks, zip: { z: ZIP_TO.z, bracketX: ZIP_TO.x + 1.2 } });
+    owned.push(...cave.owned);
+    casters.push(...cave.casters);
   }
   marker(KILLER_LEVEL, SPAWNS[KILLER_LEVEL].x, KILLER_FLOOR, SPAWNS[KILLER_LEVEL].z);
 
@@ -2424,8 +2286,8 @@ function buildSite(scene, origin, { graphics, audio }) {
      * wall, bars, squishy, or other capybara, with a little room behind the camera too.
      */
     viewClear(actor, eye, target) {
-      const from = target.add(origin);
-      const way = eye.subtract(target);
+      const from = Vector3.Add(target, origin);
+      const way = Vector3.Subtract(eye, target);
       const length = way.length() + 0.25;
       way.normalize();
       const blocks = (mesh) =>
@@ -2433,9 +2295,9 @@ function buildSite(scene, origin, { graphics, audio }) {
       if (scene.pickWithRay(new Ray(from, way, length), blocks)?.hit) return false;
       for (const other of [...police, ...roadPolice, ...alleyPolice, killer, chef, escapee]) {
         if (other === actor || !other.body.isEnabled()) continue;
-        const middle = other.position.add(new Vector3(0, 0.5 * other.size, 0));
-        const along = Math.max(0, Math.min(length, Vector3.Dot(middle.subtract(target), way)));
-        const closest = target.add(way.scale(along));
+        const middle = new Vector3(other.position.x, other.position.y + 0.5 * other.size, other.position.z);
+        const along = Math.max(0, Math.min(length, Vector3.Dot(Vector3.Subtract(middle, target), way)));
+        const closest = Vector3.Add(target, way.scale(along));
         if (Vector3.Distance(middle, closest) < 0.55 * other.size + 0.2) return false;
       }
       return true;
@@ -3667,7 +3529,7 @@ function createShots(scene, root, boss) {
     mesh.parent = root;
     mesh.isPickable = false;
     mesh.position.copyFrom(from);
-    const velocity = toward.subtract(from).normalize().scaleInPlace(speed);
+    const velocity = Vector3.Subtract(toward, from).normalize().scaleInPlace(speed);
     mesh.rotation.y = Math.atan2(velocity.x, velocity.z);
     flying.push({ mesh, velocity, mine, life: 4 });
   };
