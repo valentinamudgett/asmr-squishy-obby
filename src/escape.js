@@ -549,13 +549,19 @@ export function createEscape(scene, { graphics, audio, avatar }) {
     // Toward you if the camera fits there (you're hidden for the close-up), else the next most open way.
     const toward = Math.atan2(here.x - actor.position.x, here.z - actor.position.z);
     let yaw = toward;
-    for (let step = 0; step < 8; step += 1) {
-      const turn = toward + (step % 2 ? 1 : -1) * Math.ceil(step / 2) * (Math.PI / 4);
-      actor.closeUp(eye, target, turn);
-      if (site.viewClear(actor, eye, target)) {
-        yaw = turn;
-        break;
+    // A throw here would repeat every frame (`caught` is never set), so fall back to facing you.
+    try {
+      for (let step = 0; step < 8; step += 1) {
+        const turn = toward + (step % 2 ? 1 : -1) * Math.ceil(step / 2) * (Math.PI / 4);
+        actor.closeUp(eye, target, turn);
+        if (site.viewClear(actor, eye, target)) {
+          yaw = turn;
+          break;
+        }
       }
+    } catch (error) {
+      console.error("Caught close-up view check failed", error);
+      yaw = toward;
     }
     actor.faceYaw(yaw);
     actor.closeUp(eye, target);
@@ -2286,8 +2292,8 @@ function buildSite(scene, origin, { graphics, audio }) {
      * wall, bars, squishy, or other capybara, with a little room behind the camera too.
      */
     viewClear(actor, eye, target) {
-      const from = Vector3.Add(target, origin);
-      const way = Vector3.Subtract(eye, target);
+      const from = target.add(origin);
+      const way = eye.subtract(target);
       const length = way.length() + 0.25;
       way.normalize();
       const blocks = (mesh) =>
@@ -2296,8 +2302,8 @@ function buildSite(scene, origin, { graphics, audio }) {
       for (const other of [...police, ...roadPolice, ...alleyPolice, killer, chef, escapee]) {
         if (other === actor || !other.body.isEnabled()) continue;
         const middle = new Vector3(other.position.x, other.position.y + 0.5 * other.size, other.position.z);
-        const along = Math.max(0, Math.min(length, Vector3.Dot(Vector3.Subtract(middle, target), way)));
-        const closest = Vector3.Add(target, way.scale(along));
+        const along = Math.max(0, Math.min(length, Vector3.Dot(middle.subtract(target), way)));
+        const closest = target.add(way.scale(along));
         if (Vector3.Distance(middle, closest) < 0.55 * other.size + 0.2) return false;
       }
       return true;
@@ -3529,7 +3535,7 @@ function createShots(scene, root, boss) {
     mesh.parent = root;
     mesh.isPickable = false;
     mesh.position.copyFrom(from);
-    const velocity = Vector3.Subtract(toward, from).normalize().scaleInPlace(speed);
+    const velocity = toward.subtract(from).normalize().scaleInPlace(speed);
     mesh.rotation.y = Math.atan2(velocity.x, velocity.z);
     flying.push({ mesh, velocity, mine, life: 4 });
   };
