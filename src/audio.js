@@ -106,6 +106,38 @@ export async function createAudio() {
     applyMenuMusic();
   }
 
+  // A soft engine hum for city driving, made on first use and left running quietly at zero volume.
+  let engine = null;
+  function setEngine(level, loudness = 1) {
+    const ctx = audioEngine.audioContext ?? audioEngine._audioContext;
+    if (!unlocked || !ctx) return;
+    const on = level > 0 && loudness > 0 && audioEngine.volume > 0;
+    if (!engine) {
+      if (!on) return;
+      const tone = ctx.createOscillator();
+      tone.type = "sawtooth";
+      const rumble = ctx.createOscillator();
+      rumble.type = "triangle";
+      const soft = ctx.createBiquadFilter();
+      soft.type = "lowpass";
+      soft.frequency.value = 420;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      tone.connect(soft);
+      rumble.connect(soft);
+      soft.connect(gain);
+      gain.connect(ctx.destination);
+      tone.start();
+      rumble.start();
+      engine = { tone, rumble, gain };
+    }
+    const now = ctx.currentTime;
+    const speed = Math.max(0, Math.min(1, level));
+    engine.tone.frequency.setTargetAtTime(46 + speed * 92, now, 0.08);
+    engine.rumble.frequency.setTargetAtTime(23 + speed * 46, now, 0.08);
+    engine.gain.gain.setTargetAtTime(on ? (0.028 + speed * 0.03) * loudness : 0, now, 0.12);
+  }
+
   function unlock() {
     if (!unlockPromise) {
       unlockPromise = audioEngine.unlockAsync().then(() => {
@@ -122,6 +154,8 @@ export async function createAudio() {
     get unlocked() {
       return unlocked;
     },
+    /** City driving. 0 is silent, and anything above idles up to full speed at 1. Loudness scales it per ride. */
+    setEngine,
     unlock,
     /** Loop the start-menu track while a menu is up, and the picked song on the course. */
     setMenuMusic(on) {
@@ -205,11 +239,32 @@ export async function createAudio() {
     },
     /**
      * A synth zap: "pew" for a blaster shot, "thump" when something gets hit, "clank" for metal
-     * snapping together, "ding" for an elevator arriving.
+     * snapping together, "ding" for an elevator arriving, "horn" for your car, "honk" for traffic behind you,
+     * "bell" for the bike.
      */
     blip(kind) {
       const ctx = audioEngine.audioContext ?? audioEngine._audioContext;
       if (!unlocked || !ctx || audioEngine.volume <= 0) return;
+      if (kind === "bell") {
+        const now = ctx.currentTime;
+        // Ring-ring: two quick strikes, each a bright tone with a clangy overtone.
+        for (const start of [now, now + 0.16]) {
+          for (const [pitch, level] of [[2093, 0.08], [5340, 0.025]]) {
+            const tone = ctx.createOscillator();
+            tone.type = "sine";
+            tone.frequency.setValueAtTime(pitch, start);
+            const gain = ctx.createGain();
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.setValueAtTime(level, start);
+            gain.gain.exponentialRampToValueAtTime(0.001, start + 0.6);
+            tone.connect(gain);
+            gain.connect(ctx.destination);
+            tone.start(start);
+            tone.stop(start + 0.6);
+          }
+        }
+        return;
+      }
       if (kind === "ding") {
         const now = ctx.currentTime;
         [1319, 1047].forEach((pitch, index) => {
@@ -243,6 +298,31 @@ export async function createAudio() {
           tone.connect(gain);
           tone.start(now);
           tone.stop(now + 0.18);
+        }
+        return;
+      }
+      if (kind === "horn" || kind === "honk") {
+        const now = ctx.currentTime;
+        const far = kind === "honk";
+        const length = far ? 0.32 : 0.42;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(far ? 0.035 : 0.09, now + 0.03);
+        gain.gain.setValueAtTime(far ? 0.035 : 0.09, now + length - 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + length);
+        gain.connect(ctx.destination);
+        // Two notes a third apart, like a little car's beep.
+        for (const pitch of far ? [330, 415] : [392, 494]) {
+          const tone = ctx.createOscillator();
+          tone.type = "sawtooth";
+          tone.frequency.setValueAtTime(pitch, now);
+          const soft = ctx.createBiquadFilter();
+          soft.type = "lowpass";
+          soft.frequency.setValueAtTime(1600, now);
+          tone.connect(soft);
+          soft.connect(gain);
+          tone.start(now);
+          tone.stop(now + length);
         }
         return;
       }

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fd3ff"/>
+      <stop offset="1" stop-color="#ffe9d6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <ellipse cx="240" cy="120" rx="100" ry="36" fill="#fff" opacity="0.85"/>
+  <ellipse cx="1040" cy="150" rx="120" ry="40" fill="#fff" opacity="0.8"/>
+  <rect x="80" y="230" width="190" height="330" rx="10" fill="#c7b3ff"/>
+  <rect x="300" y="300" width="160" height="260" rx="10" fill="#ffb7d5"/>
+  <rect x="850" y="90" width="150" height="470" rx="10" fill="#7ec8ff"/>
+  <rect x="870" y="60" width="110" height="40" rx="8" fill="#ffd23f"/>
+  <rect x="1030" y="260" width="180" height="300" rx="10" fill="#ffd9a0"/>
+  <g fill="#fff6ea" opacity="0.92">
+    <rect x="108" y="260" width="40" height="30" rx="5"/><rect x="200" y="260" width="40" height="30" rx="5"/>
+    <rect x="108" y="320" width="40" height="30" rx="5"/><rect x="200" y="320" width="40" height="30" rx="5"/>
+    <rect x="108" y="380" width="40" height="30" rx="5"/><rect x="200" y="380" width="40" height="30" rx="5"/>
+    <rect x="108" y="440" width="40" height="30" rx="5"/><rect x="200" y="440" width="40" height="30" rx="5"/>
+    <rect x="325" y="330" width="40" height="30" rx="5"/><rect x="395" y="330" width="40" height="30" rx="5"/>
+    <rect x="325" y="390" width="40" height="30" rx="5"/><rect x="395" y="390" width="40" height="30" rx="5"/>
+    <rect x="875" y="130" width="40" height="26" rx="5"/><rect x="935" y="130" width="40" height="26" rx="5"/>
+    <rect x="875" y="190" width="40" height="26" rx="5"/><rect x="935" y="190" width="40" height="26" rx="5"/>
+    <rect x="875" y="250" width="40" height="26" rx="5"/><rect x="935" y="250" width="40" height="26" rx="5"/>
+    <rect x="875" y="310" width="40" height="26" rx="5"/><rect x="935" y="310" width="40" height="26" rx="5"/>
+    <rect x="875" y="370" width="40" height="26" rx="5"/><rect x="935" y="370" width="40" height="26" rx="5"/>
+    <rect x="1060" y="290" width="44" height="32" rx="5"/><rect x="1136" y="290" width="44" height="32" rx="5"/>
+    <rect x="1060" y="360" width="44" height="32" rx="5"/><rect x="1136" y="360" width="44" height="32" rx="5"/>
+  </g>
+  <g transform="translate(520,380)">
+    <rect x="0" y="70" width="250" height="110" rx="8" fill="#fff6ea"/>
+    <polygon points="-20,74 125,0 270,74" fill="#e23b78"/>
+    <rect x="100" y="110" width="50" height="70" rx="6" fill="#8a5a32"/>
+    <rect x="28" y="100" width="50" height="40" rx="5" fill="#9ad8ff"/>
+    <rect x="172" y="100" width="50" height="40" rx="5" fill="#9ad8ff"/>
+  </g>
+  <rect x="0" y="560" width="1280" height="160" fill="#5d5a6b"/>
+  <g fill="#fff6ea">
+    <rect x="40" y="634" width="110" height="12" rx="6"/>
+    <rect x="260" y="634" width="110" height="12" rx="6"/>
+    <rect x="900" y="634" width="110" height="12" rx="6"/>
+    <rect x="1120" y="634" width="110" height="12" rx="6"/>
+  </g>
+  <g transform="translate(470,588)">
+    <rect x="0" y="40" width="320" height="58" rx="26" fill="#ff4d8d"/>
+    <path d="M70 42 C90 0, 220 0, 250 42Z" fill="#ff8ab4"/>
+    <circle cx="128" cy="30" r="18" fill="#ffd7b5"/>
+    <rect x="230" y="20" width="10" height="26" rx="4" fill="#4d315f"/>
+    <circle cx="70" cy="100" r="26" fill="#2b2433"/>
+    <circle cx="70" cy="100" r="11" fill="#d9d4e0"/>
+    <circle cx="252" cy="100" r="26" fill="#2b2433"/>
+    <circle cx="252" cy="100" r="11" fill="#d9d4e0"/>
+    <rect x="300" y="54" width="20" height="14" rx="5" fill="#ffd23f"/>
+  </g>
+</svg>

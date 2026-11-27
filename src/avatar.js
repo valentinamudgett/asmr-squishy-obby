@@ -21,14 +21,16 @@ import {
 import { buildCostumes, costumeById, costumeSkin, POLICE_CAP } from "./costumes.js";
 import { DANCE_LENGTH, danceById } from "./dances.js";
 import { drawFace } from "./faces.js";
-import { hexToColor3, mulberry32, paint, roundedBox, smoothstep } from "./geometry.js";
+import { hexToColor3, mulberry32, paint, roundedBox, smoothstep, weld } from "./geometry.js";
 import { fabricFontsReady, outfitById, paintOverlay, paintPattern, patternKey, patternNeedsFonts, POLICE_OUTFIT } from "./outfits.js";
+import { disposeMaterial, fabricMaterial, furTextures, hairTextures, leatherMaterial, metalMaterial, skinMaterial, tintSkin } from "./surfaces.js";
 
 export { hexToColor3 };
 
-const HIP_Y = 0.5;
-// Flip around the chest so the feet and head trade places instead of spinning around the toes.
-const FLIP_PIVOT = 0.7;
+// Hip joint above the soles, before a build stretches the legs.
+const HIP_Y = 0.7;
+// Coaster carts are built round a hip sitting this high above the feet, in world meters.
+const SEAT_HIP = 0.45;
 // Visible yaw, lean, and landing settle. Physics speeds are unchanged; these only move the mesh.
 const TURN_TAU = 0.045;
 const TORSO_TAU = 0.05;
@@ -40,22 +42,107 @@ const JUMP_SQUAT = 0.16;
 const JUMP_STRETCH = 0.11;
 const SQUAT_TIME = 0.06;
 const STRETCH_TIME = 0.1;
-const SHOULDER_Y = 0.96;
-const HEAD_Y = 1.19;
+// Up from the hip joint to the shoulder joints, and to where the neck leaves the torso.
+const TORSO_H = 0.375;
+const NECK_BASE = 0.435;
+const NECK = 0.05;
+const NECK_R = 0.042;
+// From the middle of the head up to the crown and down to the chin.
 const HEAD_HALF = 0.18;
-const NECK = 0.03;
-const TORSO_H = 0.48;
+const HEAD_CHIN = 0.255;
+// Shoulder joints out from the middle for a girl and a boy, before the build widens them.
+const SHOULDER_X = [0.128, 0.142];
+const LEG_X = 0.075;
+// Arms hang this far out from the sides, in radians, so they clear the hips.
+const ARM_OUT = 0.12;
+const THIGH = 0.33;
+const WRIST_Y = -0.455;
+// The middle of the palm, on the shoulder pivot.
+const HAND_Y = -0.505;
+const BELT_Y = 0.083;
+// Torso sections are superellipses this square.
+const SECTION = 2.6;
 // The bow sits on the upper back of the head, pushed out to wherever the current hair ends.
 const BOW_ORIGIN = new Vector3(0, 0.06, -0.02);
 const BOW_DIRECTION = new Vector3(0.1, 0.11, -0.15).normalize();
 const FACE_W = 512;
 const FACE_H = 536;
 
-/** Proportions per age, as multipliers on the kid rig. Older means longer limbs and a smaller head. */
+/**
+ * Torso sections from the crotch to the base of the neck, up from the hip joint:
+ * [height, half width, front depth, back depth]. A girl's hips are wider and a boy's shoulders.
+ */
+const TORSO_GIRL = [
+  [-0.088, 0, 0, 0],
+  [-0.08, 0.06, 0.045, 0.05],
+  [-0.055, 0.118, 0.07, 0.086],
+  [-0.02, 0.142, 0.08, 0.098],
+  [0.03, 0.146, 0.082, 0.096],
+  [0.1, 0.126, 0.076, 0.08],
+  [0.17, 0.108, 0.072, 0.07],
+  [0.24, 0.112, 0.08, 0.07],
+  [0.3, 0.12, 0.086, 0.074],
+  [0.35, 0.13, 0.082, 0.074],
+  [0.385, 0.135, 0.07, 0.07],
+  [0.41, 0.115, 0.058, 0.062],
+  [0.43, 0.075, 0.048, 0.05],
+  [0.445, 0.04, 0.035, 0.04],
+  [0.452, 0, 0, 0],
+];
+const TORSO_BOY = [
+  [-0.088, 0, 0, 0],
+  [-0.08, 0.06, 0.045, 0.05],
+  [-0.055, 0.112, 0.07, 0.08],
+  [-0.02, 0.13, 0.078, 0.088],
+  [0.03, 0.13, 0.08, 0.085],
+  [0.1, 0.122, 0.078, 0.078],
+  [0.17, 0.116, 0.078, 0.074],
+  [0.24, 0.124, 0.085, 0.075],
+  [0.3, 0.134, 0.09, 0.078],
+  [0.35, 0.146, 0.086, 0.078],
+  [0.385, 0.153, 0.074, 0.074],
+  [0.41, 0.13, 0.06, 0.064],
+  [0.43, 0.08, 0.05, 0.052],
+  [0.445, 0.042, 0.036, 0.04],
+  [0.452, 0, 0, 0],
+];
+
+// Limb outlines as [drop below the joint, radius], top to bottom.
+const UPPER_ARM = [
+  [0, 0.044],
+  [0.07, 0.043],
+  [0.16, 0.039],
+  [0.25, 0.034],
+];
+const FOREARM = [
+  [0.24, 0.035],
+  [0.29, 0.037],
+  [0.38, 0.031],
+  [WRIST_Y * -1, 0.027],
+];
+const THIGH_SHAPE = [
+  [0, 0.066],
+  [0.08, 0.064],
+  [0.2, 0.055],
+  [THIGH, 0.044],
+];
+const SHIN_SHAPE = [
+  [0, 0.043],
+  [0.08, 0.049],
+  [0.17, 0.042],
+  [0.29, 0.03],
+  [0.31, 0.029],
+];
+
+/**
+ * Proportions per age, as multipliers on the kid rig: a kid is about six heads tall, a teen seven
+ * and a half, a grown-up a little more, with longer limbs, a wider and deeper chest, and thicker
+ * arms and legs (`limb`).
+ */
 const BUILDS = {
-  kid: { scale: 0.9, legs: 1, torso: 1, arms: 1, head: 1, width: 1 },
-  teen: { scale: 0.95, legs: 1.24, torso: 1.1, arms: 1.16, head: 0.9, width: 1.03 },
-  adult: { scale: 1, legs: 1.42, torso: 1.2, arms: 1.3, head: 0.84, width: 1.06 },
+  kid: { scale: 0.9, legs: 1, torso: 1, arms: 1, head: 0.56, width: 1, depth: 1, limb: 1 },
+  teen: { scale: 0.95, legs: 1.22, torso: 1.13, arms: 1.18, head: 0.52, width: 1.1, depth: 1.08, limb: 1.1 },
+  adult: { scale: 1, legs: 1.26, torso: 1.18, arms: 1.24, head: 0.53, width: 1.16, depth: 1.16, limb: 1.22 },
 };
 
 export function buildAvatar(scene) {
@@ -65,14 +152,19 @@ export function buildAvatar(scene) {
   rig.scaling.setAll(BUILDS.kid.scale);
   const body = new TransformNode("avatarBody", scene);
   body.parent = rig;
+  // The torso and what's worn round it are built about the hip joint and stretched together by the build.
+  const frame = new TransformNode("avatarTorsoFrame", scene);
+  frame.parent = body;
+  frame.position.y = HIP_Y;
 
   const materials = new Map();
-  const skin = cloth(scene, "avatarSkin");
-  const materialFor = (pattern, repeat = 1) => {
+  const skin = skinMaterial(scene, "avatarSkin");
+  const materialFor = (pattern, repeat = 1, kind = "cloth") => {
     if (pattern === "skin") return skin;
-    const key = `${patternKey(pattern)}|${repeat}`;
+    const key = `${patternKey(pattern)}|${repeat}|${kind}`;
     if (materials.has(key)) return materials.get(key);
-    const material = cloth(scene, `avatarCloth${materials.size}`);
+    const name = `avatarCloth${materials.size}`;
+    const material = kind === "shoe" ? leatherMaterial(scene, name) : fabricMaterial(scene, name);
     if (typeof pattern === "string") {
       material.diffuseColor = hexToColor3(pattern);
     } else {
@@ -96,67 +188,50 @@ export function buildAvatar(scene) {
     return material;
   };
 
-  const box = (name, w, h, d, parent, x, y, z) => {
-    const mesh = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
-    mesh.parent = parent;
-    mesh.position.set(x, y, z);
-    return mesh;
-  };
-
-  const torso = box("avatarTorso", 0.5, 0.48, 0.25, body, 0, HIP_Y + 0.24, 0);
+  const torso = new Mesh("avatarTorso", scene);
+  torso.parent = frame;
   const overlayTexture = new DynamicTexture("avatarOverlay", { width: 256, height: 256 }, scene, true);
   overlayTexture.hasAlpha = true;
-  const overlayMat = cloth(scene, "avatarOverlayMat");
+  const overlayMat = fabricMaterial(scene, "avatarOverlayMat");
   overlayMat.diffuseTexture = overlayTexture;
   overlayMat.useAlphaFromDiffuseTexture = true;
   overlayMat.backFaceCulling = false;
   overlayMat.zOffset = -1;
-  const overlay = MeshBuilder.CreatePlane("avatarOverlay", { width: 0.5, height: 0.48 }, scene);
-  overlay.parent = body;
-  overlay.position.set(0, HIP_Y + 0.24, 0.1265);
-  overlay.rotation.y = Math.PI;
+  const overlay = new Mesh("avatarOverlay", scene);
+  overlay.parent = frame;
   overlay.material = overlayMat;
+  const skirt = new Mesh("avatarSkirt", scene);
+  skirt.parent = frame;
 
-  const skirt = MeshBuilder.CreateCylinder(
-    "avatarSkirt",
-    { height: 0.22, diameterTop: 0.58, diameterBottom: 0.82, tessellation: 28 },
-    scene,
-  );
-  skirt.parent = body;
-  skirt.position.y = HIP_Y + 0.05;
-  skirt.scaling.z = 0.6;
+  const neck = MeshBuilder.CreateCylinder("avatarNeck", { height: 1, diameter: 1, tessellation: 20 }, scene);
+  neck.parent = body;
+  neck.material = skin;
 
   const limb = (side, isArm) => {
     const pivot = new TransformNode(`${isArm ? "arm" : "leg"}${side}`, scene);
     pivot.parent = body;
-    if (isArm) pivot.position.set(side * 0.365, SHOULDER_Y, 0);
-    else pivot.position.set(side * 0.125, HIP_Y, 0);
-    const width = isArm ? 0.22 : 0.245;
-    const sizes = isArm ? [0.24, 0.16, 0.08] : [0.2, 0.24, 0.06];
-    let y = isArm ? 0.02 : 0;
-    // Shin and foot hang off a knee so the coaster seat can fold them. Straight (rotation 0) matches the old leg.
+    // Shin and foot hang off a knee so the coaster seat can fold them.
     // Arms stay one piece: cuffs, mitts, and held toys are placed on the shoulder pivot.
     const bend = isArm ? null : new TransformNode(`${pivot.name}Bend`, scene);
     if (bend) {
       bend.parent = pivot;
-      bend.position.y = -sizes[0];
+      bend.position.y = -THIGH;
     }
-    const parts = sizes.map((height, index) => {
-      const foot = !isArm && index === 2;
-      const folded = Boolean(bend) && index > 0;
-      const mesh = box(
-        `${pivot.name}-${index}`,
-        width + (foot ? 0.01 : 0),
-        height,
-        foot ? 0.3 : isArm ? 0.22 : 0.245,
-        folded ? bend : pivot,
-        0,
-        (folded ? y - bend.position.y : y) - height / 2,
-        foot ? 0.03 : 0,
-      );
-      y -= height;
+    const hang = (mesh, parent) => {
+      mesh.parent = parent;
       return mesh;
-    });
+    };
+    const parts = isArm
+      ? [
+          hang(limbMesh(scene, `${pivot.name}-0`, UPPER_ARM), pivot),
+          hang(limbMesh(scene, `${pivot.name}-1`, FOREARM), pivot),
+          hang(buildHand(scene, `${pivot.name}-2`, side), pivot),
+        ]
+      : [
+          hang(limbMesh(scene, `${pivot.name}-0`, THIGH_SHAPE), pivot),
+          hang(limbMesh(scene, `${pivot.name}-1`, SHIN_SHAPE), bend),
+          hang(buildShoe(scene, `${pivot.name}-2`), bend),
+        ];
     return { side, pivot, bend, parts };
   };
   const arms = [limb(-1, true), limb(1, true)];
@@ -164,8 +239,7 @@ export function buildAvatar(scene) {
 
   const headNode = new TransformNode("avatarHead", scene);
   headNode.parent = body;
-  headNode.position.y = HEAD_Y;
-  const head = roundedCylinder(scene, "avatarHeadMesh", 0.19, 0.36, 0.075);
+  const head = buildHead(scene);
   head.parent = headNode;
   head.material = skin;
 
@@ -178,31 +252,39 @@ export function buildAvatar(scene) {
   faceMat.emissiveColor = new Color3(0.18, 0.18, 0.18);
   faceMat.backFaceCulling = false;
   faceMat.zOffset = -2;
-  const face = curvedPatch(scene, "avatarFaceMesh", 0.1915, 1.5, 0.3);
+  const face = facePatch(scene, "avatarFaceMesh");
   face.parent = headNode;
   face.material = faceMat;
 
+  // The hair's own vertex colors tint fine strands with a soft sheen running along them.
+  const strands = hairTextures(scene);
   const hairMat = new StandardMaterial("avatarHair", scene);
   hairMat.diffuseColor = Color3.White();
-  hairMat.specularColor = new Color3(0.18, 0.16, 0.14);
-  hairMat.specularPower = 24;
+  hairMat.diffuseTexture = strands.color;
+  hairMat.bumpTexture = strands.bump;
+  hairMat.bumpTexture.level = 0.55;
+  hairMat.specularColor = new Color3(0.24, 0.22, 0.2);
+  hairMat.specularPower = 44;
   hairMat.backFaceCulling = false;
+  const choker = buildChoker(scene);
   const hairStyles = {
     long: { mesh: buildHair(scene), extras: [] },
     short: { mesh: buildShortHair(scene), extras: [] },
     shaggy: { mesh: buildShaggyHair(scene), extras: [] },
     buns: { mesh: buildBunHair(scene), extras: [] },
-    headphones: { mesh: buildBraidHair(scene), extras: [...buildHeadphones(scene), ...buildChoker(scene)] },
+    headphones: { mesh: buildBraidHair(scene), extras: [...buildHeadphones(scene), choker] },
     waves: { mesh: buildHeadbandHair(scene), extras: buildHeadband(scene) },
     redwaves: { mesh: buildRedWaveHair(scene), extras: [] },
   };
   for (const entry of Object.values(hairStyles)) {
     entry.mesh.parent = headNode;
     entry.mesh.material = hairMat;
-    const ys = entry.mesh.getVerticesData(VertexBuffer.PositionKind).filter((_, index) => index % 3 === 1);
+    const rest = entry.mesh.getVerticesData(VertexBuffer.PositionKind);
+    const ys = rest.filter((_, index) => index % 3 === 1);
     // Hair is built painted in grays. Keep that as shading under whatever color the player picks.
     const baked = entry.mesh.getVerticesData(VertexBuffer.ColorKind);
     entry.mesh.metadata = {
+      rest: Float32Array.from(rest),
       shade: baked ? Float32Array.from({ length: ys.length }, (_, index) => baked[index * 4]) : null,
       top: Math.max(...ys),
       bottom: Math.min(...ys),
@@ -214,8 +296,9 @@ export function buildAvatar(scene) {
     }
   }
 
-  const bowMat = cloth(scene, "avatarBow");
+  const bowMat = fabricMaterial(scene, "avatarBow");
   bowMat.diffuseColor = hexToColor3("#ff8fb8");
+  bowMat.specularColor = new Color3(0.16, 0.14, 0.15);
   const bow = buildBow(scene);
   bow.parent = headNode;
   bow.rotationQuaternion = new Quaternion();
@@ -224,7 +307,7 @@ export function buildAvatar(scene) {
   bow.material = bowMat;
 
   const necklace = buildNecklace(scene);
-  necklace.root.parent = headNode;
+  necklace.root.parent = body;
   necklace.root.setEnabled(false);
   const wearBand = buildWearHeadband(scene);
   wearBand.parent = headNode;
@@ -234,58 +317,54 @@ export function buildAvatar(scene) {
   bracelet.root.setEnabled(false);
   const held = buildHeldSquishies(scene);
   held.root.parent = arms[1].pivot;
-  // Palm of the right hand: the hand box is centered near y -0.42, and its front face is at z 0.11.
-  held.root.position.set(-0.01, -0.4, 0.16);
+  // Against the palm of the right hand, on the thumb side.
+  held.root.position.set(-0.012, HAND_Y + 0.005, 0.105);
   held.root.rotation.set(0.85, -0.2, 0.15);
   held.root.setEnabled(false);
   const blaster = buildBlaster(scene);
   blaster.root.parent = arms[1].pivot;
-  blaster.root.position.set(0, -0.42, 0.01);
+  blaster.root.position.set(0, HAND_Y + 0.02, 0);
   blaster.root.setEnabled(false);
   let armed = false;
-  // Center of the left fist. Its y scale undoes the arm's stretch, so anything held keeps its shape.
+  // Middle of the left fist. Its scale undoes the arm's stretch, so anything held keeps its shape.
   const leftGrip = new TransformNode("avatarLeftGrip", scene);
   leftGrip.parent = arms[0].pivot;
-  leftGrip.position.set(0, -0.42, 0);
+  leftGrip.position.set(0, HAND_Y, 0);
   let leftHeld = false;
-  const costumes = buildCostumes(scene, headNode, body, { arms, skin });
+  const costumes = buildCostumes(scene, headNode, body, { arms, skin, hand: { wrist: WRIST_Y, palm: HAND_Y, radius: 0.03 } });
 
-  const furTexture = new DynamicTexture("avatarFur", { width: 256, height: 256 }, scene, true);
-  paintFur(furTexture.getContext(), 256);
-  furTexture.update();
-  furTexture.wrapU = Texture.WRAP_ADDRESSMODE;
-  furTexture.wrapV = Texture.WRAP_ADDRESSMODE;
-  const hoodMat = cloth(scene, "avatarHoodMat");
-  hoodMat.diffuseTexture = furTexture;
+  const hoodMat = fabricMaterial(scene, "avatarHoodMat");
+  hoodMat.diffuseTexture = furTextures(scene).color;
   hoodMat.backFaceCulling = false;
   const hood = buildHood(scene);
   hood.parent = headNode;
   hood.material = hoodMat;
 
-  const beltMat = cloth(scene, "avatarBeltMat");
-  beltMat.specularColor = new Color3(0.2, 0.2, 0.2);
-  const buckleMat = cloth(scene, "avatarBuckleMat");
-  buckleMat.diffuseColor = new Color3(0.82, 0.83, 0.86);
-  buckleMat.specularColor = new Color3(0.9, 0.9, 0.9);
-  buckleMat.specularPower = 48;
+  const beltMat = leatherMaterial(scene, "avatarBeltMat");
+  beltMat.backFaceCulling = false;
+  const buckleMat = metalMaterial(scene, "avatarBuckleMat", "#d1d3da");
   const belt = new TransformNode("avatarBelt", scene);
-  belt.parent = body;
-  const beltStrap = box("avatarBeltStrap", 0.51, 0.05, 0.26, belt, 0, 0, 0);
+  belt.parent = frame;
+  const beltStrap = new Mesh("avatarBeltStrap", scene);
+  beltStrap.parent = belt;
   beltStrap.material = beltMat;
-  const buckle = box("avatarBuckle", 0.08, 0.055, 0.012, belt, 0, 0, 0.134);
+  const buckle = roundedBox(scene, "avatarBuckle", { width: 0.05, height: 0.036, depth: 0.008, radius: 0.004, segments: 3 });
+  buckle.parent = belt;
   buckle.material = buckleMat;
-  const buckleHole = box("avatarBuckleHole", 0.05, 0.027, 0.006, belt, 0, 0, 0.141);
+  const buckleHole = MeshBuilder.CreateBox("avatarBuckleHole", { width: 0.03, height: 0.017, depth: 0.004 }, scene);
+  buckleHole.parent = buckle;
+  buckleHole.position.z = 0.003;
   buckleHole.material = beltMat;
 
   const hipClothTexture = new DynamicTexture("avatarHipCloth", { width: 128, height: 256 }, scene, true);
   hipClothTexture.hasAlpha = true;
-  const hipClothMat = cloth(scene, "avatarHipClothMat");
+  const hipClothMat = fabricMaterial(scene, "avatarHipClothMat");
   hipClothMat.diffuseTexture = hipClothTexture;
   hipClothMat.useAlphaFromDiffuseTexture = true;
   hipClothMat.backFaceCulling = false;
   const hipCloth = buildHipCloth(scene);
   hipCloth.parent = legs[0].pivot;
-  hipCloth.position.set(-0.13, -0.01, 0.13);
+  hipCloth.position.set(-0.064, -0.01, 0.064);
   hipCloth.material = hipClothMat;
   let hipClothColor = null;
   let faceId = "grin";
@@ -300,6 +379,7 @@ export function buildAvatar(scene) {
   const parts = [
     torso,
     skirt,
+    neck,
     head,
     ...Object.values(hairStyles).flatMap((entry) => [entry.mesh, ...entry.extras]),
     bow,
@@ -318,12 +398,17 @@ export function buildAvatar(scene) {
   ];
   let squash = 0;
   let rigLift = 0;
+  let flipPivot = HIP_Y + 0.25;
   let phase = 0;
   let walkBlend = 0;
   let runBlend = 0;
   let airBlend = 0;
   let flyBlend = 0;
   let hangBlend = 0;
+  let swimBlend = 0;
+  let treadBlend = 0;
+  let climbBlend = 0;
+  let swimPhase = 0;
   // How far a taller build must drop so its hip lands on the same cart seat as a kid.
   let sitDrop = 0;
   let move = null;
@@ -341,36 +426,125 @@ export function buildAvatar(scene) {
   let flipSpin = 0;
   let shownWave = 0;
   let trickKind = null;
-  let height = (HEAD_Y + HEAD_HALF + 0.05) * BUILDS.kid.scale;
+  let height = 1.28;
+  // Sections of the torso for the current girl-to-boy mix, and how the build stretches them.
+  let torsoMix = null;
+  let sections = null;
+  let build = BUILDS.kid;
+
+  /** The torso's half width and front and back depth at height `y` in body space, as built now. */
+  const section = (y) => {
+    const at = sectionAt(sections, (y - HIP_Y) / build.torso);
+    return { halfWidth: at.w * build.width, front: at.f * build.depth, back: at.b * build.depth };
+  };
+
+  const rebuildTorso = (mix) => {
+    sections = torsoSections(mix);
+    loft(torso, sections, { u: 1.5, v: 0.48 });
+    loft(overlay, sections, { from: -0.03, to: NECK_BASE + 0.01, rows: 24, theta: 0.46 * Math.PI, columns: 28, grow: () => 0.003 });
+    // Hugs the hips, then flares out over the thighs.
+    loft(skirt, sections, {
+      from: 0.13,
+      to: -0.27,
+      rows: 14,
+      clampBelow: 0.03,
+      grow: (y) => 0.008 + 0.12 * smoothstep(0.04, -0.27, y) ** 1.2,
+      u: 1,
+      v: 0.48,
+      doubleSided: true,
+    });
+    loft(beltStrap, sections, { from: BELT_Y - 0.022, to: BELT_Y + 0.022, rows: 2, grow: () => 0.005, u: 6, v: 1 });
+    buckle.position.set(0, BELT_Y, sectionAt(sections, BELT_Y).f + 0.009);
+  };
 
   const shape = (age, boy) => {
-    const build = BUILDS[age] ?? BUILDS.kid;
-    const wide = build.width * (boy && age !== "kid" ? 1.07 : 1);
-    const torsoH = TORSO_H * build.torso;
+    build = BUILDS[age] ?? BUILDS.kid;
+    const mix = boy ? (age === "kid" ? 0.65 : 1) : age === "kid" ? 0.35 : 0;
+    if (mix !== torsoMix) {
+      torsoMix = mix;
+      rebuildTorso(mix);
+    }
     rig.scaling.setAll(build.scale);
     // Longer legs reach further below the hip, so lift the rig to keep the feet on the ground.
     rigLift = HIP_Y * (build.legs - 1) * build.scale;
-    const kid = BUILDS.kid;
-    sitDrop = HIP_Y * build.legs - (HIP_Y * kid.legs * kid.scale) / build.scale;
+    sitDrop = HIP_Y * build.legs - SEAT_HIP / build.scale;
+    flipPivot = HIP_Y + 0.25 * build.torso;
     rig.position.y = rigLift;
-    torso.scaling.set(wide, build.torso, 1);
-    torso.position.y = HIP_Y + torsoH / 2;
-    overlay.scaling.set(wide, build.torso, 1);
-    overlay.position.y = HIP_Y + torsoH / 2;
-    skirt.scaling.set(wide, 1, 0.6);
-    belt.position.y = HIP_Y + 0.025;
-    beltStrap.scaling.x = wide;
+    frame.scaling.set(build.width, build.torso, build.depth);
+    const shoulderX = (SHOULDER_X[0] + (SHOULDER_X[1] - SHOULDER_X[0]) * mix) * build.width;
     for (const arm of arms) {
-      arm.pivot.position.set(arm.side * (0.25 * wide + 0.115), HIP_Y + torsoH - 0.02, 0);
-      arm.pivot.scaling.y = build.arms;
+      arm.pivot.position.set(arm.side * shoulderX, HIP_Y + TORSO_H * build.torso, 0);
+      arm.pivot.scaling.set(build.limb, build.arms, build.limb);
     }
-    for (const leg of legs) leg.pivot.scaling.y = build.legs;
-    leftGrip.scaling.y = 1 / build.arms;
+    for (const leg of legs) {
+      leg.pivot.position.set(leg.side * LEG_X * build.width, HIP_Y, 0);
+      leg.pivot.scaling.set(build.limb, build.legs, build.limb);
+    }
+    leftGrip.scaling.set(1 / build.limb, 1 / build.arms, 1 / build.limb);
+    blaster.root.scaling.copyFrom(leftGrip.scaling);
+    const neckBase = HIP_Y + NECK_BASE * build.torso;
     headNode.scaling.setAll(build.head);
-    headNode.position.y = HIP_Y + torsoH + NECK + HEAD_HALF * build.head;
+    headNode.position.y = neckBase + NECK * build.torso + HEAD_CHIN * build.head;
+    const neckBottom = neckBase - 0.035 * build.torso;
+    const neckTop = headNode.position.y - 0.12 * build.head;
+    const neckWidth = NECK_R * 2 * build.limb;
+    neck.position.set(0, (neckBottom + neckTop) / 2, -0.004);
+    neck.scaling.set(neckWidth, neckTop - neckBottom, neckWidth * 0.94);
+    const pendantY = neckBase - 0.075 * build.torso;
+    necklace.fit(neckBase + 0.004 * build.torso, NECK_R * build.limb, pendantY, section(pendantY).front);
+    const neckInHead = (NECK_R * build.limb) / build.head;
+    choker.position.set(0, -HEAD_CHIN - (NECK * build.torso * 0.5) / build.head, 0);
+    choker.scaling.setAll((neckInHead + 0.012) * 2);
     height = rig.position.y + (headNode.position.y + (HEAD_HALF + 0.05) * build.head) * build.scale;
-    return { top: HIP_Y + torsoH, bottom: HIP_Y - 0.42 * build.legs, wide };
+    return {
+      top: HIP_Y + 0.4 * build.torso,
+      bottom: HIP_Y - 0.45 * build.legs,
+      hip: HIP_Y,
+      wide: build.width,
+      deep: build.depth,
+      neck: neckBase,
+      neckRadius: NECK_R * build.limb,
+      section,
+      /** Fits `mesh` as a band round the torso from `from` to `to` above the hip joint, `grow` out from it. */
+      band(mesh, from, to, grow) {
+        loft(mesh, sections, { from, to, rows: 2, grow: () => grow, u: 6, v: 1 });
+        mesh.position.set(0, HIP_Y, 0);
+        mesh.scaling.copyFrom(frame.scaling);
+      },
+    };
   };
+
+  /**
+   * Long hair below the chin lies on the back and chest instead of sinking into them. Everything
+   * from the body's middle out to just past its surface is squeezed into a thin layer on the
+   * surface, in order, so locks keep their thickness and front faces stay in front.
+   */
+  const drape = (mesh) => {
+    const rest = mesh.metadata.rest;
+    const positions = Float32Array.from(rest);
+    const scale = headNode.scaling.y;
+    const center = headNode.position.y;
+    const bottom = HIP_Y - 0.1;
+    const top = HIP_Y + (NECK_BASE + 0.01) * build.torso;
+    const margin = 0.004;
+    const layer = 0.016;
+    for (let i = 0; i < rest.length; i += 3) {
+      const y = center + rest[i + 1] * scale;
+      if (y > top || y < bottom) continue;
+      const at = section(y);
+      const across = Math.abs(rest[i] * scale) / (at.halfWidth + margin);
+      if (across >= 1) continue;
+      const reach = (1 - across ** SECTION) ** (1 / SECTION);
+      const z = rest[i + 2] * scale;
+      const surface = ((z < 0 ? at.back : at.front) + margin) * reach;
+      const depth = Math.abs(z);
+      if (depth >= surface + layer) continue;
+      positions[i + 2] = (Math.sign(z || 1) * (surface + (layer * depth) / (surface + layer))) / scale;
+    }
+    mesh.setVerticesData(VertexBuffer.PositionKind, positions);
+    mesh.refreshBoundingInfo();
+  };
+  shape("kid", false);
 
   return {
     root,
@@ -387,7 +561,7 @@ export function buildAvatar(scene) {
       const hat = costumeById(look.costume).head;
       // Boys wear a dress outfit as a shirt with matching shorts and suspenders.
       const shorts = boy && Boolean(outfit.skirt);
-      skin.diffuseColor = costumeSkin(look.costume, look.skinColor);
+      tintSkin(skin, costumeSkin(look.costume, look.skinColor));
       torso.material = materialFor(shorts ? outfit.sleeve : outfit.torso, 2);
       paintOverlay(overlayTexture.getContext(), 256, shorts ? "suspenders" : outfit.overlay, outfit.skirt);
       overlayTexture.update();
@@ -403,7 +577,7 @@ export function buildAvatar(scene) {
       for (const leg of legs) {
         leg.parts[0].material = materialFor(thigh);
         leg.parts[1].material = materialFor(outfit.shin);
-        leg.parts[2].material = materialFor(outfit.shoes);
+        leg.parts[2].material = materialFor(outfit.shoes, 1, "shoe");
       }
       faceId = look.face;
       paintFace();
@@ -415,10 +589,11 @@ export function buildAvatar(scene) {
         for (const extra of entry.extras) extra.setEnabled(active);
         if (!active) continue;
         hairTop = Math.max(HEAD_HALF, entry.mesh.metadata.top);
+        drape(entry.mesh);
         colorHair(entry.mesh, look.hairColor, entry.mesh.metadata.top, entry.mesh.metadata.bottom);
         bow.position.copyFrom(BOW_DIRECTION).scaleInPlace(entry.mesh.metadata.bowDepth + 0.022).addInPlace(BOW_ORIGIN);
       }
-      costumes.apply(look.costume, { hairTop, top: fit.top, bottom: fit.bottom, hip: HIP_Y, wide: fit.wide });
+      costumes.apply(look.costume, { hairTop, ...fit });
       hood.setEnabled(Boolean(outfit.hood) && !hat);
       if (outfit.hood) hoodMat.diffuseColor = hexToColor3(outfit.hood);
       bow.setEnabled(look.bow && !outfit.hood && !hat);
@@ -464,10 +639,12 @@ export function buildAvatar(scene) {
       leftHeld = true;
     },
     dispose() {
-      root.dispose(false, true);
       // Outfit materials swapped out by an earlier apply() are no longer on any mesh.
-      for (const material of materials.values()) {
-        if (scene.materials.includes(material)) material.dispose(false, true);
+      const owned = new Set(materials.values());
+      for (const mesh of root.getChildMeshes()) if (mesh.material) owned.add(mesh.material);
+      root.dispose(false, false);
+      for (const material of owned) {
+        if (scene.materials.includes(material)) disposeMaterial(material);
       }
     },
     /** Open-mouth yell while a lava fall plays out. Restores the chosen face when it ends. */
@@ -501,10 +678,14 @@ export function buildAvatar(scene) {
       const armSwing = Math.sin(phase) * (0.75 + 0.5 * runBlend) * walkBlend;
       const pump = 0.35 * runBlend;
       const breathe = Math.sin(pose.time * 2.4) * 0.03 * (1 - walkBlend);
-      arms[0].pivot.rotation.set(-armSwing - pump - airBlend * 2.6, 0, -0.08 - airBlend * 0.35 - breathe);
-      arms[1].pivot.rotation.set(armSwing - pump - airBlend * 2.6, 0, 0.08 + airBlend * 0.35 + breathe);
+      arms[0].pivot.rotation.set(-armSwing - pump - airBlend * 2.6, 0, -ARM_OUT - airBlend * 0.35 - breathe);
+      arms[1].pivot.rotation.set(armSwing - pump - airBlend * 2.6, 0, ARM_OUT + airBlend * 0.35 + breathe);
       legs[0].pivot.rotation.set(legSwing - airBlend * 0.45, 0, 0);
       legs[1].pivot.rotation.set(-legSwing + airBlend * 0.25, 0, 0);
+      // The trailing knee folds as it swings back, more when running.
+      const knee = (side) => Math.max(0, Math.sin(phase + (side > 0 ? Math.PI : 0) - 0.6)) * (0.5 + 0.7 * runBlend) * walkBlend;
+      legs[0].bend.rotation.set(knee(-1) + airBlend * 0.5, 0, 0);
+      legs[1].bend.rotation.set(knee(1) + airBlend * 0.3, 0, 0);
       const poseAir = Boolean(airborne) && !pose.sitting;
       if (poseAir && !wasAirborne) airT = 0;
       if (poseAir) airT += dt;
@@ -587,6 +768,8 @@ export function buildAvatar(scene) {
         blendPose(arms[1].pivot, -1.65, 0, -0.9, wave);
         blendPose(legs[0].pivot, -1.2, 0, -0.1, wave);
         blendPose(legs[1].pivot, -1.2, 0, 0.1, wave);
+        blendPose(legs[0].bend, 1.6, 0, 0, wave);
+        blendPose(legs[1].bend, 1.6, 0, 0, wave);
         blendPose(headNode, 0.5, 0, 0, wave);
         stretch += 0.12 * wave;
       }
@@ -607,7 +790,8 @@ export function buildAvatar(scene) {
         if (Math.abs(flipPitch) < 0.008) flipPitch = 0;
         if (Math.abs(flipSpin) < 0.008) flipSpin = 0;
       }
-      const pivot = FLIP_PIVOT * rig.scaling.y;
+      // Flip round the chest so the feet and head trade places instead of spinning round the toes.
+      const pivot = flipPivot * rig.scaling.y;
       const cos = Math.cos(flipPitch);
       const sin = Math.sin(flipPitch);
       rig.rotation.set(flipPitch, flipSpin, 0);
@@ -622,7 +806,56 @@ export function buildAvatar(scene) {
       if (held.id) {
         const pulse = 1 + Math.sin(pose.time * 3.2) * 0.045;
         const armScale = arms[1].pivot.scaling.y || 1;
-        held.root.scaling.set(pulse, pulse / armScale, pulse);
+        const thick = arms[1].pivot.scaling.x || 1;
+        held.root.scaling.set(pulse / thick, pulse / armScale, pulse / thick);
+      }
+
+      // Swimming: tipped forward into a front crawl with a flutter kick. Treading water: upright,
+      // slow arm and leg sweeps. Climbing out: hands on the edge, pull up, knee over.
+      swimBlend += ((pose.swimming ? 1 : 0) - swimBlend) * Math.min(1, dt * 5);
+      treadBlend += ((pose.treading ? 1 : 0) - treadBlend) * Math.min(1, dt * 5);
+      climbBlend += ((pose.climbing ? 1 : 0) - climbBlend) * Math.min(1, dt * 14);
+      swimPhase += dt * (5.5 + 1.2 * Math.min(4, pose.swimSpeed ?? 0));
+      if (swimBlend + treadBlend + climbBlend > 0.001) {
+        const t = pose.time;
+        if (swimBlend > 0.001) {
+          arms.forEach((arm, i) => {
+            const reach = ((swimPhase + i * Math.PI) % (Math.PI * 2)) - Math.PI;
+            toward(arm.pivot, reach, 0, (i ? 1 : -1) * 0.22, swimBlend);
+          });
+          legs.forEach((leg, i) => {
+            toward(leg.pivot, 0.1 + Math.sin(t * 11 + i * Math.PI) * 0.32, 0, 0, swimBlend);
+            toward(leg.bend, 0.18, 0, 0, swimBlend);
+          });
+          toward(headNode, -0.85, 0, 0, swimBlend);
+          body.rotation.z += Math.sin(swimPhase) * 0.14 * swimBlend;
+        }
+        if (treadBlend > 0.001) {
+          arms.forEach((arm, i) => {
+            const side = i ? 1 : -1;
+            toward(arm.pivot, -0.95 + Math.sin(t * 3.2 + i) * 0.15, side * Math.sin(t * 3.2) * 0.4, side * (0.85 + Math.sin(t * 3.2 + 1.2) * 0.3), treadBlend);
+          });
+          legs.forEach((leg, i) => {
+            toward(leg.pivot, -0.45 + Math.sin(t * 4 + i * Math.PI) * 0.35, 0, (i ? 1 : -1) * 0.12, treadBlend);
+            toward(leg.bend, 0.8 + Math.sin(t * 4 + i * Math.PI + 1) * 0.35, 0, 0, treadBlend);
+          });
+          body.position.y += Math.sin(t * 2.6) * 0.015 * treadBlend;
+        }
+        const p = Math.min(1, Math.max(0, pose.climbing || 0));
+        if (climbBlend > 0.001) {
+          const push = smoothstep(0.35, 0.7, p);
+          for (const [i, arm] of arms.entries()) toward(arm.pivot, -2.4 + 2.1 * push, 0, (i ? 1 : -1) * 0.3, climbBlend);
+          toward(legs[0].pivot, -0.2 - 1.3 * smoothstep(0.5, 0.85, p), 0, 0, climbBlend);
+          toward(legs[0].bend, 0.3 + 1.3 * smoothstep(0.5, 0.85, p), 0, 0, climbBlend);
+          toward(legs[1].pivot, 0.25, 0, 0, climbBlend);
+          toward(legs[1].bend, 0.4, 0, 0, climbBlend);
+        }
+        // Tip the whole rig round the chest, on top of any flip.
+        const tilt = flipPitch + 1.25 * swimBlend + 0.12 * treadBlend + 0.55 * climbBlend * (1 - p * 0.8);
+        const swimPivot = flipPivot * rig.scaling.y;
+        rig.rotation.x = tilt;
+        rig.position.y = rigLift + swimPivot * (1 - Math.cos(tilt)) + 0.06 * swimBlend;
+        rig.position.z = -swimPivot * Math.sin(tilt);
       }
 
       // Coaster seat: hips down, knees up, hands on the lap. Snaps off when the ride ends (not the zipline hang).
@@ -631,16 +864,14 @@ export function buildAvatar(scene) {
         body.position.y = -sitDrop;
         body.rotation.set(-0.05, 0, 0);
         headNode.rotation.set(0.08, 0, 0);
-        legs[0].pivot.rotation.set(-2.34, 0, -0.16);
-        legs[1].pivot.rotation.set(-2.34, 0, 0.16);
-        legs[0].bend.rotation.set(1.22, 0, 0);
-        legs[1].bend.rotation.set(1.22, 0, 0);
-        arms[0].pivot.rotation.set(-0.7, 0.1, 0.42);
-        arms[1].pivot.rotation.set(-0.7, -0.1, -0.42);
+        legs[0].pivot.rotation.set(-1.75, 0, -0.1);
+        legs[1].pivot.rotation.set(-1.75, 0, 0.1);
+        legs[0].bend.rotation.set(1.6, 0, 0);
+        legs[1].bend.rotation.set(1.6, 0, 0);
+        arms[0].pivot.rotation.set(-0.7, 0.1, 0.32);
+        arms[1].pivot.rotation.set(-0.7, -0.1, -0.32);
         skirt.rotation.x = 0.22;
       } else {
-        legs[0].bend.rotation.set(0, 0, 0);
-        legs[1].bend.rotation.set(0, 0, 0);
         skirt.rotation.x = 0;
       }
 
@@ -664,81 +895,303 @@ function airStretchTarget(t) {
   return -JUMP_SQUAT + (JUMP_STRETCH + JUMP_SQUAT) * rise;
 }
 
-function cloth(scene, name) {
-  const material = new StandardMaterial(name, scene);
-  material.specularColor = new Color3(0.06, 0.06, 0.06);
-  return material;
+function signPow(value, power) {
+  return Math.sign(value) * Math.abs(value) ** power;
 }
 
-function roundedCylinder(scene, name, radius, height, corner) {
-  const shape = [new Vector3(0.0001, -height / 2, 0)];
-  for (let i = 0; i <= 6; i += 1) {
-    const a = -Math.PI / 2 + (i / 6) * (Math.PI / 2);
-    shape.push(new Vector3(radius - corner + Math.cos(a) * corner, -height / 2 + corner + Math.sin(a) * corner, 0));
+/** The girl and boy torso outlines mixed by `mix`, smoothed into many more sections. */
+function torsoSections(mix) {
+  const rows = TORSO_GIRL.map((girl, index) => girl.map((value, k) => value + (TORSO_BOY[index][k] - value) * mix));
+  const out = [];
+  const pick = (index) => rows[Math.max(0, Math.min(rows.length - 1, index))];
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const steps = i === 0 || i === rows.length - 2 ? 2 : 3;
+    for (let k = 0; k < steps; k += 1) {
+      const t = k / steps;
+      const [a, b, c, d] = [pick(i - 1), pick(i), pick(i + 1), pick(i + 2)];
+      const value = (n) =>
+        0.5 * (2 * b[n] + (-a[n] + c[n]) * t + (2 * a[n] - 5 * b[n] + 4 * c[n] - d[n]) * t * t + (-a[n] + 3 * b[n] - 3 * c[n] + d[n]) * t * t * t);
+      out.push({ y: value(0), w: Math.max(0, value(1)), f: Math.max(0, value(2)), b: Math.max(0, value(3)) });
+    }
   }
-  for (let i = 0; i <= 6; i += 1) {
-    const a = (i / 6) * (Math.PI / 2);
-    shape.push(new Vector3(radius - corner + Math.cos(a) * corner, height / 2 - corner + Math.sin(a) * corner, 0));
-  }
-  shape.push(new Vector3(0.0001, height / 2, 0));
-  return MeshBuilder.CreateLathe(name, { shape, tessellation: 40 }, scene);
+  const last = rows[rows.length - 1];
+  out.push({ y: last[0], w: 0, f: 0, b: 0 });
+  return out;
 }
 
-/** A slice of a cylinder wall facing +Z, used as the face decal. */
-function curvedPatch(scene, name, radius, span, height) {
-  const cols = 16;
-  const rows = 4;
+/** The section at height `y`, between the two nearest built ones. */
+function sectionAt(sections, y) {
+  if (y <= sections[0].y) return sections[0];
+  for (let i = 1; i < sections.length; i += 1) {
+    const next = sections[i];
+    if (y > next.y) continue;
+    const prev = sections[i - 1];
+    const t = (y - prev.y) / (next.y - prev.y || 1);
+    return { y, w: prev.w + (next.w - prev.w) * t, f: prev.f + (next.f - prev.f) * t, b: prev.b + (next.b - prev.b) * t };
+  }
+  return sections[sections.length - 1];
+}
+
+/**
+ * Builds `mesh` as a surface through the torso `sections`: the whole torso by default, or rows
+ * evenly spaced from `from` to `to`, part way round (`theta` either side of the front) and grown
+ * out by `grow(y)`. `u` and `v` set how many texture tiles go round and per unit of height.
+ */
+function loft(mesh, sections, options) {
+  const { from, to, rows: count, theta = Math.PI, columns = 40, grow = () => 0, u = 1, v = 1, clampBelow = -Infinity, doubleSided = false } = options;
+  const heights = from === undefined ? sections.map((s) => s.y) : Array.from({ length: count + 1 }, (_, j) => from + ((to - from) * j) / count);
+  const base = heights[0];
   const positions = [];
-  const normals = [];
+  const uvs = [];
+  const indices = [];
+  const square = 2 / SECTION;
+  const partial = theta < Math.PI;
+  for (const [j, y] of heights.entries()) {
+    const at = from === undefined ? sections[j] : sectionAt(sections, Math.max(y, clampBelow));
+    const g = at.w > 0 ? grow(y) : 0;
+    for (let i = 0; i <= columns; i += 1) {
+      // Round from the back, out past +x, across the front, and back by -x, so prints read the right way.
+      const share = i / columns;
+      const angle = partial ? theta - 2 * theta * share : Math.PI - 2 * Math.PI * share;
+      const s = Math.sin(angle);
+      const c = Math.cos(angle);
+      const depth = (c >= 0 ? at.f : at.b) + g;
+      positions.push((at.w + g) * signPow(s, square), y, depth * signPow(c, square));
+      uvs.push(share * u, partial ? (y - base) / (heights[heights.length - 1] - base) : Math.abs(y - base) / v);
+    }
+  }
+  const row = columns + 1;
+  for (let j = 0; j < heights.length - 1; j += 1) {
+    for (let i = 0; i < columns; i += 1) {
+      const a = j * row + i;
+      indices.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
+    }
+  }
+  const middle = (heights[0] + heights[heights.length - 1]) / 2;
+  const normals = new Float32Array(positions.length);
+  VertexData.ComputeNormals(positions, indices, normals);
+  let score = 0;
+  for (let i = 0; i < positions.length; i += 3) score += normals[i] * positions[i] + normals[i + 1] * (positions[i + 1] - middle) + normals[i + 2] * positions[i + 2];
+  if (score < 0) {
+    for (let t = 0; t < indices.length; t += 3) [indices[t + 1], indices[t + 2]] = [indices[t + 2], indices[t + 1]];
+    VertexData.ComputeNormals(positions, indices, normals);
+  }
+  weld(positions, normals);
+  const data = new VertexData();
+  if (doubleSided) {
+    const count3 = positions.length / 3;
+    data.positions = [...positions, ...positions];
+    data.normals = [...normals, ...Array.from(normals, (n) => -n)];
+    data.uvs = [...uvs, ...uvs];
+    const inside = [];
+    for (let t = 0; t < indices.length; t += 3) inside.push(indices[t] + count3, indices[t + 2] + count3, indices[t + 1] + count3);
+    data.indices = [...indices, ...inside];
+  } else {
+    data.positions = positions;
+    data.normals = normals;
+    data.uvs = uvs;
+    data.indices = indices;
+  }
+  data.applyToMesh(mesh, true);
+  mesh.refreshBoundingInfo();
+}
+
+/** A rounded limb hanging from its joint, through the [drop, radius] `outline`. */
+function limbMesh(scene, name, outline) {
+  const shape = [];
+  const [topDrop, topRadius] = outline[0];
+  const [endDrop, endRadius] = outline[outline.length - 1];
+  for (let i = 0; i <= 5; i += 1) {
+    const a = (i / 5) * (Math.PI / 2);
+    shape.push(new Vector3(Math.max(0.0001, endRadius * Math.sin(a)), -endDrop - endRadius * 0.85 * Math.cos(a), 0));
+  }
+  for (let k = outline.length - 2; k >= 1; k -= 1) shape.push(new Vector3(outline[k][1], -outline[k][0], 0));
+  for (let i = 0; i <= 5; i += 1) {
+    const a = (i / 5) * (Math.PI / 2);
+    shape.push(new Vector3(Math.max(0.0001, topRadius * Math.cos(a)), -topDrop + topRadius * 0.9 * Math.sin(a), 0));
+  }
+  return MeshBuilder.CreateLathe(name, { shape, tessellation: 22 }, scene);
+}
+
+/** A relaxed hand hanging from the wrist: palm toward the leg, fingers loosely curled, thumb in front. */
+function buildHand(scene, name, side) {
+  const palm = roundedBox(scene, `${name}Palm`, { width: 0.03, height: 0.07, depth: 0.066, radius: 0.013, segments: 4 });
+  palm.position.set(0, WRIST_Y - 0.035, 0.002);
+  const fingers = roundedBox(scene, `${name}Fingers`, { width: 0.025, height: 0.062, depth: 0.06, radius: 0.0115, segments: 4 });
+  fingers.position.set(-side * 0.006, WRIST_Y - 0.088, -0.002);
+  fingers.rotation.z = -side * 0.22;
+  const thumb = MeshBuilder.CreateCapsule(`${name}Thumb`, { radius: 0.0105, height: 0.058, tessellation: 10, subdivisions: 1, capSubdivisions: 4 }, scene);
+  thumb.position.set(-side * 0.008, WRIST_Y - 0.043, 0.034);
+  thumb.rotation.set(0.45, 0, -side * 0.25);
+  const hand = Mesh.MergeMeshes([palm, fingers, thumb], true, true);
+  hand.name = name;
+  return hand;
+}
+
+/** A trainer: rounded toe, a little heel, and a sole that sits flat on the ground. */
+function buildShoe(scene, name) {
+  const upper = roundedBox(scene, `${name}Upper`, { width: 0.084, height: 0.066, depth: 0.19, radius: 0.03, segments: 5 });
+  upper.position.set(0, -0.31 - 0.03, 0.038);
+  const sole = roundedBox(scene, `${name}Sole`, { width: 0.09, height: 0.016, depth: 0.205, radius: 0.007, segments: 3 });
+  sole.position.set(0, -0.31 - 0.06 + 0.008, 0.038);
+  const shoe = Mesh.MergeMeshes([upper, sole], true, true);
+  shoe.name = name;
+  return shoe;
+}
+
+/** Radius of the head round its middle at height `y`: a rounded crown, straight sides, and a jaw tapering to the chin. */
+function headRadius(y) {
+  if (y > 0.105) return 0.115 + Math.sqrt(Math.max(0, 0.075 ** 2 - (y - 0.105) ** 2));
+  if (y > -0.06) return 0.19;
+  const t = Math.min(1, (y + 0.06) / -(HEAD_CHIN - 0.06));
+  return 0.19 * Math.sqrt(Math.max(0, 1 - t * t)) ** 0.75;
+}
+
+/** A point on the head `angle` round from the face at height `y`, pushed out by `lift`. The jaw narrows and the chin juts forward. */
+function headSurface(angle, y, lift = 0) {
+  const r = headRadius(y) + lift;
+  const jaw = smoothstep(-0.06, -HEAD_CHIN, y);
+  const ahead = Math.cos(angle) * r;
+  return [-Math.sin(angle) * r * (1 - 0.2 * jaw), y, ahead >= 0 ? ahead : ahead * (1 - 0.45 * jaw)];
+}
+
+/** A grid over `point(i, j)` with its UVs, normals welded across the seam, faces pointing out of `center`. */
+function gridMesh(scene, name, columns, rows, point, center, uv) {
+  const positions = [];
   const uvs = [];
   const indices = [];
   for (let j = 0; j <= rows; j += 1) {
-    for (let i = 0; i <= cols; i += 1) {
-      const u = i / cols;
-      const angle = (u - 0.5) * span;
-      const y = -height / 2 + (j / rows) * height;
-      positions.push(-Math.sin(angle) * radius, y, Math.cos(angle) * radius);
-      normals.push(-Math.sin(angle), 0, Math.cos(angle));
-      uvs.push(u, j / rows);
+    for (let i = 0; i <= columns; i += 1) {
+      positions.push(...point(i, j));
+      uvs.push(...uv(i, j));
     }
   }
+  const row = columns + 1;
   for (let j = 0; j < rows; j += 1) {
-    for (let i = 0; i < cols; i += 1) {
-      const a = j * (cols + 1) + i;
-      indices.push(a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2);
+    for (let i = 0; i < columns; i += 1) {
+      const a = j * row + i;
+      indices.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
     }
   }
+  const normals = new Float32Array(positions.length);
+  VertexData.ComputeNormals(positions, indices, normals);
+  let score = 0;
+  for (let i = 0; i < positions.length; i += 3) {
+    score += normals[i] * (positions[i] - center[0]) + normals[i + 1] * (positions[i + 1] - center[1]) + normals[i + 2] * (positions[i + 2] - center[2]);
+  }
+  if (score < 0) {
+    for (let t = 0; t < indices.length; t += 3) [indices[t + 1], indices[t + 2]] = [indices[t + 2], indices[t + 1]];
+    VertexData.ComputeNormals(positions, indices, normals);
+  }
+  weld(positions, normals);
   const mesh = new Mesh(name, scene);
   const data = new VertexData();
   data.positions = positions;
+  data.indices = indices;
   data.normals = normals;
   data.uvs = uvs;
-  data.indices = indices;
   data.applyToMesh(mesh);
   return mesh;
 }
 
+/** The head: a rounded crown, a jaw and chin below the face, and an ear on each side. */
+function buildHead(scene) {
+  const heights = [HEAD_HALF];
+  for (let i = 0; i <= 6; i += 1) heights.push(0.105 + 0.075 * Math.cos((i / 6) * (Math.PI / 2)));
+  heights.push(0.03, -0.06);
+  for (let i = 1; i <= 10; i += 1) heights.push(-0.06 - (i / 10) * (HEAD_CHIN - 0.06));
+  const columns = 40;
+  const skull = gridMesh(
+    scene,
+    "avatarHeadMesh",
+    columns,
+    heights.length - 1,
+    (i, j) => (j === 0 ? [0, HEAD_HALF, 0] : headSurface((i / columns) * Math.PI * 2, heights[j])),
+    [0, -0.02, 0],
+    (i, j) => [i / columns, 1 - j / (heights.length - 1)],
+  );
+  const ears = [-1, 1].map((side) => {
+    const ear = MeshBuilder.CreateSphere(`avatarEar${side}`, { diameter: 1, segments: 12 }, scene);
+    ear.scaling.set(0.034, 0.105, 0.068);
+    ear.rotation.set(0, side * 0.32, side * -0.06);
+    ear.position.set(side * 0.186, -0.035, -0.022);
+    return ear;
+  });
+  const head = Mesh.MergeMeshes([skull, ...ears], true, true);
+  head.name = "avatarHeadMesh";
+  return head;
+}
+
+/**
+ * The face decal: a patch hugging the front of the head, a little out from it. It reaches from
+ * the brow to the chin, so the painted eyes land halfway down the head and the mouth above the chin.
+ */
+function facePatch(scene, name) {
+  const span = 0.85;
+  const top = 0.1;
+  const height = 0.34;
+  return gridMesh(
+    scene,
+    name,
+    20,
+    12,
+    (i, j) => headSurface(-span + (i / 20) * span * 2, top - height + (j / 12) * height, 0.0015),
+    [0, -0.05, 0],
+    (i, j) => [i / 20, j / 12],
+  );
+}
+
 function buildHair(scene) {
-  const cap = MeshBuilder.CreateSphere("hairCap", { diameter: 0.45, segments: 20, slice: 0.5 }, scene);
+  const cap = MeshBuilder.CreateSphere("hairCap", { diameter: 0.45, segments: 24, slice: 0.5 }, scene);
   cap.position.set(0, 0.035, -0.012);
   cap.scaling.set(1, 0.95, 1);
 
   const pieces = [cap];
-  const add = (name, w, h, d, x, y, z, rz = 0, rx = 0) => {
+  const add = (name, w, h, d, x, y, z, rz = 0, rx = 0, ry = 0) => {
     const mesh = roundedBox(scene, name, { width: w, height: h, depth: d, radius: Math.min(w, d) * 0.45, segments: 4 });
     mesh.position.set(x, y, z);
-    mesh.rotation.set(rx, 0, rz);
+    mesh.rotation.set(rx, ry, rz);
     pieces.push(mesh);
   };
-  add("hairBack", 0.46, 0.7, 0.12, 0, -0.29, -0.17, 0, 0.05);
+  add("hairBack", 0.42, 0.7, 0.075, 0, -0.29, -0.175, 0, 0.05);
   for (const side of [-1, 1]) {
-    add("hairSide", 0.075, 0.3, 0.34, side * 0.205, -0.07, -0.03);
-    add("hairStrand", 0.11, 0.66, 0.11, side * 0.2, -0.3, 0.12, side * 0.04);
+    add("hairSide", 0.032, 0.3, 0.32, side * 0.194, -0.07, -0.03);
+    // Flat locks falling from the temples past the cheeks and onto the chest.
+    add("hairStrand", 0.1, 0.62, 0.04, side * 0.18, -0.29, 0.07, side * 0.03);
   }
-  add("hairBangs", 0.3, 0.09, 0.09, 0.045, 0.115, 0.165, -0.22);
-  add("hairBangs2", 0.16, 0.08, 0.08, -0.11, 0.1, 0.16, 0.35);
+  pieces.push(sweptFringe(scene, "hairBangs", 0.225, 0.95));
   for (const mesh of pieces) paint(mesh, Color3.White());
   return Mesh.MergeMeshes(pieces, true, true);
+}
+
+/**
+ * A fringe combed down and across from the crown of a hair cap of `radius` (squashed by `squash`
+ * in height), ending in a wispy hem at `hem` that dips by `sweep` toward one side. It starts
+ * tucked inside the cap.
+ */
+function sweptFringe(scene, name, radius, squash, hem = 0.075, sweep = 0.028) {
+  const columns = 40;
+  const rows = 9;
+  const from = -1.1;
+  const to = 1.1;
+  return gridMesh(
+    scene,
+    name,
+    columns,
+    rows,
+    (i, j) => {
+      const angle = from + (i / columns) * (to - from);
+      const v = j / rows;
+      const edge = hem + sweep * angle - 0.014 * Math.abs(Math.sin(angle * 9));
+      const y = 0.2 + (edge - 0.2) * v;
+      const rise = Math.min(1, (y - 0.035) / (radius * squash));
+      const reach = radius * Math.sqrt(1 - rise * rise) - 0.004 + 0.02 * v;
+      const turn = angle + 0.12 * v;
+      return [Math.sin(turn) * reach, y, Math.cos(turn) * reach - 0.012];
+    },
+    [0, 0.035, -0.012],
+    (i, j) => [(i / columns) * 2.5, 1 - j / rows],
+  );
 }
 
 function buildShortHair(scene) {
@@ -753,12 +1206,10 @@ function buildShortHair(scene) {
     mesh.rotation.set(rx, 0, rz);
     pieces.push(mesh);
   };
-  add("shortBack", 0.42, 0.24, 0.12, 0, -0.03, -0.14, 0, 0.08);
-  for (const side of [-1, 1]) add("shortSide", 0.06, 0.15, 0.24, side * 0.198, 0.03, -0.03);
-  add("shortFringeL", 0.14, 0.08, 0.08, -0.1, 0.15, 0.15, 0.28, -0.25);
-  add("shortFringeM", 0.14, 0.09, 0.08, 0.01, 0.16, 0.16, -0.12, -0.25);
-  add("shortFringeR", 0.12, 0.08, 0.08, 0.11, 0.15, 0.15, -0.35, -0.25);
-  add("shortTuft", 0.07, 0.1, 0.06, 0.04, 0.235, 0.03, -0.45);
+  add("shortBack", 0.41, 0.24, 0.08, 0, -0.03, -0.16, 0, 0.08);
+  for (const side of [-1, 1]) add("shortSide", 0.026, 0.13, 0.24, side * 0.19, 0.04, -0.03);
+  pieces.push(sweptFringe(scene, "shortFringe", 0.22, 0.92, 0.11, -0.022));
+  add("shortTuft", 0.06, 0.08, 0.035, 0.04, 0.215, 0.03, -0.45);
   for (const mesh of pieces) paint(mesh, Color3.White());
   return Mesh.MergeMeshes(pieces, true, true);
 }
@@ -1711,13 +2162,14 @@ function buildHeadphones(scene) {
   return pieces;
 }
 
+/** A black band round the neck, one unit across; the avatar sizes it to the neck. */
 function buildChoker(scene) {
   const material = accessoryMaterial(scene, "chokerMat", "#1a1a1a");
-  material.zOffset = -3;
-  const band = MeshBuilder.CreateBox("choker", { width: 0.18, height: 0.03, depth: 0.045 }, scene);
-  band.position.set(0, -0.155, 0.2);
+  const band = MeshBuilder.CreateTorus("choker", { diameter: 1, thickness: 0.14, tessellation: 28 }, scene);
+  band.scaling.y = 0.6;
+  band.bakeCurrentTransformIntoVertices();
   band.material = material;
-  return [band];
+  return band;
 }
 
 /**
@@ -1778,30 +2230,10 @@ function buildHood(scene) {
   return Mesh.MergeMeshes(pieces, true, true);
 }
 
-function paintFur(ctx, size) {
-  const rand = mulberry32(9);
-  ctx.fillStyle = "#c9c7c3";
-  ctx.fillRect(0, 0, size, size);
-  ctx.lineCap = "round";
-  for (let i = 0; i < 2600; i += 1) {
-    const x = rand() * size;
-    const y = rand() * size;
-    const angle = rand() * Math.PI * 2;
-    const length = 4 + rand() * 10;
-    const shade = Math.round(70 + rand() * 185);
-    ctx.strokeStyle = `rgba(${shade}, ${shade}, ${shade - 4}, 0.75)`;
-    ctx.lineWidth = 1 + rand() * 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
-    ctx.stroke();
-  }
-}
-
 function buildHipCloth(scene) {
-  const plane = MeshBuilder.CreatePlane("hipCloth", { width: 0.2, height: 0.3 }, scene);
+  const plane = MeshBuilder.CreatePlane("hipCloth", { width: 0.15, height: 0.26 }, scene);
   plane.rotation.set(0, -Math.PI / 4, -0.05);
-  plane.position.y = -0.15;
+  plane.position.y = -0.13;
   plane.bakeCurrentTransformIntoVertices();
   return plane;
 }
@@ -1856,26 +2288,40 @@ function surfaceDepth(mesh, origin, direction, reach = 0.045) {
   return depth;
 }
 
-/** A gold chain under the chin with a pink pendant on the chest. */
+/** A fine gold chain round the base of the neck, dipping in front to a pink pendant on the chest. */
 function buildNecklace(scene) {
   const root = new TransformNode("necklace", scene);
-  const gold = accessoryMaterial(scene, "necklaceGold", "#f0c14d");
-  gold.specularColor = new Color3(0.7, 0.6, 0.3);
+  const gold = metalMaterial(scene, "necklaceGold", "#f0c14d");
   const gemMat = accessoryMaterial(scene, "necklaceGem", "#ff8fb8");
-  const chain = MeshBuilder.CreateTorus("necklaceChain", { diameter: 0.28, thickness: 0.022, tessellation: 22 }, scene);
+  gemMat.specularColor = new Color3(0.9, 0.9, 0.9);
+  gemMat.specularPower = 120;
+  const chain = MeshBuilder.CreateTorus("necklaceChain", { diameter: 1, thickness: 0.05, tessellation: 32 }, scene);
   chain.parent = root;
-  chain.position.y = -0.21;
-  chain.scaling.set(1, 0.85, 0.9);
+  chain.rotation.x = 0.5;
   chain.material = gold;
-  const drop = MeshBuilder.CreateCylinder("necklaceDrop", { height: 0.045, diameter: 0.016, tessellation: 8 }, scene);
+  const drop = MeshBuilder.CreateCylinder("necklaceDrop", { height: 1, diameter: 0.006, tessellation: 6 }, scene);
   drop.parent = root;
-  drop.position.set(0, -0.25, 0.125);
   drop.material = gold;
-  const pendant = MeshBuilder.CreateSphere("necklacePendant", { diameter: 0.05, segments: 12 }, scene);
+  const pendant = MeshBuilder.CreateSphere("necklacePendant", { diameter: 0.022, segments: 12 }, scene);
   pendant.parent = root;
-  pendant.position.set(0, -0.285, 0.14);
+  pendant.scaling.z = 0.6;
   pendant.material = gemMat;
-  return { root, meshes: [chain, drop, pendant] };
+  return {
+    root,
+    meshes: [chain, drop, pendant],
+    /** Rings the neck at body height `y`, with the pendant at `pendantY` resting on the chest `front`. */
+    fit(y, neckRadius, pendantY, front) {
+      root.position.set(0, y, 0);
+      const ring = neckRadius + 0.01;
+      chain.scaling.set(ring * 2, ring * 2, ring * 2.5);
+      const lowY = -Math.sin(0.5) * ring * 1.25;
+      const lowZ = Math.cos(0.5) * ring * 1.25;
+      pendant.position.set(0, pendantY - y, front + 0.009);
+      drop.position.set(0, (lowY + pendant.position.y) / 2, (lowZ + pendant.position.z) / 2);
+      drop.scaling.y = Math.max(0.005, Math.hypot(lowY - pendant.position.y, pendant.position.z - lowZ));
+      drop.rotation.x = -Math.atan2(pendant.position.z - lowZ, lowY - pendant.position.y);
+    },
+  };
 }
 
 /** A pink band worn over the hair, above the eyes. */
@@ -2057,15 +2503,14 @@ function buildBlaster(scene) {
 /** A slim gold bangle with a pink bead, on the wrist. */
 function buildBracelet(scene) {
   const root = new TransformNode("bracelet", scene);
-  const gold = accessoryMaterial(scene, "braceletGold", "#f0c14d");
-  gold.specularColor = new Color3(0.7, 0.6, 0.3);
-  const band = MeshBuilder.CreateTorus("braceletBand", { diameter: 0.27, thickness: 0.022, tessellation: 16 }, scene);
+  const gold = metalMaterial(scene, "braceletGold", "#f0c14d");
+  const band = MeshBuilder.CreateTorus("braceletBand", { diameter: 0.072, thickness: 0.009, tessellation: 24 }, scene);
   band.parent = root;
-  band.position.y = -0.37;
+  band.position.y = WRIST_Y + 0.014;
   band.material = gold;
-  const bead = MeshBuilder.CreateSphere("braceletBead", { diameter: 0.04, segments: 10 }, scene);
+  const bead = MeshBuilder.CreateSphere("braceletBead", { diameter: 0.017, segments: 10 }, scene);
   bead.parent = root;
-  bead.position.set(-0.12, -0.37, 0.04);
+  bead.position.set(-0.037, WRIST_Y + 0.014, 0.008);
   bead.material = accessoryMaterial(scene, "braceletBeadMat", "#ff8fb8");
   return { root, meshes: [band, bead] };
 }

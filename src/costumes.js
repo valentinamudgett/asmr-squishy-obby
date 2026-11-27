@@ -1,6 +1,7 @@
 import { Color3, Mesh, MeshBuilder, StandardMaterial, TransformNode, Vector3, VertexData } from "@babylonjs/core";
 import { hexToColor3 } from "./geometry.js";
 import { t } from "./i18n.js";
+import { weaveBump } from "./surfaces.js";
 
 /** Thanksgiving and Christmas costumes, worn on top of the outfit. `head` ones hide the bow, headband, and hood. */
 export const COSTUMES = [
@@ -103,9 +104,10 @@ function flatShape(outline, center) {
 /**
  * Every costume piece for one avatar, hidden until worn. Hats hang from a node on top of the
  * hair; noses, ears, and beards sit on the round head itself; back pieces hang from `body`.
- * Gingerbread icing goes on the arm pivots, and elf ears wear the avatar's own `skin` material.
+ * Gingerbread icing goes on the arm pivots round `hand.wrist`, and elf ears wear the avatar's own
+ * `skin` material.
  */
-export function buildCostumes(scene, headNode, body, { arms, skin }) {
+export function buildCostumes(scene, headNode, body, { arms, skin, hand }) {
   const materials = new Map();
   const material = (hex, glow = false) => {
     const key = `${hex}|${glow}`;
@@ -113,6 +115,7 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
       const made = new StandardMaterial(`costume-${hex}`, scene);
       made.diffuseColor = hexToColor3(hex);
       made.specularColor = new Color3(0.12, 0.12, 0.12);
+      made.bumpTexture = glow ? null : weaveBump(scene);
       made.backFaceCulling = false;
       made.twoSidedLighting = true;
       if (glow) made.emissiveColor = hexToColor3(hex);
@@ -145,10 +148,11 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   const capeFor = (name, outer, inner) => {
     const root = pivot(name, body);
     const sheet = (shrink, hex) => {
+      // Over the shoulders and arms at the top, flaring out behind toward the hem.
       const pathArray = [
-        [0, 0.33, 0.19],
-        [-0.5, 0.41, 0.27],
-        [-1, 0.5, 0.36],
+        [0, 0.2, 0.11],
+        [-0.5, 0.25, 0.16],
+        [-1, 0.3, 0.21],
       ].map(([y, rx, rz]) => {
         const row = [];
         for (let i = 0; i <= 20; i += 1) {
@@ -186,7 +190,7 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   /** Flat round buttons down the shirt front, placed on the torso in apply(). */
   const buttonsFor = (name, parent, colors) =>
     colors.map((hex, index) => {
-      const button = add(MeshBuilder.CreateSphere(`${name}${index}`, { diameter: 0.05, segments: 10 }, scene), parent, hex);
+      const button = add(MeshBuilder.CreateSphere(`${name}${index}`, { diameter: 0.036, segments: 10 }, scene), parent, hex);
       button.scaling.z = 0.45;
       return { node: button, share: 0.8 - index * 0.28 };
     });
@@ -211,7 +215,7 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   const beard = node("santaBeard", headNode);
   santa.more.push(beard);
   const beardPuff = add(MeshBuilder.CreateSphere("santaBeardPuff", { diameter: 0.26, segments: 16 }, scene), beard, "#fbf8f2");
-  beardPuff.position.set(0, -0.2, 0.125);
+  beardPuff.position.set(0, -0.215, 0.12);
   beardPuff.scaling.set(1.2, 0.85, 0.55);
   for (const side of [-1, 1]) {
     const curl = add(MeshBuilder.CreateSphere("santaBeardCurl", { diameter: 0.12, segments: 12 }, scene), beard, "#fbf8f2");
@@ -246,7 +250,7 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   }
   const nose = node("reindeerNose", headNode);
   reindeer.more.push(nose);
-  add(MeshBuilder.CreateSphere("reindeerNoseBall", { diameter: 0.05, segments: 12 }, scene), nose, "#ff2a2a", true).position.set(0, 0.016, 0.2);
+  add(MeshBuilder.CreateSphere("reindeerNoseBall", { diameter: 0.05, segments: 12 }, scene), nose, "#ff2a2a", true).position.set(0, -0.055, 0.2);
 
   const snowman = { head: node("snowmanHat", head), back: pivot("snowmanScarf", body), more: [] };
   snowman.back.setEnabled(false);
@@ -266,17 +270,17 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
     "#ff7a1a",
   );
   carrotCone.rotation.x = Math.PI / 2;
-  carrotCone.position.set(0, 0.016, 0.24);
+  carrotCone.position.set(0, -0.055, 0.24);
+  // Wound round the neck, with a tail hanging down the chest that apply() lays on the torso front.
   const scarf = pivot("snowmanScarfWrap", snowman.back);
-  const wrap = add(MeshBuilder.CreateTorus("snowmanScarfRing", { diameter: 0.3, thickness: 0.08, tessellation: 24 }, scene), scarf, "#d4232f");
-  wrap.scaling.z = 0.8;
-  const scarfEnd = add(MeshBuilder.CreateBox("snowmanScarfEnd", { width: 0.07, height: 0.22, depth: 0.025 }, scene), scarf, "#d4232f");
-  scarfEnd.position.set(0.08, -0.12, 0.15);
-  scarfEnd.rotation.z = 0.12;
-  for (const y of [-0.06, -0.16]) {
-    const stripe = add(MeshBuilder.CreateBox("snowmanScarfStripe", { width: 0.072, height: 0.02, depth: 0.027 }, scene), scarf, "#fbf8f2");
-    stripe.position.set(0.08 + (y + 0.12) * -0.12, y, 0.15);
-    stripe.rotation.z = 0.12;
+  const wrap = add(MeshBuilder.CreateTorus("snowmanScarfRing", { diameter: 0.15, thickness: 0.05, tessellation: 24 }, scene), scarf, "#d4232f");
+  wrap.scaling.z = 0.9;
+  const scarfTail = pivot("snowmanScarfTail", scarf);
+  const scarfEnd = add(MeshBuilder.CreateBox("snowmanScarfEnd", { width: 0.06, height: 0.2, depth: 0.018 }, scene), scarfTail, "#d4232f");
+  scarfEnd.position.y = -0.1;
+  for (const y of [-0.08, -0.17]) {
+    const stripe = add(MeshBuilder.CreateBox("snowmanScarfStripe", { width: 0.062, height: 0.018, depth: 0.02 }, scene), scarfTail, "#fbf8f2");
+    stripe.position.y = y;
   }
   const coal = buttonsFor("snowmanCoal", snowman.back, ["#1f1d24", "#1f1d24", "#1f1d24"]);
 
@@ -286,10 +290,14 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   for (const arm of arms) {
     const cuffs = node(`gingerbreadCuffs${arm.side}`, arm.pivot);
     gingerbread.more.push(cuffs);
-    // Icing lines around the hand, just past the sleeve.
-    for (const y of [-0.395, -0.435]) {
-      const band = add(MeshBuilder.CreateBox("gingerbreadIcing", { width: 0.232, height: 0.014, depth: 0.232 }, scene), cuffs, "#fffaf2");
-      band.position.y = y;
+    // Icing lines round the forearm, just above the hand.
+    for (const lift of [0.025, 0.055]) {
+      const band = add(
+        MeshBuilder.CreateTorus("gingerbreadIcing", { diameter: (hand.radius + 0.007) * 2, thickness: 0.008, tessellation: 20 }, scene),
+        cuffs,
+        "#fffaf2",
+      );
+      band.position.y = hand.wrist + lift;
     }
   }
 
@@ -351,16 +359,22 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   );
   pilgrimBand.position.y = 0.033;
   buckle("pilgrimHatBuckle", capotain, 0.07, 0.05, "#0e0d0f").position.set(0, 0.033, 0.126);
+  // A wide white collar lying over the shoulders, with two flaps falling at the front.
   const pilgrimCollar = pivot("pilgrimCollar", pilgrim.back);
-  const collarDisc = add(MeshBuilder.CreateCylinder("pilgrimCollarDisc", { height: 0.02, diameter: 0.5, tessellation: 32 }, scene), pilgrimCollar, "#fbf8f2");
+  const collarDisc = add(
+    MeshBuilder.CreateCylinder("pilgrimCollarDisc", { height: 0.05, diameterTop: 0.11, diameterBottom: 0.36, tessellation: 32 }, scene),
+    pilgrimCollar,
+    "#fbf8f2",
+  );
   collarDisc.scaling.z = 0.62;
-  for (const side of [-1, 1]) {
-    const flap = add(MeshBuilder.CreateBox("pilgrimCollarFlap", { width: 0.13, height: 0.12, depth: 0.015 }, scene), pilgrimCollar, "#fbf8f2");
-    flap.position.set(side * 0.068, -0.05, 0.135);
-  }
-  const pilgrimBelt = pivot("pilgrimBelt", pilgrim.back);
-  add(MeshBuilder.CreateBox("pilgrimBeltBand", { width: 0.51, height: 0.06, depth: 0.26 }, scene), pilgrimBelt, "#1c1a1c");
-  buckle("pilgrimBeltBuckle", pilgrimBelt, 0.09, 0.075, "#1c1a1c").position.z = 0.132;
+  collarDisc.position.y = -0.025;
+  const collarFlaps = [-1, 1].map((side) => {
+    const flap = add(MeshBuilder.CreateBox("pilgrimCollarFlap", { width: 0.075, height: 0.075, depth: 0.01 }, scene), pilgrimCollar, "#fbf8f2");
+    flap.rotation.x = -0.25;
+    return { side, flap };
+  });
+  const pilgrimBelt = add(new Mesh("pilgrimBeltBand", scene), pilgrim.back, "#1c1a1c");
+  const pilgrimBuckle = buckle("pilgrimBeltBuckle", pilgrim.back, 0.06, 0.05, "#1c1a1c");
 
   // A fanned tail seen from behind, which is how the camera sees the player, plus a beak and wattle.
   const turkey = { head: null, back: pivot("turkeyTail", body), more: [] };
@@ -394,14 +408,14 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
     "#f2b23a",
   );
   beak.rotation.x = Math.PI / 2;
-  beak.position.set(0, 0.016, 0.22);
+  beak.position.set(0, -0.055, 0.22);
   const snood = add(MeshBuilder.CreateSphere("turkeySnood", { diameter: 0.045, segments: 10 }, scene), gobbler, "#e0283a");
   snood.scaling.set(0.5, 1.6, 0.5);
-  snood.position.set(0.035, 0, 0.215);
+  snood.position.set(0.035, -0.07, 0.215);
   // Under the chin, clear of the mouth.
   const wattle = add(MeshBuilder.CreateSphere("turkeyWattle", { diameter: 0.07, segments: 10 }, scene), gobbler, "#e0283a");
   wattle.scaling.set(0.8, 1.3, 0.6);
-  wattle.position.set(0, -0.13, 0.16);
+  wattle.position.set(0, -0.255, 0.1);
 
   const scarecrow = { head: node("scarecrowHat", head), back: pivot("scarecrowClothes", body), more: [] };
   scarecrow.back.setEnabled(false);
@@ -438,7 +452,9 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
   for (const arm of arms) {
     const cuffs = node(`scarecrowCuffs${arm.side}`, arm.pivot);
     scarecrow.more.push(cuffs);
-    ring("scarecrowCuffStraw", cuffs, 7, 0, Math.PI * 2, (turn, i) => straw("scarecrowStraw", turn, 0.1, -0.39, 0.08 + (i % 2) * 0.02, true));
+    ring("scarecrowCuffStraw", cuffs, 7, 0, Math.PI * 2, (turn, i) =>
+      straw("scarecrowStraw", turn, hand.radius + 0.008, hand.wrist + 0.01, 0.05 + (i % 2) * 0.015, true),
+    );
   }
   const patches = [
     ["#4a7ab8", 0.11, 0.1, 0.1, 0.62, -0.1],
@@ -470,11 +486,15 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
     pieTilt,
     "#fffaf2",
   ).position.y = 0.13;
+  // Quilted oven mitts over the hands, with a white cuff at the wrist.
   for (const arm of arms) {
     const mitt = node(`pieMitt${arm.side}`, arm.pivot);
     pie.more.push(mitt);
-    add(MeshBuilder.CreateBox("pieMittHand", { width: 0.25, height: 0.12, depth: 0.25 }, scene), mitt, "#e8783a").position.y = -0.44;
-    add(MeshBuilder.CreateBox("pieMittCuff", { width: 0.262, height: 0.035, depth: 0.262 }, scene), mitt, "#fbf8f2").position.y = -0.385;
+    const glove = add(MeshBuilder.CreateSphere("pieMittHand", { diameter: 1, segments: 14 }, scene), mitt, "#e8783a");
+    glove.scaling.set(0.07, 0.15, 0.1);
+    glove.position.set(0, hand.palm - 0.012, 0.004);
+    const cuff = add(MeshBuilder.CreateTorus("pieMittCuff", { diameter: (hand.radius + 0.016) * 2, thickness: 0.026, tessellation: 20 }, scene), mitt, "#fbf8f2");
+    cuff.position.y = hand.wrist + 0.012;
   }
 
   const leaves = { head: node("leafCrown", head), back: null, more: [] };
@@ -536,8 +556,12 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
 
   return {
     meshes,
-    /** `top` and `bottom` are the shoulder line and the hem in body space; `wide` matches the torso. */
-    apply(id, { hairTop, top, bottom, hip, wide }) {
+    /**
+     * `top` and `bottom` are the shoulder line and the hem in body space, `neck` the base of the
+     * neck, and `wide`/`deep` the torso's scale. `section(y)` gives the torso's half width and its
+     * front and back reach at a body height, and `band()` wraps a mesh round the torso.
+     */
+    apply(id, { hairTop, top, bottom, hip, wide, deep, neck, neckRadius, section, band }) {
       worn = outfits[id] ? id : "none";
       for (const [costumeId, parts] of Object.entries(outfits)) {
         const on = costumeId === worn;
@@ -548,21 +572,34 @@ export function buildCostumes(scene, headNode, body, { arms, skin }) {
       head.setEnabled(worn !== "none");
       head.position.y = hairTop;
       santaCape.position.y = top;
-      santaCape.scaling.set(wide, top - bottom, 1);
-      scarf.position.y = top + 0.01;
-      scarf.scaling.x = wide;
+      santaCape.scaling.set(wide, top - bottom, deep);
+      scarf.position.y = neck + 0.012;
+      scarfTail.position.set(0.045 * wide, -0.042, section(neck - 0.13).front + 0.012);
+      scarfTail.rotation.set(-0.12, 0, 0.12);
       for (const { side, wing } of wings) {
-        wing.position.set(wing.position.x, top - 0.1, -0.15);
+        wing.position.set(wing.position.x, top - 0.1, -section(top - 0.1).back - 0.012);
         wing.rotation.z = side * 0.3;
       }
-      for (const { node: button, share } of [...coal, ...gumdrops]) button.position.set(0, hip + share * (top - hip), 0.13);
-      pilgrimCollar.position.y = top + 0.01;
-      pilgrimCollar.scaling.x = wide;
-      pilgrimBelt.position.y = hip + 0.05;
-      pilgrimBelt.scaling.x = wide;
-      tailFan.position.set(0, hip + 0.04, -0.3);
-      strawCollar.position.y = top;
-      for (const { node: patch, x, share } of patches) patch.position.set(x * wide, hip + share * (top - hip), 0.129);
+      for (const { node: button, share } of [...coal, ...gumdrops]) {
+        const y = hip + share * (top - hip);
+        button.position.set(0, y, section(y).front + 0.004);
+      }
+      pilgrimCollar.position.y = neck - 0.005;
+      pilgrimCollar.scaling.set(wide, 1, deep);
+      for (const { side, flap } of collarFlaps) {
+        flap.position.set(side * 0.04, -0.075, Math.max(0.1, (section(neck - 0.09).front + 0.01) / deep));
+      }
+      band(pilgrimBelt, 0.055, 0.115, 0.011);
+      const buckleY = hip + 0.085 * pilgrimBelt.scaling.y;
+      pilgrimBuckle.position.set(0, buckleY, section(buckleY).front + 0.018);
+      tailFan.position.set(0, hip + 0.04, -section(hip + 0.04).back - 0.13);
+      strawCollar.position.y = neck - 0.02;
+      const strawRing = (neckRadius + 0.03) / 0.1;
+      strawCollar.scaling.set(strawRing, 1, strawRing);
+      for (const { node: patch, x, share } of patches) {
+        const y = hip + share * (top - hip);
+        patch.position.set(x * wide, y, section(y).front + 0.002);
+      }
     },
     get worn() {
       return worn;

@@ -1,15 +1,12 @@
 import {
   Color3,
   DynamicTexture,
-  Material,
   Mesh,
   MeshBuilder,
   PhysicsBody,
   PhysicsMotionType,
   PhysicsShapeBox,
   Quaternion,
-  StandardMaterial,
-  Texture,
   TransformNode,
   Vector3,
   VertexBuffer,
@@ -22,6 +19,7 @@ import { defaultLook } from "./look.js";
 import { BUILDER_OUTFIT } from "./outfits.js";
 import { FOOT_OFFSET } from "./player.js";
 import { plainMaterial, unlitMaterial } from "./seasons.js";
+import { createTowerWings } from "./towerWings.js";
 
 const SAVE_KEY = "asmr-squishy-obby:tower";
 
@@ -83,7 +81,7 @@ export const WINGS = [
   { id: "blaze", cost: 76000, speed: 10.8, nameKey: "wing.blaze", hintKey: "wing.blazeHint" },
   { id: "frost", cost: 96000, speed: 11.1, nameKey: "wing.frost", hintKey: "wing.frostHint" },
   { id: "solar", cost: 120000, speed: 11.5, nameKey: "wing.solar", hintKey: "wing.solarHint" },
-  { id: "monarch", cost: 150000, speed: 11.8, nameKey: "wing.monarch", hintKey: "wing.monarchHint" },
+  { id: "monarch", cost: 150000, speed: 11.8, nameKey: "wing.monarch", hintKey: "wing.monarchHint", form: "butterfly" },
   { id: "lunar", cost: 190000, speed: 12.2, nameKey: "wing.lunar", hintKey: "wing.lunarHint" },
   { id: "cosmic", cost: 240000, speed: 12.6, nameKey: "wing.cosmic", hintKey: "wing.cosmicHint" },
   { id: "velvet", cost: 300000, speed: 12.9, nameKey: "wing.velvet", hintKey: "wing.velvetHint" },
@@ -92,11 +90,14 @@ export const WINGS = [
   { id: "mythic", cost: 600000, speed: 14, nameKey: "wing.mythic", hintKey: "wing.mythicHint" },
 ];
 
+/** Ground jump on each tower. The crown pays ten times this, before the worn wing. */
+const PAY_RISE = 9;
+
 export const PLACES = [
-  { id: "eiffel", cost: 0, kind: "eiffel", nameKey: "place.eiffel", hintKey: "place.eiffelHint" },
-  { id: "lighthouse", cost: 1, kind: "lighthouse", nameKey: "place.lighthouse", hintKey: "place.lighthouseHint" },
-  { id: "ice", cost: 2, kind: "ice", nameKey: "place.ice", hintKey: "place.iceHint" },
-  { id: "volcano", cost: 3, kind: "volcano", nameKey: "place.volcano", hintKey: "place.volcanoHint" },
+  { id: "eiffel", cost: 0, pay: 1000, kind: "eiffel", nameKey: "place.eiffel", hintKey: "place.eiffelHint" },
+  { id: "lighthouse", cost: 1, pay: 10000, kind: "lighthouse", nameKey: "place.lighthouse", hintKey: "place.lighthouseHint" },
+  { id: "ice", cost: 2, pay: 100000, kind: "ice", nameKey: "place.ice", hintKey: "place.iceHint" },
+  { id: "volcano", cost: 3, pay: 1000000, kind: "volcano", nameKey: "place.volcano", hintKey: "place.volcanoHint" },
 ];
 
 const held = new Set();
@@ -120,7 +121,9 @@ window.addEventListener("blur", () => held.clear());
 /**
  * Tower climb. The Eiffel Tower is free. Other places cost wins. Jump off the ladder to earn
  * tower coins (not the coins from the other games) and spend them on wings at the shack.
- * The top of a climb is 1 win. Saved in this browser.
+ * A jump on the Eiffel Tower starts near 1,000 and each later tower starts ten times higher.
+ * The same jump pays more the farther up the ladder you are. The top of a climb is 1 win.
+ * Saved in this browser.
  */
 export function createTower(scene, graphics) {
   const saved = loadSave();
@@ -138,7 +141,6 @@ export function createTower(scene, graphics) {
   let autoClimb = false;
   let action = null;
   const pending = [];
-  const wingTextures = new Map();
 
   const mats = {
     plaza: plainMaterial(scene, "tower-plaza", "#5cba84", 0),
@@ -163,22 +165,7 @@ export function createTower(scene, graphics) {
 
   const wingRoot = new TransformNode("tower-wings", scene);
   wingRoot.setEnabled(false);
-  const wingMat = new StandardMaterial("tower-wing-photo", scene);
-  wingMat.diffuseColor = Color3.White();
-  wingMat.emissiveColor = Color3.White();
-  wingMat.specularColor = Color3.Black();
-  wingMat.disableLighting = true;
-  wingMat.backFaceCulling = false;
-  wingMat.fogEnabled = false;
-  wingMat.useAlphaFromDiffuseTexture = true;
-  wingMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
-  // Shoulder-sized pair on the back. The photo spreads left and right; it does not cover the face.
-  const wingPlane = MeshBuilder.CreatePlane("tower-wing-card", { width: 1.45, height: 0.82 }, scene);
-  wingPlane.parent = wingRoot;
-  wingPlane.position.set(0, 0, -0.32);
-  wingPlane.rotation.y = Math.PI;
-  wingPlane.material = wingMat;
-  wingPlane.isPickable = false;
+  const wings = createTowerWings(scene, wingRoot);
   paintWings();
 
   const rung = MeshBuilder.CreateBox("tower-rung", { width: 1.35, height: 0.1, depth: 0.16 }, scene);
@@ -192,19 +179,7 @@ export function createTower(scene, graphics) {
   const keeper = buildKeeper(scene, graphics);
 
   function paintWings() {
-    const wing = worn > 0 ? WINGS[worn - 1] : null;
-    wingPlane.setEnabled(Boolean(wing));
-    if (!wing) return;
-    let texture = wingTextures.get(wing.id);
-    if (!texture) {
-      texture = new Texture(`/wings/${wing.id}.png`, scene, false, true);
-      texture.hasAlpha = true;
-      texture.getAlphaFromRGB = false;
-      wingTextures.set(wing.id, texture);
-    }
-    wingMat.diffuseTexture = texture;
-    wingMat.emissiveTexture = texture;
-    wingMat.opacityTexture = null;
+    wings.wear(worn > 0 ? WINGS[worn - 1] : null, (worn - 1) / (WINGS.length - 1));
   }
 
   function here() {
@@ -217,8 +192,10 @@ export function createTower(scene, graphics) {
 
   function quote(feetY) {
     const height = Math.max(0, feetY - (origin().y + PLAZA_TOP));
+    const span = CROWN_TOP - PLAZA_TOP;
+    const climb = 1 + (PAY_RISE * height) / span;
     const wing = 1 + worn * 0.45;
-    return Math.max(1, Math.round((5 + height * 2.8) * wing));
+    return Math.max(1, Math.round(here().pay * climb * wing));
   }
 
   function climbed(feetY) {
@@ -338,7 +315,7 @@ export function createTower(scene, graphics) {
       wingRoot.setEnabled(true);
       wingRoot.position.set(foot.x, foot.y + 1.16, foot.z);
       wingRoot.rotation.y = facing;
-      wingPlane.rotation.x = Math.sin(time * (4 + worn * 0.15)) * 0.12;
+      wings.update(time, climbing);
     } else wingRoot.setEnabled(false);
     keeper.show(true);
     keeper.update(dtFrom(time), foot, time, o, action === "wings");

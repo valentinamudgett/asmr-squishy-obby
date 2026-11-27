@@ -368,6 +368,13 @@
               <span aria-hidden="true">→</span>
             </span>
           </button>
+          <button id="start-city" class="play-action play-city" type="button">
+            <img class="play-photo" src="/menu/game-city.svg" alt="" width="1280" height="720" />
+            <span class="play-label">
+              <span data-i18n="start.city">City life</span>
+              <span aria-hidden="true">→</span>
+            </span>
+          </button>
         </div>
       </section>
 
@@ -582,6 +589,51 @@
         <p class="note" data-i18n="tower.shopNote">Each pair costs more than the last and makes you climb the ladder faster. Jump off to earn coins. Higher up pays more. Reach the top for 1 win.</p>
         <div id="tower-wings" class="shop-grid"></div>
         <p id="tower-shop-status" class="note" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="city-hud" class="city-hud" hidden>
+      <p class="city-status">
+        <span id="city-home-line"></span>
+        <span id="city-status" aria-live="polite"></span>
+      </p>
+      <div class="city-hud-row">
+        <button id="city-homes-open" type="button" aria-controls="city-homes">
+          <span aria-hidden="true">🏠</span> <span data-i18n="city.homesButton">Homes</span>
+        </button>
+        <button id="city-go-home" type="button">
+          <span aria-hidden="true">📍</span> <span data-i18n="city.goHome">Go home</span>
+        </button>
+        <button id="city-map-open" type="button" aria-controls="city-map" data-i18n-label="city.mapButtonLabel" aria-label="Open the city map (M)">
+          <span aria-hidden="true">🗺️</span> <span data-i18n="city.mapButton">Map</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="city-map" class="city-map" hidden>
+      <canvas id="city-map-canvas" role="img" data-i18n-label="cityMap.title" aria-label="City map"></canvas>
+      <button id="city-map-toggle" class="city-map-toggle" type="button" aria-expanded="false" data-i18n-label="cityMap.grow" aria-label="Make the map big (M)"></button>
+      <button id="city-map-close" type="button" data-i18n-label="cityMap.close" aria-label="Close the big map">✕</button>
+      <p id="city-map-hint" class="city-map-hint"></p>
+    </div>
+
+    <div id="city-homes" hidden>
+      <button id="city-homes-backdrop" class="backdrop" type="button" aria-label="Close"></button>
+      <section class="sheet shop-sheet" role="dialog" aria-modal="true" aria-labelledby="city-homes-title">
+        <header class="sheet-head">
+          <div>
+            <p class="eyebrow" data-i18n="city.kicker">Real estate</p>
+            <h2 id="city-homes-title" data-i18n="city.homesTitle">Homes</h2>
+          </div>
+          <div class="shop-tools">
+            <span class="reward-badge"><span class="coin-glyph" aria-hidden="true"></span> <span id="city-coins">0</span></span>
+            <button id="city-homes-close" type="button" data-i18n="shop.close">Close</button>
+          </div>
+        </header>
+        <p class="note" data-i18n="city.homesNote">Pick the style you like best. Tour takes you there so you can walk in and look around first. Sell within a day and you get every coin back. After that you get 80% back.</p>
+        <div id="city-home-tabs" class="segment city-home-tabs" role="group"></div>
+        <div id="city-home-list" class="shop-grid"></div>
+        <p id="city-homes-status" class="note" aria-live="polite"></p>
       </section>
     </div>
 

@@ -2,6 +2,7 @@ import {
   CharacterSupportedState,
   FreeCamera,
   PhysicsCharacterController,
+  PhysicsRaycastResult,
   Ray,
   Vector3,
 } from "@babylonjs/core";
@@ -85,6 +86,25 @@ function actionFor(event) {
 }
 const DOWN = new Vector3(0, -1, 0);
 const GRAVITY_VECTOR = new Vector3(0, GRAVITY, 0);
+const NO_GRAVITY = new Vector3(0, 0, 0);
+
+// Swimming, only where hooks.waterAt finds water (the city's pools and sea).
+/** Water at least this deep (surface to floor) is for swimming. Shallower is wading. */
+const SWIM_DEPTH = 1;
+/** Back to wading once it gets this shallow, so the change doesn't flicker on a slope. */
+const WADE_DEPTH = 0.88;
+/** How far the feet hang below the surface while afloat: head and shoulders stay out. */
+const FLOAT_DEPTH = 0.85;
+const SWIM_SHARE = 0.55;
+const STROKE_SPEED = 3.4;
+const STROKE_WAIT = 0.55;
+const SWIM_TOP_SPEED = 5.2;
+/** A pool edge, step, or ladder top at most this far above the surface can be climbed. */
+const CLIMB_UP = 0.6;
+/** Pushing into a taller edge this long still climbs it, up to CLIMB_STUCK, so nobody is stuck in a pool. */
+const STUCK_SECONDS = 1.2;
+const CLIMB_STUCK = 1.5;
+const CLIMB_SECONDS = 0.6;
 
 export function createPlayer(scene, spawn, hooks, heading = 0) {
   const controller = new PhysicsCharacterController(
@@ -126,6 +146,9 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
   let steerPause = 0;
   let pitch = 0.48;
   let distance = 7.3;
+  /** Extra camera height and distance for the car you're in, eased in and out. */
+  let viewLift = 0;
+  let viewBack = 0;
   let aimRaise = 0;
   let facing = heading;
   let coyote = 0;
@@ -149,6 +172,22 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
   let boostLeft = 0;
   let dip = 0;
   let dipVel = 0;
+  const swim = {
+    on: false,
+    time: 0,
+    strokeWait: 0,
+    stuck: 0,
+    climb: null,
+    wade: 0,
+    rest: 0,
+    from: new Vector3(),
+    to: new Vector3(),
+    vel: new Vector3(),
+    dir: new Vector3(),
+    ray: new PhysicsRaycastResult(),
+    a: new Vector3(),
+    b: new Vector3(),
+  };
   // Last good support reading and the pad it came from, for frames where the check misses that pad.
   const heldGround = {
     supportedState: CharacterSupportedState.SUPPORTED,
@@ -289,6 +328,9 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     get flying() {
       return flying;
     },
+    get swimming() {
+      return swim.on || Boolean(swim.climb);
+    },
     /** Runs and air moves `multiplier` times faster for `seconds`. A multiplier of 1 ends it. */
     setSpeedBoost(multiplier, seconds = 0) {
       speedBoost = multiplier > 1 && seconds > 0 ? multiplier : 1;
@@ -299,6 +341,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     },
     respawn(spot, nextHeading = 0) {
       land();
+      leaveWater();
       controller.setPosition(spot);
       controller.setVelocity(Vector3.Zero());
       state = "IN_AIR";
@@ -377,8 +420,10 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       };
     },
     /** Hangs the capsule center at `spot` (a zipline): no gravity, no steering, the camera follows. */
-    carry(dt, spot, nextFacing) {
+    /** `view` ({ lift, back }) raises and pulls the camera back, for tall or long cars. */
+    carry(dt, spot, nextFacing, view = null) {
       land();
+      leaveWater();
       tickBoost(dt);
       jumpBuffer = 0;
       jumpQueued = 0;
@@ -397,7 +442,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
       if (!dragging) steerPause = Math.max(0, steerPause - dt);
       if (!dragging && steerPause <= 0) yaw = lerpAngle(yaw, facing, 1 - Math.exp(-FOLLOW_TURN * dt));
       aim = yaw;
-      followCamera(dt);
+      followCamera(dt, view);
       return {
         position,
         foot,
@@ -443,6 +488,12 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         rideVelocity.scaleInPlace(1 / dt);
       }
       foot.set(position.x, position.y - FOOT_OFFSET, position.z);
+      const water = hooks.waterAt ? hooks.waterAt(foot) : null;
+      swim.wade = 0;
+      if (water || swim.on || swim.climb) {
+        const swum = swimStep(dt, allowInput, water);
+        if (swum) return swum;
+      }
       let support = controller.checkSupport(dt, DOWN);
       let grounded = support.supportedState === CharacterSupportedState.SUPPORTED;
       // On the way up a jump grazes the pad's rim or the next stair tread, and the check reads that as
@@ -481,6 +532,7 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         wish.set(0, 0, 0);
         heldAngle = null;
       }
+      if (swim.wade > 0) wish.scaleInPlace(1 - 0.45 * swim.wade);
       const velocity = controller.getVelocity();
       next.copyFrom(velocity);
       forward.set(Math.sin(aim), 0, Math.cos(aim));
@@ -715,9 +767,257 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
         speed,
         impact,
         supportX: support.averageSurfaceVelocity.x,
+        wading: swim.wade,
+        water,
       };
     },
   };
+
+  /**
+   * One frame in the water. Returns the frame while swimming or climbing out, or null to carry on
+   * walking (shallow water only sets `swim.wade`, which slows the walk).
+   */
+  function swimStep(dt, allowInput, water) {
+    if (swim.climb) return climbStep(dt);
+    swim.rest = Math.max(0, swim.rest - dt);
+    const bottom = water ? bottomDepth(water, foot.x, foot.z) : 0;
+    let entered = 0;
+    if (!swim.on) {
+      if (!water) return null;
+      if (bottom < SWIM_DEPTH || water.under < FLOAT_DEPTH - 0.1 || swim.rest > 0) {
+        swim.wade = clamp(water.under, 0, 1);
+        if (water.under > -0.05 && allowInput && hasWish() && tryClimb(water, dt)) return climbStep(0);
+        return null;
+      }
+      swim.on = true;
+      swim.time = 0;
+      swim.stuck = 0;
+      swim.strokeWait = 0.25;
+      entered = Math.max(0.5, -controller.getVelocity().y);
+      land();
+      trick = null;
+      trickTime = 0;
+      launched = false;
+      airJumpLeft = false;
+      stairRun = false;
+      ridePad = null;
+      groundPad = null;
+      controller.maxStepHeight = STEP_HEIGHT;
+      controller.maxSlopeCosine = SLOPE_COSINE;
+      hooks.onSwim?.(true);
+    } else if (!water || bottom < WADE_DEPTH) {
+      leaveWater();
+      state = "IN_AIR";
+      launched = false;
+      coyote = 0;
+      return null;
+    }
+
+    swim.time += dt;
+    swim.strokeWait = Math.max(0, swim.strokeWait - dt);
+    if (allowInput) readWish();
+    else {
+      wish.set(0, 0, 0);
+      heldAngle = null;
+    }
+    const velocity = controller.getVelocity();
+    swim.vel.copyFrom(velocity);
+    const glide = 1 - Math.exp(-2.4 * dt);
+    swim.vel.x += (wish.x * SWIM_SHARE - swim.vel.x) * glide;
+    swim.vel.z += (wish.z * SWIM_SHARE - swim.vel.z) * glide;
+    let stroked = false;
+    if (allowInput && jumpQueued > 0) {
+      takeQueuedJump();
+      if (swim.strokeWait <= 0) {
+        swim.strokeWait = STROKE_WAIT;
+        const held = hasWish();
+        const angle = held ? Math.atan2(wish.x, wish.z) : facing;
+        swim.vel.x += Math.sin(angle) * STROKE_SPEED;
+        swim.vel.z += Math.cos(angle) * STROKE_SPEED;
+        stroked = true;
+      }
+    }
+    const horiz = Math.hypot(swim.vel.x, swim.vel.z);
+    if (horiz > SWIM_TOP_SPEED) {
+      swim.vel.x *= SWIM_TOP_SPEED / horiz;
+      swim.vel.z *= SWIM_TOP_SPEED / horiz;
+    }
+    // Buoyancy eases the feet to FLOAT_DEPTH with a gentle bob. A dive in sinks a little, then rises.
+    let floatFoot = water.surfaceY - FLOAT_DEPTH + Math.sin(swim.time * 2.6) * 0.035;
+    // Steps or a beach rising ahead: feet up onto them, so you stand and walk out.
+    if (horiz > 0.3) {
+      const ahead = bottomDepth(water, foot.x + (swim.vel.x / horiz) * 0.5, foot.z + (swim.vel.z / horiz) * 0.5);
+      if (ahead < FLOAT_DEPTH && ahead > 0.15) floatFoot = Math.max(floatFoot, water.surfaceY - ahead + 0.04);
+    }
+    const rise = clamp((floatFoot - foot.y) * 3.2, -2.5, 2.5);
+    swim.vel.y += (rise - swim.vel.y) * (1 - Math.exp(-(swim.vel.y < rise ? 5 : 3) * dt));
+
+    const support = controller.checkSupport(dt, DOWN);
+    controller.setVelocity(swim.vel);
+    controller.integrate(dt, support, NO_GRAVITY);
+    position.copyFrom(controller.getPosition());
+    // Never sink below the floor or drift off the top of the water.
+    const top = floatFoot + 0.25 + FOOT_OFFSET;
+    if (position.y > top) {
+      position.y = top;
+      controller.setPosition(position);
+    }
+    // Feet down on a floor that is nearly too shallow to swim: stand up and wade.
+    if (support.supportedState === CharacterSupportedState.SUPPORTED && bottom < SWIM_DEPTH && swim.time > 0.8) {
+      leaveWater();
+      launched = false;
+      return null;
+    }
+
+    if (hasWish()) {
+      facing = lerpAngle(facing, Math.atan2(wish.x, wish.z), 1 - Math.exp(-6 * dt));
+      lookedAround = false;
+      if (!dragging) steerPause = 0;
+    }
+    if (!dragging) steerPause = Math.max(0, steerPause - dt);
+    if (!dragging && steerPause <= 0 && !lookedAround) {
+      yaw = lerpAngle(yaw, facing, 1 - Math.exp(-FOLLOW_TURN * dt));
+    }
+    state = "IN_AIR";
+    coyote = 0;
+    followCamera(dt);
+
+    if (allowInput && hasWish() && tryClimb(water, dt)) return climbStep(0);
+    const speed = Math.hypot(swim.vel.x, swim.vel.z);
+    return swimFrame({ speed, stroked, entered, water });
+  }
+
+  function hasWish() {
+    return wish.x * wish.x + wish.z * wish.z > 0.4;
+  }
+
+  /** Surface to floor right here, from the colliders (falls back to the registered floor). */
+  function bottomDepth(water, x, z) {
+    const physics = scene.getPhysicsEngine?.();
+    if (!physics) return water.depth;
+    swim.a.set(x, water.surfaceY + 0.1, z);
+    swim.b.set(x, water.surfaceY - Math.max(water.depth, 1) - 2, z);
+    physics.raycastToRef(swim.a, swim.b, swim.ray);
+    if (!swim.ray.hasHit) return water.depth;
+    return Math.min(water.depth, water.surfaceY - swim.ray.hitPointWorld.y);
+  }
+
+  /** Pushing into an edge low enough to climb: starts the climb-out and returns true. */
+  function tryClimb(water, dt) {
+    const physics = scene.getPhysicsEngine?.();
+    if (!physics) return false;
+    swim.dir.set(wish.x, 0, wish.z).normalize();
+    const dir = swim.dir;
+    const probeY = Math.max(foot.y + 0.1, water.surfaceY - 0.25);
+    swim.a.set(position.x, probeY, position.z);
+    swim.b.set(position.x + dir.x * (CAPSULE_RADIUS + 0.45), probeY, position.z + dir.z * (CAPSULE_RADIUS + 0.45));
+    physics.raycastToRef(swim.a, swim.b, swim.ray);
+    if (!swim.ray.hasHit || Math.abs(swim.ray.hitNormalWorld.y) > 0.5) {
+      swim.stuck = 0;
+      return false;
+    }
+    const wallX = swim.ray.hitPointWorld.x;
+    const wallZ = swim.ray.hitPointWorld.z;
+    swim.stuck += dt;
+    const reach = swim.stuck > STUCK_SECONDS ? CLIMB_STUCK : CLIMB_UP;
+    const landX = wallX + dir.x * (CAPSULE_RADIUS + 0.2);
+    const landZ = wallZ + dir.z * (CAPSULE_RADIUS + 0.2);
+    swim.a.set(landX, water.surfaceY + reach + 0.05, landZ);
+    swim.b.set(landX, water.surfaceY - 0.4, landZ);
+    physics.raycastToRef(swim.a, swim.b, swim.ray);
+    if (!swim.ray.hasHit || swim.ray.hitNormalWorld.y < 0.6) return false;
+    const deckY = swim.ray.hitPointWorld.y;
+    // A riser the walk can step up by itself isn't a climb.
+    if (deckY - water.surfaceY > reach || deckY < foot.y + STEP_HEIGHT + 0.02) return false;
+    // Room to stand: nothing in the way at chest height on the deck.
+    swim.a.set(position.x, deckY + 0.7, position.z);
+    swim.b.set(landX + dir.x * 0.25, deckY + 0.7, landZ + dir.z * 0.25);
+    physics.raycastToRef(swim.a, swim.b, swim.ray);
+    if (swim.ray.hasHit) return false;
+    swim.climb = { t: 0, deckY };
+    swim.from.copyFrom(position);
+    swim.to.set(landX, deckY + FOOT_OFFSET + 0.04, landZ);
+    swim.on = false;
+    swim.stuck = 0;
+    facing = Math.atan2(dir.x, dir.z);
+    controller.setVelocity(Vector3.Zero());
+    return true;
+  }
+
+  /** Hands on the edge, pull up, then step forward onto the deck. Moves the capsule directly. */
+  function climbStep(dt) {
+    const climb = swim.climb;
+    climb.t = Math.min(1, climb.t + dt / CLIMB_SECONDS);
+    const up = smooth(Math.min(1, climb.t / 0.6));
+    const over = smooth(Math.max(0, (climb.t - 0.45) / 0.55));
+    const lift = swim.to.y + 0.06;
+    position.set(
+      swim.from.x + (swim.to.x - swim.from.x) * (0.15 * up + 0.85 * over),
+      swim.from.y + (lift - swim.from.y) * up + (swim.to.y - lift) * over,
+      swim.from.z + (swim.to.z - swim.from.z) * (0.15 * up + 0.85 * over),
+    );
+    controller.setPosition(position);
+    controller.setVelocity(Vector3.Zero());
+    jumpQueued = 0;
+    jumpBuffer = 0;
+    if (!dragging) steerPause = Math.max(0, steerPause - dt);
+    if (!dragging && steerPause <= 0) yaw = lerpAngle(yaw, facing, 1 - Math.exp(-FOLLOW_TURN * dt));
+    aim = yaw;
+    followCamera(dt);
+    const p = climb.t;
+    if (climb.t >= 1) {
+      swim.climb = null;
+      state = "IN_AIR";
+      launched = false;
+      coyote = 0;
+      airTime = 0;
+      mute = Math.max(mute, 0.1);
+      hooks.onSwim?.(false);
+    }
+    return swimFrame({ speed: 0, stroked: false, entered: 0, water: null, climbing: p });
+  }
+
+  function swimFrame({ speed, stroked, entered, water, climbing = 0 }) {
+    return {
+      position,
+      foot,
+      pad: null,
+      grounded: false,
+      walking: false,
+      onStair: false,
+      airborne: false,
+      state: climbing ? "CLIMB_OUT" : "SWIM",
+      justLanded: false,
+      jumped: false,
+      doubleJumped: false,
+      looked: false,
+      trick: null,
+      trickP: 0,
+      flying: false,
+      facing,
+      speed,
+      impact: 0,
+      supportX: 0,
+      swimming: !climbing,
+      swimMoving: !climbing && (speed > 0.7 || hasWish()),
+      stroked,
+      splashIn: entered,
+      climbing,
+      wading: 0,
+      water,
+      surfaceY: water?.surfaceY ?? swim.to.y - FOOT_OFFSET,
+    };
+  }
+
+  function leaveWater() {
+    const was = swim.on || Boolean(swim.climb);
+    if (swim.on) swim.rest = 0.5;
+    swim.on = false;
+    swim.climb = null;
+    swim.stuck = 0;
+    swim.wade = 0;
+    if (was) hooks.onSwim?.(false);
+  }
 
   function tickBoost(dt) {
     if (boostLeft <= 0) return;
@@ -735,10 +1035,16 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     return Math.abs(foot.y - padTop(pad) - groundGap) < HOLD_GROUND_GAP;
   }
 
-  function followCamera(dt) {
+  function followCamera(dt, view = null) {
     foot.set(position.x, position.y - FOOT_OFFSET, position.z);
-    look.set(position.x, foot.y + 1.05, position.z);
+    const lift = view?.lift ?? 0;
+    const back = view?.back ?? 0;
+    viewLift += (lift - viewLift) * Math.min(1, dt * 4);
+    viewBack += (back - viewBack) * Math.min(1, dt * 4);
+    look.set(position.x, foot.y + 1.05 + viewLift, position.z);
+    distance += viewBack;
     cameraOffset(desiredCam, look);
+    distance -= viewBack;
     const follow = 1 - Math.exp(-FOLLOW_MOVE * dt);
     camHold.x += (desiredCam.x - camHold.x) * follow;
     camHold.y += (desiredCam.y - camHold.y) * follow;
@@ -810,6 +1116,8 @@ export function createPlayer(scene, spawn, hooks, heading = 0) {
     } else {
       camera.position.set(hold.x, hold.y - dipAmount, hold.z);
     }
+    const water = hooks.waterAt?.(camera.position);
+    if (water && camera.position.y < water.surfaceY + 0.35) camera.position.y = water.surfaceY + 0.35;
     camera.setTarget(raisedAim(focus));
   }
 }
@@ -874,6 +1182,10 @@ function bindDesktop(canvas, keys, handlers) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function smooth(t) {
+  return t * t * (3 - 2 * t);
 }
 
 function angleDelta(to, from) {
